@@ -1,0 +1,32 @@
+# Package manager
+node_modules/
+pnpm-lock.yaml
+!pnpm-lock.yaml
+
+# Build artifacts
+dist/
+*.bun-build*
+
+# Local state directories (runs, validation artifacts)
+.milhouse/
+.milhouse-worktrees/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+pnpm-debug.log*
