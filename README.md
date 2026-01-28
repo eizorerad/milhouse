@@ -30,7 +30,8 @@ milhouse --validate    # ← Runs probes: database, cache, env, deps
 milhouse --plan        # ← Creates WBS with DoD and dependencies  
 milhouse --exec        # ← Executes with evidence verification
 ```
-SCAN → VALIDATE → PLAN → CONSOLIDATE → EXEC → VERIFY
+
+**SCAN → VALIDATE → PLAN → CONSOLIDATE → EXEC → VERIFY**
 
 Milhouse:
 - ✅ **Vibe-code auto cleaner** — Scans and fixes vibe-coded changes automatically, no need for manual cleanup
@@ -76,16 +77,7 @@ cd your-project
 milhouse --init
 ```
 
-# start with human in the loop 
-
-# # Scan and plan (no execution)
-milhouse --run --end-phase consolidate --severity CRITICAL,HIGH
-
-# Execute the plan 
-milhouse --run --start-phase exec --severity CRITICAL,HIGH
-```
-
-### Or start with fully automatic execution 
+### Or start with fully automatic execution
 
 ```bash
 # Run with severity filter (WARNING: automatic execution!)
@@ -198,7 +190,7 @@ Every task must pass **5 gates** before completion:
 
 ## 🤖 AI Engines
 
-Milhouse works with 6 AI coding assistants:
+Milhouse works with 8 AI coding assistants:
 
 ```bash
 milhouse                    # Claude Code (default)
@@ -384,7 +376,7 @@ Use `--no-deprecation-warnings` to suppress deprecation messages.
 |--------|-------|
 | Tests | 3,700+ passing |
 | Pass Rate | 99.6% |
-| AI Engines | 6 supported |
+| AI Engines | 8 supported |
 | Probe Types | 6 |
 | Gates | 5 |
 | Agents | 7 |
@@ -392,8 +384,6 @@ Use `--no-deprecation-warnings` to suppress deprecation messages.
 ---
 
 ## 📖 Architecture
-
-For detailed documentation on Milhouse's internal architecture, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 Key concepts:
 - **7 AI Agents**: LI, IV, PL, PR, CO, EX, VE — each with specific roles in the pipeline
@@ -441,19 +431,6 @@ milhouse runs import-legacy-plans --dry-run
 
 # Actually import the plans
 milhouse runs import-legacy-plans
-```
-
-For more details, see [docs/runs-and-plans.md](./docs/runs-and-plans.md).
-
----
-
-## 🤝 Contributing
-
-```bash
-git clone https://github.com/eizorerad/milhouse.git
-cd milhouse
-pnpm install
-pnpm test
 ```
 
 ---
