@@ -615,6 +615,16 @@ If there are no conflicts, you're done!
 }
 
 /**
+ * Info about an issue for creating human-readable commit messages
+ */
+interface IssueInfo {
+	/** Issue ID */
+	id: string;
+	/** Human-readable description (symptom) */
+	title: string;
+}
+
+/**
  * Merge completed branches back to base using rebase-then-merge strategy
  *
  * This function:
@@ -629,6 +639,12 @@ If there are no conflicts, you're done!
  * - Subsequent branches must rebase onto the NEW target state
  * - Parallel merges would cause conflicts and race conditions
  *
+ * @param branches - List of branches to merge
+ * @param targetBranch - Target branch to merge into
+ * @param engine - AI engine for conflict resolution
+ * @param workDir - Working directory
+ * @param branchToIssueInfo - Map of branch name to issue info for commit messages
+ * @param modelOverride - Optional model override
  * @returns Array of results for each branch
  */
 async function mergeCompletedBranches(
@@ -636,6 +652,7 @@ async function mergeCompletedBranches(
 	targetBranch: string,
 	engine: AIEngine,
 	workDir: string,
+	branchToIssueInfo: Map<string, IssueInfo>,
 	modelOverride?: string,
 ): Promise<BranchMergeResult[]> {
 	const results: BranchMergeResult[] = [];
@@ -715,8 +732,16 @@ async function mergeCompletedBranches(
 			if (rebaseResult.success) {
 				// Rebase succeeded cleanly, now do the fast-forward merge
 				logDebug(`  ✓ Rebase succeeded, performing merge...`);
-
-				const mergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir);
+	
+					// Create human-readable commit message from issue info
+					const issueInfo = branchToIssueInfo.get(branch);
+					const commitMessage = issueInfo
+						? issueInfo.title
+						: undefined;
+	
+					const mergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
+						message: commitMessage,
+					});
 
 				if (mergeResultVcs.ok && mergeResultVcs.value.success) {
 					logSuccess(`  ✓ Successfully merged ${branch}`);
@@ -736,22 +761,27 @@ async function mergeCompletedBranches(
 			}
 
 			// Rebase has conflicts
-			if (rebaseResult.hasConflicts && rebaseResult.conflictedFiles) {
-				logWarn(
-					`  ⚠ Rebase conflict (${rebaseResult.conflictedFiles.length} files): ${rebaseResult.conflictedFiles.join(", ")}`,
-				);
-				logInfo(`  Attempting AI resolution...`);
-
-				// Use AI to resolve rebase conflicts
-				const conflicts = createMergeConflictInfo(rebaseResult.conflictedFiles, branch, targetBranch);
-				const resolutionResult = await resolveConflictsWithEngine(engine, conflicts, workDir, modelOverride);
-				const resolved = resolutionResult.success;
-
-				if (resolved) {
-					// AI resolved conflicts, now complete the merge
-					logDebug(`  ✓ AI resolved conflicts`);
-
-					const mergeResultVcs2 = await mergeAgentBranch(branch, targetBranch, workDir);
+				if (rebaseResult.hasConflicts && rebaseResult.conflictedFiles) {
+					logWarn(
+						`  ⚠ Rebase conflict (${rebaseResult.conflictedFiles.length} files): ${rebaseResult.conflictedFiles.join(", ")}`,
+					);
+					logInfo(`  Attempting AI resolution...`);
+	
+					// Use AI to resolve rebase conflicts
+					const conflicts = createMergeConflictInfo(rebaseResult.conflictedFiles, branch, targetBranch);
+					const resolutionResult = await resolveConflictsWithEngine(engine, conflicts, workDir, modelOverride);
+					const resolved = resolutionResult.success;
+	
+					// Get issue info for commit message
+					const issueInfoForConflict = branchToIssueInfo.get(branch);
+	
+					if (resolved) {
+						// AI resolved conflicts, now complete the merge
+						logDebug(`  ✓ AI resolved conflicts`);
+	
+						const mergeResultVcs2 = await mergeAgentBranch(branch, targetBranch, workDir, {
+							message: issueInfoForConflict?.title,
+						});
 
 					if (mergeResultVcs2.ok && mergeResultVcs2.value.success) {
 						logSuccess(`  ✓ Successfully merged ${branch} after AI conflict resolution`);
@@ -778,7 +808,9 @@ async function mergeCompletedBranches(
 				if (attempt < MAX_MERGE_RETRIES) {
 					logInfo(`  Attempting direct merge as fallback...`);
 
-					const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir);
+					const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
+						message: issueInfoForConflict?.title,
+					});
 
 					if (directMergeResultVcs.ok && directMergeResultVcs.value.success) {
 						logSuccess(`  ✓ Direct merge succeeded`);
@@ -829,7 +861,10 @@ async function mergeCompletedBranches(
 			if (attempt < MAX_MERGE_RETRIES) {
 				logInfo(`  Attempting direct merge as fallback for non-conflict error...`);
 				
-				const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir);
+				const issueInfoForDirect = branchToIssueInfo.get(branch);
+				const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
+					message: issueInfoForDirect?.title,
+				});
 				
 				if (directMergeResultVcs.ok && directMergeResultVcs.value.success) {
 					logSuccess(`  ✓ Direct merge succeeded (bypassed rebase)`);
@@ -919,6 +954,8 @@ export async function runParallelByIssue(
 	// Map branch name to issue ID for tracking merge results
 	const branchesToMerge: string[] = [];
 	const branchToIssueMap = new Map<string, string>();
+	// Map branch name to issue info for human-readable commit messages
+	const branchToIssueInfo = new Map<string, IssueInfo>();
 
 	// Track ALL branches for detailed status reporting (complete, partial, failed)
 	const allBranchStatuses: BranchStatus[] = [];
@@ -1155,6 +1192,11 @@ export async function runParallelByIssue(
 				});
 
 				branchToIssueMap.set(branchName, issueGroup.issueId);
+					// Store issue info for human-readable commit messages
+					branchToIssueInfo.set(branchName, {
+						id: issueGroup.issueId,
+						title: issueGroup.issue.symptom,
+					});
 
 				// Queue branch for merge AFTER all agents complete (do NOT merge here!)
 				// This prevents race conditions where parallel merges conflict
@@ -1251,6 +1293,7 @@ export async function runParallelByIssue(
 			baseBranch,
 			engine,
 			workDir,
+			branchToIssueInfo,
 			modelOverride,
 		);
 

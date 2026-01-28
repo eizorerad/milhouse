@@ -629,7 +629,7 @@ export class MergeService implements IMergeService {
 	 * 3. Cleans up the worktree (branch remains with merged commits)
 	 */
 	async safeMergeInWorktree(options: SafeMergeOptions): Promise<VcsResult<SafeMergeResult>> {
-		const { sourceBranch, targetBranch, workDir, runId } = options;
+		const { sourceBranch, targetBranch, workDir, runId, message } = options;
 
 		// Generate unique ID for merge worktree
 		const mergeId = `merge-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -662,7 +662,9 @@ export class MergeService implements IMergeService {
 
 		try {
 			// In the worktree, merge the source branch
-			const mergeArgs = ["merge", sourceBranch, "-m", `Merge ${sourceBranch} into ${targetBranch}`];
+			// Use custom message if provided, otherwise use default
+			const commitMessage = message || `Merge ${sourceBranch} into ${targetBranch}`;
+			const mergeArgs = ["merge", sourceBranch, "-m", commitMessage];
 			const mergeResult = await runGitCommand(mergeArgs, mergeWorktreePath);
 
 			if (!mergeResult.ok) {
@@ -850,6 +852,8 @@ export interface SafeMergeOptions {
 	workDir: string;
 	/** Run ID for worktree naming */
 	runId: string;
+	/** Custom commit message for the merge (human-readable, no technical metadata) */
+	message?: string;
 }
 
 /**
