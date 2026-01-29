@@ -481,13 +481,19 @@ services:
 
 			expect(result).not.toBeNull();
 			expect(result?.services?.db?.healthcheck).toBeDefined();
-			expect(result?.services?.db?.healthcheck).toEqual({
-				test: ["CMD-SHELL", "pg_isready -U postgres"],
-				interval: "10s",
-				timeout: "5s",
-				retries: 5,
-				start_period: "30s",
-			});
+			// Use type assertion for healthcheck with start_period which is valid YAML but not in the interface
+			const healthcheck = result?.services?.db?.healthcheck as {
+				test: string[];
+				interval: string;
+				timeout: string;
+				retries: number;
+				start_period: string;
+			};
+			expect(healthcheck.test).toEqual(["CMD-SHELL", "pg_isready -U postgres"]);
+			expect(healthcheck.interval).toBe("10s");
+			expect(healthcheck.timeout).toBe("5s");
+			expect(healthcheck.retries).toBe(5);
+			expect(healthcheck.start_period).toBe("30s");
 		});
 
 		test("should parse complex build configurations", () => {
@@ -508,16 +514,22 @@ services:
 			const result = probe.parseYaml(yaml);
 
 			expect(result).not.toBeNull();
-			expect(result?.services?.app?.build).toEqual({
-				context: "./app",
-				dockerfile: "Dockerfile.prod",
-				args: {
-					NODE_ENV: "production",
-					BUILD_DATE: "2024-01-01",
-				},
-				target: "production",
-				cache_from: ["app:cache"],
+			// Use type assertion for build config with extended properties
+			const build = result?.services?.app?.build as {
+				context: string;
+				dockerfile: string;
+				args: Record<string, string>;
+				target: string;
+				cache_from: string[];
+			};
+			expect(build.context).toBe("./app");
+			expect(build.dockerfile).toBe("Dockerfile.prod");
+			expect(build.args).toEqual({
+				NODE_ENV: "production",
+				BUILD_DATE: "2024-01-01",
 			});
+			expect(build.target).toBe("production");
+			expect(build.cache_from).toEqual(["app:cache"]);
 		});
 
 		test("should parse depends_on corruption example from validation report", () => {
@@ -611,10 +623,16 @@ services:
 				"-f",
 				"http://localhost:3000/health",
 			]);
-			expect(result?.services?.app?.deploy?.replicas).toBe(3);
-			expect(result?.services?.app?.deploy?.resources?.limits?.memory).toBe(
-				"512M"
-			);
+			// Use type assertion for deploy config which is valid YAML but not in the interface
+			const deploy = result?.services?.app?.deploy as {
+				replicas: number;
+				resources: {
+					limits: { cpus: string; memory: string };
+					reservations: { cpus: string; memory: string };
+				};
+			};
+			expect(deploy.replicas).toBe(3);
+			expect(deploy.resources.limits.memory).toBe("512M");
 		});
 	});
 
@@ -765,11 +783,15 @@ volumes:
 				DATABASE_URL: "postgres://db:5432/app",
 				REDIS_URL: "redis://redis:6379",
 			});
-			expect(result?.services?.api?.build).toEqual({
-				context: "./api",
-				dockerfile: "Dockerfile.prod",
-				args: { NODE_ENV: "production" },
-			});
+			// Use type assertion for build config with extended properties
+			const apiBuild = result?.services?.api?.build as {
+				context: string;
+				dockerfile: string;
+				args: Record<string, string>;
+			};
+			expect(apiBuild.context).toBe("./api");
+			expect(apiBuild.dockerfile).toBe("Dockerfile.prod");
+			expect(apiBuild.args).toEqual({ NODE_ENV: "production" });
 
 			// Verify depends_on relationships are correct
 			const apiDependsOn = result?.services?.api?.depends_on as Record<
