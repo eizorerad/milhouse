@@ -6,7 +6,8 @@
 	"packageManager": "pnpm@9.15.0",
 	"main": "dist/index.js",
 	"bin": {
-		"milhouse": "./bin.js"
+		"milhouse": "./bin.js",
+		"milhouse-dev": "./bin-dev.js"
 	},
 	"files": [
 		"dist",

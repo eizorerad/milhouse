@@ -84,7 +84,10 @@ export class QwenPlugin implements IEnginePlugin {
 	 */
 	async isAvailable(): Promise<boolean> {
 		try {
-			const proc = Bun.spawn(["which", "qwen"], {
+			// Use 'where' on Windows, 'which' on Unix
+			const isWindows = process.platform === "win32";
+			const checkCommand = isWindows ? "where" : "which";
+			const proc = Bun.spawn([checkCommand, "qwen"], {
 				stdout: "pipe",
 				stderr: "pipe",
 			});

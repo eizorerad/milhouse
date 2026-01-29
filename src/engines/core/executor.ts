@@ -142,7 +142,13 @@ export class EngineExecutor implements IEngineExecutor {
 		);
 
 		// Spawn the process
-		const proc = Bun.spawn([plugin.config.command, ...args], {
+		// On Windows, we need to use cmd.exe /c to run .cmd/.bat files
+		const isWindows = process.platform === "win32";
+		const spawnArgs = isWindows
+			? ["cmd.exe", "/c", plugin.config.command, ...args]
+			: [plugin.config.command, ...args];
+
+		const proc = Bun.spawn(spawnArgs, {
 			cwd: request.workDir,
 			env,
 			stdin: "pipe",

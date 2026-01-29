@@ -107,7 +107,10 @@ export class AiderPlugin implements IEnginePlugin {
 	 */
 	async isAvailable(): Promise<boolean> {
 		try {
-			const proc = Bun.spawn(["which", "aider"], {
+			// Use 'where' on Windows, 'which' on Unix
+			const isWindows = process.platform === "win32";
+			const checkCommand = isWindows ? "where" : "which";
+			const proc = Bun.spawn([checkCommand, "aider"], {
 				stdout: "pipe",
 				stderr: "pipe",
 			});
