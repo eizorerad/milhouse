@@ -440,4 +440,181 @@ services:
 			});
 		});
 	});
+
+	describe("complex depends_on and healthcheck", () => {
+		test("should parse depends_on with conditions", () => {
+			const yaml = `
+version: '3.8'
+services:
+  web:
+    image: web:latest
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.web?.depends_on).toBeDefined();
+			expect(result?.services?.web?.depends_on).toEqual({
+				db: { condition: "service_healthy" },
+				redis: { condition: "service_started" },
+			});
+		});
+
+		test("should parse nested healthcheck with all properties", () => {
+			const yaml = `
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.db?.healthcheck).toBeDefined();
+			expect(result?.services?.db?.healthcheck).toEqual({
+				test: ["CMD-SHELL", "pg_isready -U postgres"],
+				interval: "10s",
+				timeout: "5s",
+				retries: 5,
+				start_period: "30s",
+			});
+		});
+
+		test("should parse complex build configurations", () => {
+			const yaml = `
+version: '3.8'
+services:
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.prod
+      args:
+        NODE_ENV: production
+        BUILD_DATE: "2024-01-01"
+      target: production
+      cache_from:
+        - app:cache
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app?.build).toEqual({
+				context: "./app",
+				dockerfile: "Dockerfile.prod",
+				args: {
+					NODE_ENV: "production",
+					BUILD_DATE: "2024-01-01",
+				},
+				target: "production",
+				cache_from: ["app:cache"],
+			});
+		});
+
+		test("should parse depends_on corruption example from validation report", () => {
+			const yaml = `
+version: '3.8'
+services:
+  api:
+    image: api:latest
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.api?.depends_on).toBeDefined();
+
+			const dependsOn = result?.services?.api?.depends_on as Record<
+				string,
+				{ condition: string }
+			>;
+			expect(Object.keys(dependsOn)).toHaveLength(3);
+			expect(dependsOn.db?.condition).toBe("service_healthy");
+			expect(dependsOn.redis?.condition).toBe("service_healthy");
+			expect(dependsOn.rabbitmq?.condition).toBe("service_started");
+		});
+
+		test("should parse healthcheck with string test command", () => {
+			const yaml = `
+version: '3.8'
+services:
+  redis:
+    image: redis:7
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 3s
+      retries: 3
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.redis?.healthcheck?.test).toBe("redis-cli ping");
+			expect(result?.services?.redis?.healthcheck?.interval).toBe("5s");
+		});
+
+		test("should parse service with all complex nested structures", () => {
+			const yaml = `
+version: '3.8'
+services:
+  app:
+    image: app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app?.build).toEqual({
+				context: ".",
+				dockerfile: "Dockerfile",
+			});
+			expect(result?.services?.app?.depends_on).toEqual({
+				db: { condition: "service_healthy" },
+			});
+			expect(result?.services?.app?.healthcheck?.test).toEqual([
+				"CMD",
+				"curl",
+				"-f",
+				"http://localhost:3000/health",
+			]);
+			expect(result?.services?.app?.deploy?.replicas).toBe(3);
+			expect(result?.services?.app?.deploy?.resources?.limits?.memory).toBe(
+				"512M"
+			);
+		});
+	});
 });
