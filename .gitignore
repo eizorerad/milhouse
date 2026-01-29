@@ -33,3 +33,6 @@ pnpm-debug.log*
 
 # progress tracking
 progress.md
+
+# plans temp folder
+docs/plans/
