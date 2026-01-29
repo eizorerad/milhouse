@@ -617,4 +617,236 @@ services:
 			);
 		});
 	});
+
+	describe("integration tests with real-world compose files", () => {
+		test("should correctly parse a real-world compose file with 4+ services", () => {
+			const yaml = `
+version: '3.8'
+
+x-common-env: &common-env
+  LOG_LEVEL: info
+  NODE_ENV: production
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "nginx", "-t"]
+    networks:
+      - frontend
+      - backend
+
+  api:
+    image: api:latest
+    build:
+      context: ./api
+      dockerfile: Dockerfile.prod
+      args:
+        NODE_ENV: production
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgres://db:5432/app
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+    networks:
+      - backend
+    volumes:
+      - ./api/uploads:/app/uploads
+
+  web:
+    image: web:latest
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    environment:
+      <<: *common-env
+      API_URL: http://api:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+    networks:
+      - frontend
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: app
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 10s
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    command: |
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+    networks:
+      - backend
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+
+volumes:
+  db-data:
+  redis-data:
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.version).toBe("3.8");
+
+			// Verify all 5 services are detected (not just 3 of 4 like before)
+			expect(result?.services).toBeDefined();
+			const serviceNames = Object.keys(result?.services || {});
+			expect(serviceNames).toHaveLength(5);
+			expect(serviceNames).toContain("nginx");
+			expect(serviceNames).toContain("api");
+			expect(serviceNames).toContain("web");
+			expect(serviceNames).toContain("db");
+			expect(serviceNames).toContain("redis");
+
+			// Verify nginx service
+			expect(result?.services?.nginx?.image).toBe("nginx:alpine");
+			expect(result?.services?.nginx?.ports).toEqual(["80:80", "443:443"]);
+			expect(result?.services?.nginx?.depends_on).toEqual({
+				api: { condition: "service_healthy" },
+				web: { condition: "service_started" },
+			});
+
+			// Verify api service with merged environment
+			expect(result?.services?.api?.environment).toEqual({
+				LOG_LEVEL: "info",
+				NODE_ENV: "production",
+				DATABASE_URL: "postgres://db:5432/app",
+				REDIS_URL: "redis://redis:6379",
+			});
+			expect(result?.services?.api?.build).toEqual({
+				context: "./api",
+				dockerfile: "Dockerfile.prod",
+				args: { NODE_ENV: "production" },
+			});
+
+			// Verify depends_on relationships are correct
+			const apiDependsOn = result?.services?.api?.depends_on as Record<
+				string,
+				{ condition: string }
+			>;
+			expect(apiDependsOn.db?.condition).toBe("service_healthy");
+			expect(apiDependsOn.redis?.condition).toBe("service_healthy");
+
+			// Verify healthchecks are properly parsed (merged from anchor)
+			expect(result?.services?.db?.healthcheck?.interval).toBe("10s");
+			expect(result?.services?.db?.healthcheck?.test).toEqual([
+				"CMD-SHELL",
+				"pg_isready -U app",
+			]);
+
+			// Verify redis command with block scalar
+			const redisCommand = result?.services?.redis?.command as string;
+			expect(redisCommand).toContain("redis-server");
+			expect(redisCommand).toContain("--appendonly yes");
+			expect(redisCommand).toContain("--maxmemory-policy allkeys-lru");
+
+			// Verify volumes use correct array structure
+			expect(result?.services?.db?.volumes).toEqual([
+				"db-data:/var/lib/postgresql/data",
+				"./init.sql:/docker-entrypoint-initdb.d/init.sql:ro",
+			]);
+
+			// Verify networks
+			expect(result?.networks).toBeDefined();
+			expect(Object.keys(result?.networks as object)).toContain("frontend");
+			expect(Object.keys(result?.networks as object)).toContain("backend");
+
+			// Verify volumes
+			expect(result?.volumes).toBeDefined();
+			expect(Object.keys(result?.volumes as object)).toContain("db-data");
+			expect(Object.keys(result?.volumes as object)).toContain("redis-data");
+		});
+
+		test("should detect correct service count from complex file", () => {
+			const yaml = `
+version: '3.8'
+services:
+  service1:
+    image: service1:latest
+  service2:
+    image: service2:latest
+  service3:
+    image: service3:latest
+  service4:
+    image: service4:latest
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(Object.keys(result?.services || {})).toHaveLength(4);
+		});
+
+		test("should handle empty compose file gracefully", () => {
+			const yaml = `version: '3.8'`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.version).toBe("3.8");
+			expect(result?.services).toBeUndefined();
+		});
+
+		test("should handle compose file with only services", () => {
+			const yaml = `
+services:
+  app:
+    image: node:18
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app?.image).toBe("node:18");
+		});
+	});
 });
