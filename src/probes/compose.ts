@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import YAML from "yaml";
 import { BaseProbe, type CommandResult } from "./base.ts";
 import {
 	type ComposeProbeOutput,
@@ -456,201 +457,23 @@ export class ComposeProbe extends BaseProbe<ComposeProbeOutput> {
 	}
 
 	/**
-	 * Simple YAML parser for compose files
-	 * Handles basic compose file structure without external dependencies
+	 * Parse YAML content using the yaml library
+	 * Handles all YAML 1.2 features including anchors, aliases, block scalars, and flow style
 	 */
 	parseYaml(content: string): RawComposeFile | null {
 		try {
 			// Try to parse as JSON first (some compose files are JSON)
 			return JSON.parse(content) as RawComposeFile;
 		} catch {
-			// Fall back to simple YAML parsing
+			// Fall back to YAML parsing
 		}
 
 		try {
-			return this.simpleYamlParse(content);
+			// Enable merge key support (<<:) which is commonly used in Docker Compose files
+			return YAML.parse(content, { merge: true }) as RawComposeFile;
 		} catch {
 			return null;
 		}
-	}
-
-	/**
-	 * Simple YAML parser for basic compose structures
-	 * This is a minimal implementation - for production use, a proper YAML library would be better
-	 */
-	simpleYamlParse(content: string): RawComposeFile {
-		const lines = content.split("\n");
-		const result: RawComposeFile = {};
-
-		let currentSection: string | null = null;
-		let currentService: string | null = null;
-		let currentServiceData: RawComposeService = {};
-		let currentKey: string | null = null;
-		let currentArrayKey: string | null = null;
-		const services: Record<string, RawComposeService> = {};
-		const networks: string[] = [];
-		const volumes: string[] = [];
-
-		for (const rawLine of lines) {
-			const line = rawLine;
-
-			// Skip empty lines and comments
-			if (line.trim() === "" || line.trim().startsWith("#")) {
-				continue;
-			}
-
-			// Calculate indentation
-			const indent = line.search(/\S/);
-			const trimmed = line.trim();
-
-			// Top-level keys (version, services, networks, volumes)
-			if (indent === 0 && trimmed.endsWith(":")) {
-				const key = trimmed.slice(0, -1);
-				if (key === "services") {
-					currentSection = "services";
-				} else if (key === "networks") {
-					currentSection = "networks";
-				} else if (key === "volumes") {
-					currentSection = "volumes";
-				} else if (key === "version") {
-					currentSection = "version";
-				}
-				currentService = null;
-				currentKey = null;
-				currentArrayKey = null;
-				continue;
-			}
-
-			// Top-level value (for version)
-			if (indent === 0 && trimmed.includes(":")) {
-				const colonIdx = trimmed.indexOf(":");
-				const key = trimmed.slice(0, colonIdx).trim();
-				const value = trimmed
-					.slice(colonIdx + 1)
-					.trim()
-					.replace(/^["']|["']$/g, "");
-				if (key === "version") {
-					result.version = value;
-				}
-				continue;
-			}
-
-			// Service name (indent 2)
-			if (currentSection === "services" && indent === 2 && trimmed.endsWith(":")) {
-				// Save previous service
-				if (currentService && Object.keys(currentServiceData).length > 0) {
-					services[currentService] = currentServiceData;
-				}
-				currentService = trimmed.slice(0, -1);
-				currentServiceData = {};
-				currentKey = null;
-				currentArrayKey = null;
-				continue;
-			}
-
-			// Service properties (indent 4)
-			if (currentSection === "services" && currentService && indent === 4) {
-				// Handle array items
-				if (trimmed.startsWith("-")) {
-					const value = trimmed
-						.slice(1)
-						.trim()
-						.replace(/^["']|["']$/g, "");
-					if (currentArrayKey && Array.isArray(currentServiceData[currentArrayKey])) {
-						(currentServiceData[currentArrayKey] as string[]).push(value);
-					}
-					continue;
-				}
-
-				// Handle key: value pairs
-				if (trimmed.includes(":")) {
-					const colonIdx = trimmed.indexOf(":");
-					const key = trimmed.slice(0, colonIdx).trim();
-					const value = trimmed
-						.slice(colonIdx + 1)
-						.trim()
-						.replace(/^["']|["']$/g, "");
-
-					if (value === "") {
-						// This key has nested content or is an array
-						currentKey = key;
-						currentArrayKey = key;
-						if (
-							key === "ports" ||
-							key === "volumes" ||
-							key === "depends_on" ||
-							key === "networks"
-						) {
-							currentServiceData[key] = [];
-						} else if (key === "environment") {
-							currentServiceData[key] = {};
-						}
-					} else {
-						currentServiceData[key] = value;
-						currentKey = null;
-						currentArrayKey = null;
-					}
-				}
-				continue;
-			}
-
-			// Nested service properties (indent 6+)
-			if (currentSection === "services" && currentService && indent >= 6) {
-				if (trimmed.startsWith("-")) {
-					const value = trimmed
-						.slice(1)
-						.trim()
-						.replace(/^["']|["']$/g, "");
-					if (currentArrayKey && Array.isArray(currentServiceData[currentArrayKey])) {
-						(currentServiceData[currentArrayKey] as string[]).push(value);
-					}
-				} else if (trimmed.includes(":") && currentKey === "environment") {
-					const colonIdx = trimmed.indexOf(":");
-					const key = trimmed.slice(0, colonIdx).trim();
-					const value = trimmed
-						.slice(colonIdx + 1)
-						.trim()
-						.replace(/^["']|["']$/g, "");
-					if (!currentServiceData.environment) {
-						currentServiceData.environment = {};
-					}
-					(currentServiceData.environment as Record<string, string>)[key] = value;
-				}
-				continue;
-			}
-
-			// Network names (indent 2)
-			if (currentSection === "networks" && indent === 2) {
-				if (trimmed.endsWith(":")) {
-					networks.push(trimmed.slice(0, -1));
-				}
-				continue;
-			}
-
-			// Volume names (indent 2)
-			if (currentSection === "volumes" && indent === 2) {
-				if (trimmed.endsWith(":")) {
-					volumes.push(trimmed.slice(0, -1));
-				}
-			}
-		}
-
-		// Save last service
-		if (currentService && Object.keys(currentServiceData).length > 0) {
-			services[currentService] = currentServiceData;
-		}
-
-		if (Object.keys(services).length > 0) {
-			result.services = services;
-		}
-		if (networks.length > 0) {
-			result.networks = networks;
-		}
-		if (volumes.length > 0) {
-			result.volumes = volumes;
-		}
-
-		return result;
 	}
 
 	/**
