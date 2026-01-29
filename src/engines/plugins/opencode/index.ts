@@ -40,7 +40,10 @@ export class OpencodePlugin implements IEnginePlugin {
 	 */
 	async isAvailable(): Promise<boolean> {
 		try {
-			const proc = Bun.spawn(["which", "opencode"], {
+			// Use 'where' on Windows, 'which' on Unix
+			const isWindows = process.platform === "win32";
+			const checkCommand = isWindows ? "where" : "which";
+			const proc = Bun.spawn([checkCommand, "opencode"], {
 				stdout: "pipe",
 				stderr: "pipe",
 			});

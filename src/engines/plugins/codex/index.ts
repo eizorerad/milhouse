@@ -42,7 +42,10 @@ export class CodexPlugin implements IEnginePlugin {
 	 */
 	async isAvailable(): Promise<boolean> {
 		try {
-			const proc = Bun.spawn(["which", "codex"], {
+			// Use 'where' on Windows, 'which' on Unix
+			const isWindows = process.platform === "win32";
+			const checkCommand = isWindows ? "where" : "which";
+			const proc = Bun.spawn([checkCommand, "codex"], {
 				stdout: "pipe",
 				stderr: "pipe",
 			});

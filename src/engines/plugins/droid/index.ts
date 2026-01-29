@@ -101,7 +101,10 @@ export class DroidPlugin implements IEnginePlugin {
 	 */
 	async isAvailable(): Promise<boolean> {
 		try {
-			const proc = Bun.spawn(["which", "droid"], {
+			// Use 'where' on Windows, 'which' on Unix
+			const isWindows = process.platform === "win32";
+			const checkCommand = isWindows ? "where" : "which";
+			const proc = Bun.spawn([checkCommand, "droid"], {
 				stdout: "pipe",
 				stderr: "pipe",
 			});
