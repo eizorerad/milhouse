@@ -67,15 +67,53 @@ milhouse --run --start-phase exec --severity CRITICAL,HIGH
 ```bash
 git clone https://github.com/eizorerad/milhouse.git
 cd milhouse
+```
+
+#### Using Bun (Recommended)
+
+```bash
+# Install Bun if not already installed
+# Windows:
+powershell -c "irm bun.sh/install.ps1 | iex"
+# macOS/Linux:
+curl -fsSL https://bun.sh/install | bash
+
+# Install dependencies
+bun install
+
+# Build the binary for your platform
+bun run build:windows   # Windows
+bun run build:mac-arm   # macOS Apple Silicon
+bun run build:mac-x64   # macOS Intel
+bun run build:linux     # Linux
+
+# Link globally
+bun link
+
+# Now you can use milhouse anywhere
+cd your-project
+milhouse --init
+```
+
+#### Using pnpm
+
+```bash
+# Install dependencies
 pnpm install
 
-# Link globally so 'milhouse' command works in terminal
+# Setup pnpm global bin directory (first time only)
+pnpm setup
+# Restart your terminal after this
+
+# Link globally
 pnpm link --global
 
 # Now you can use milhouse anywhere
 cd your-project
 milhouse --init
 ```
+
+> **Note:** When using pnpm, you need Bun or tsx installed to run in dev mode, or build the binary first with `bun run build:windows` (or your platform).
 
 ### Or start with fully automatic execution
 
