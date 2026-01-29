@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import YAML from "yaml";
 import { BaseProbe, type CommandResult } from "./base.ts";
 import {
 	type ComposeProbeOutput,
