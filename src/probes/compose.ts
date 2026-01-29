@@ -457,19 +457,19 @@ export class ComposeProbe extends BaseProbe<ComposeProbeOutput> {
 	}
 
 	/**
-	 * Simple YAML parser for compose files
-	 * Handles basic compose file structure without external dependencies
+	 * Parse YAML content using the yaml library
+	 * Handles all YAML 1.2 features including anchors, aliases, block scalars, and flow style
 	 */
 	parseYaml(content: string): RawComposeFile | null {
 		try {
 			// Try to parse as JSON first (some compose files are JSON)
 			return JSON.parse(content) as RawComposeFile;
 		} catch {
-			// Fall back to simple YAML parsing
+			// Fall back to YAML parsing
 		}
 
 		try {
-			return this.simpleYamlParse(content);
+			return YAML.parse(content) as RawComposeFile;
 		} catch {
 			return null;
 		}
