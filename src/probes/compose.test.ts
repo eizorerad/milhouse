@@ -192,4 +192,107 @@ services:
 			expect(result?.services?.redis.ports).toEqual(["6379:6379"]);
 		});
 	});
+
+	describe("flow style arrays and objects", () => {
+		test("should parse flow style inline arrays for ports", () => {
+			const yaml = `
+version: '3.8'
+services:
+  web:
+    image: nginx:latest
+    ports: ['80:80', '443:443']
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.web).toBeDefined();
+			expect(result?.services?.web.ports).toEqual(["80:80", "443:443"]);
+		});
+
+		test("should parse flow style inline objects for build", () => {
+			const yaml = `
+version: '3.8'
+services:
+  app:
+    build: { context: '.', dockerfile: 'Dockerfile.prod' }
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app).toBeDefined();
+			expect(result?.services?.app.build).toEqual({
+				context: ".",
+				dockerfile: "Dockerfile.prod",
+			});
+		});
+
+		test("should parse mixed flow and block styles", () => {
+			const yaml = `
+version: '3.8'
+services:
+  app:
+    image: node:18
+    ports: ['3000:3000', '9229:9229']
+    environment:
+      NODE_ENV: production
+      DEBUG: 'false'
+    volumes:
+      - ./app:/app
+      - node_modules:/app/node_modules
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app).toBeDefined();
+			expect(result?.services?.app.ports).toEqual(["3000:3000", "9229:9229"]);
+			expect(result?.services?.app.environment).toEqual({
+				NODE_ENV: "production",
+				DEBUG: "false",
+			});
+			expect(result?.services?.app.volumes).toEqual([
+				"./app:/app",
+				"node_modules:/app/node_modules",
+			]);
+		});
+
+		test("should parse flow style environment variables", () => {
+			const yaml = `
+version: '3.8'
+services:
+  app:
+    image: node:18
+    environment: { NODE_ENV: 'production', PORT: '3000' }
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app?.environment).toEqual({
+				NODE_ENV: "production",
+				PORT: "3000",
+			});
+		});
+
+		test("should parse ports with flow style from validation report", () => {
+			const yaml = `
+version: '3.8'
+services:
+  nginx:
+    image: nginx:alpine
+    ports: ["80:80", "443:443", "8080:8080"]
+    volumes: ["./nginx.conf:/etc/nginx/nginx.conf:ro"]
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.nginx).toBeDefined();
+			expect(result?.services?.nginx.ports).toEqual([
+				"80:80",
+				"443:443",
+				"8080:8080",
+			]);
+			expect(result?.services?.nginx.volumes).toEqual([
+				"./nginx.conf:/etc/nginx/nginx.conf:ro",
+			]);
+		});
+	});
 });
