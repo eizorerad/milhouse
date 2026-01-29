@@ -143,6 +143,15 @@ export interface RuntimeOptions {
 	 * @default 2000
 	 */
 	retryDelayValidation?: number;
+
+	// Verification / DoD
+	/**
+	 * Disable safety validation for DoD check_command execution.
+	 * When true, milhouse will execute check_command as-is (including pipes, redirects, etc.).
+	 *
+	 * SECURITY WARNING: This can execute arbitrary shell code from tasks.json.
+	 */
+	unsafeDoDChecks?: boolean;
 }
 
 /**
@@ -196,4 +205,7 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 	maxValidationRetries: 2,
 	retryUnvalidated: true,
 	retryDelayValidation: 2000,
+
+	// Verification / DoD defaults
+	unsafeDoDChecks: false,
 };

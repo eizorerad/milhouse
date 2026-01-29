@@ -163,6 +163,10 @@ export function createProgram(): Command {
 			"Delay between validation retry rounds in milliseconds",
 			"2000",
 		)
+		.option(
+			"--unsafe-dod-checks",
+			"Disable safety validation for DoD check_command execution (executes commands as-is). SECURITY RISK.",
+		)
 		.option("-v, --verbose", "Verbose Milhouse output");
 
 	return program;
@@ -416,6 +420,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 			opts.maxValidationRetries !== undefined ? Number.parseInt(opts.maxValidationRetries, 10) : 2,
 		retryUnvalidated: opts.retryUnvalidated !== false, // Default true, --no-retry-unvalidated sets to false
 		retryDelayValidation: Number.parseInt(opts.retryDelayValidation, 10) || 2000,
+		unsafeDoDChecks: opts.unsafeDodChecks || false,
 	};
 
 	return {

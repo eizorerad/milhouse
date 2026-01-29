@@ -120,4 +120,16 @@ describe("parseArgs", () => {
 			expect(typeof result.options.maxValidationRetries).toBe("number");
 		});
 	});
+
+	describe("unsafe DoD checks flag", () => {
+		test("defaults to false when not specified", () => {
+			const result = parseArgs(["node", "milhouse"]);
+			expect(result.options.unsafeDoDChecks).toBe(false);
+		});
+
+		test("sets to true when --unsafe-dod-checks is provided", () => {
+			const result = parseArgs(["node", "milhouse", "--unsafe-dod-checks"]);
+			expect(result.options.unsafeDoDChecks).toBe(true);
+		});
+	});
 });

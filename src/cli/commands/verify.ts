@@ -379,19 +379,32 @@ export function runEvidenceGate(runId: string, workDir: string): GateResult {
 /**
  * Execute a check_command and return success status
  */
-function executeCheckCommand(command: string, workDir: string): { success: boolean; skipped?: boolean; reason?: string } {
-	// Validate the command before execution
-	const validation = validateCheckCommand(command);
-	if (!validation.valid) {
-		logWarn(`Skipping unsafe command: ${command}`);
-		for (const issue of validation.issues) {
-			logDebug(`  - ${issue}`);
+function executeCheckCommand(
+	command: string,
+	workDir: string,
+	options?: { unsafeDoDChecks?: boolean },
+): { success: boolean; skipped?: boolean; reason?: string } {
+	// Validate the command before execution unless explicitly disabled
+	if (!options?.unsafeDoDChecks) {
+		const validation = validateCheckCommand(command);
+		if (!validation.valid) {
+			logWarn(`Skipping unsafe command: ${command}`);
+			for (const issue of validation.issues) {
+				logDebug(`  - ${issue}`);
+			}
+			return { success: false, skipped: true, reason: validation.issues.join("; ") };
 		}
-		return { success: false, skipped: true, reason: validation.issues.join("; ") };
+
+		// Surface warnings in verbose mode (not blocking)
+		if (validation.warnings.length > 0) {
+			for (const w of validation.warnings) {
+				logDebug(`DoD check_command warning: ${w} (cmd: ${command})`);
+			}
+		}
 	}
 
 	try {
-		execSync(command, {
+			execSync(command, {
 			cwd: workDir,
 			stdio: "pipe",
 			timeout: 30000, // 30 second timeout per command
@@ -406,7 +419,7 @@ function executeCheckCommand(command: string, workDir: string): { success: boole
  * Run the DoD gate - verify all acceptance criteria by executing check_commands
  * This will automatically run check_commands and update verified status
  */
-export function runDoDGate(runId: string, workDir: string): GateResult {
+export function runDoDGate(runId: string, workDir: string, options?: { unsafeDoDChecks?: boolean }): GateResult {
 	const evidence: Evidence[] = [];
 	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
@@ -428,7 +441,7 @@ export function runDoDGate(runId: string, workDir: string): GateResult {
 			// If has check_command, run it to verify
 			if (criterion.check_command) {
 				logDebug(`Running check: ${criterion.check_command}`);
-				const result = executeCheckCommand(criterion.check_command, workDir);
+				const result = executeCheckCommand(criterion.check_command, workDir, options);
 
 				if (result.success) {
 					criterion.verified = true;
@@ -664,7 +677,14 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 	const spinner = new ProgressSpinner("Running verification gates", ["TV"]);
 
 	spinner.updateStep("Running automated gates");
-	const gateResults = runAllGates(runId, workDir);
+	// Pass through unsafe DoD option so DoD check_command are not blocked if requested
+	const gateResults = [
+		runPlaceholderGate(runId, workDir),
+		runDiffHygieneGate(runId, workDir),
+		runDoDGate(runId, workDir, { unsafeDoDChecks: options.unsafeDoDChecks }),
+		runEvidenceGate(runId, workDir),
+		runEnvConsistencyGate(workDir),
+	];
 
 	const gatesPassed = gateResults.filter((g) => g.passed).length;
 	const gatesFailed = gateResults.filter((g) => !g.passed).length;
