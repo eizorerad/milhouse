@@ -152,6 +152,15 @@ export interface RuntimeOptions {
 	 * SECURITY WARNING: This can execute arbitrary shell code from tasks.json.
 	 */
 	unsafeDoDChecks?: boolean;
+
+	// Retry policy
+	/**
+	 * Retry any failure, not just retryable errors (safety net mode).
+	 * When true, all failures are retried up to maxRetries.
+	 * When false (default), only retryable errors trigger retries.
+	 * @default false
+	 */
+	retryOnAnyFailure?: boolean;
 }
 
 /**
@@ -208,4 +217,7 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 
 	// Verification / DoD defaults
 	unsafeDoDChecks: false,
+
+	// Retry policy defaults
+	retryOnAnyFailure: false,
 };

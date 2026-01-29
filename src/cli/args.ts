@@ -167,6 +167,10 @@ export function createProgram(): Command {
 			"--unsafe-dod-checks",
 			"Disable safety validation for DoD check_command execution (executes commands as-is). SECURITY RISK.",
 		)
+		.option(
+			"--retry-on-any-failure",
+			"Retry any failure, not just retryable errors (safety net mode). When enabled, all failures are retried up to maxRetries.",
+		)
 		.option("-v, --verbose", "Verbose Milhouse output");
 
 	return program;
@@ -421,6 +425,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 		retryUnvalidated: opts.retryUnvalidated !== false, // Default true, --no-retry-unvalidated sets to false
 		retryDelayValidation: Number.parseInt(opts.retryDelayValidation, 10) || 2000,
 		unsafeDoDChecks: opts.unsafeDodChecks || false,
+		retryOnAnyFailure: opts.retryOnAnyFailure || false,
 	};
 
 	return {

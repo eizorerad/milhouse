@@ -333,7 +333,7 @@ export interface MilhousePrompt {
  * Retry configuration for Milhouse execution
  */
 export interface MilhouseRetryConfig {
-	/** Maximum number of retry attempts */
+	/** Maximum number of retry attempts (additional attempts after initial) */
 	readonly maxRetries: number;
 	/** Base delay between retries in milliseconds */
 	readonly baseDelayMs: number;
@@ -347,6 +347,13 @@ export interface MilhouseRetryConfig {
 	readonly retryablePatterns: RegExp[];
 	/** Error patterns that should NOT trigger retry */
 	readonly nonRetryablePatterns: RegExp[];
+	/**
+	 * Retry any failure, not just retryable errors (safety net mode).
+	 * When true, all failures are retried up to maxRetries.
+	 * When false (default), only retryable errors trigger retries.
+	 * @default false
+	 */
+	readonly retryOnAnyFailure?: boolean;
 }
 
 /**
@@ -382,6 +389,7 @@ export const DEFAULT_RETRY_CONFIG: MilhouseRetryConfig = {
 		/not found/i,
 		/404/,
 	],
+	retryOnAnyFailure: false,
 };
 
 /**

@@ -395,10 +395,11 @@ function executeCheckCommand(
 			return { success: false, skipped: true, reason: validation.issues.join("; ") };
 		}
 
-		// Surface warnings in verbose mode (not blocking)
+		// Surface warnings (not blocking) - use logWarn for visibility
 		if (validation.warnings.length > 0) {
+			logWarn(`DoD check_command has warnings (will still execute): ${command}`);
 			for (const w of validation.warnings) {
-				logDebug(`DoD check_command warning: ${w} (cmd: ${command})`);
+				logDebug(`  - ${w}`);
 			}
 		}
 	}

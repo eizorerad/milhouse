@@ -16,7 +16,12 @@
  */
 
 import { bus } from "../../events/index.ts";
-import { createTask, loadTasks, readTask, updateTaskWithLock } from "../../state/tasks.ts";
+import {
+	createTaskForRun,
+	loadTasksForRun,
+	readTaskForRun,
+	updateTaskForRunSafe,
+} from "../../state/tasks.ts";
 import type { Task } from "../../state/types.ts";
 import { logDebug, logInfo, logWarn } from "../../ui/logger.ts";
 import type {
@@ -159,6 +164,11 @@ export function isRetryableError(error: string): boolean {
 /**
  * Execute a function with Milhouse retry logic
  *
+ * Semantics:
+ * - maxRetries = number of ADDITIONAL attempts after the initial attempt
+ * - maxAttempts = 1 + maxRetries (total attempts)
+ * - Example: maxRetries=3 means 4 total attempts (1 initial + 3 retries)
+ *
  * @param fn - Function to execute
  * @param config - Retry configuration
  * @param context - Optional runtime context for events
@@ -173,8 +183,14 @@ export async function executeWithRetry<T>(
 	const startTime = Date.now();
 	let lastError: Error | null = null;
 
-	for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
+	// Calculate total attempts: 1 initial + maxRetries additional
+	const maxAttempts = 1 + config.maxRetries;
+
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 		const attemptStart = Date.now();
+
+		// Log attempt start
+		logInfo(`Attempt ${attempt}/${maxAttempts}`);
 
 		try {
 			// Check for abort
@@ -209,17 +225,29 @@ export async function executeWithRetry<T>(
 			context?.emitEvent("task:progress", {
 				taskId: context.currentTaskId ?? "unknown",
 				step: "retry",
-				detail: `Attempt ${attempt}/${config.maxRetries} failed: ${errorMsg}`,
+				detail: `Attempt ${attempt}/${maxAttempts} failed: ${errorMsg}`,
 			});
 
 			// Check if we should retry
-			if (attempt < config.maxRetries) {
-				if (!isErrorRetryable(errorMsg, config)) {
+			if (attempt < maxAttempts) {
+				// Determine if error is retryable
+				const isRetryable = isErrorRetryable(errorMsg, config);
+				const shouldRetry = config.retryOnAnyFailure || isRetryable;
+
+				if (!shouldRetry) {
 					logDebug(`Error is not retryable: ${errorMsg}`);
+					logInfo(`Not retrying: error is not retryable (${errorMsg.slice(0, 100)})`);
 					break;
 				}
 
-				logWarn(`Milhouse: Attempt ${attempt}/${config.maxRetries} failed: ${errorMsg}`);
+				// Log retry reason
+				if (config.retryOnAnyFailure && !isRetryable) {
+					logInfo(`Retrying: --retry-on-any-failure enabled`);
+				} else {
+					logInfo(`Retrying: error matches retryable pattern`);
+				}
+
+				logWarn(`Attempt ${attempt}/${maxAttempts} failed: ${errorMsg}`);
 				logDebug(`Waiting ${delayMs}ms before retry...`);
 
 				try {
@@ -248,6 +276,8 @@ export async function executeWithRetry<T>(
  * Configuration for follow-up task creation
  */
 export interface FollowUpTaskConfig {
+	/** Run ID for run-aware state operations */
+	runId: string;
 	/** Task ID that failed */
 	taskId: string;
 	/** Working directory */
@@ -259,7 +289,7 @@ export interface FollowUpTaskConfig {
 }
 
 /**
- * Create a follow-up task from a failed task
+ * Create a follow-up task from a failed task (run-aware version)
  *
  * Creates a new task that:
  * - References the original failed task
@@ -267,6 +297,7 @@ export interface FollowUpTaskConfig {
  * - Has a higher parallel group to ensure it runs after current batch
  * - Depends on no other tasks (ready for immediate execution when retried)
  *
+ * @param runId - Run ID for run-aware state operations
  * @param originalTaskId - ID of the failed task
  * @param errorMessage - Error that caused the failure
  * @param workDir - Working directory
@@ -274,26 +305,28 @@ export interface FollowUpTaskConfig {
  * @returns Created follow-up task or null
  */
 export function createFollowUpTask(
+	runId: string,
 	originalTaskId: string,
 	errorMessage: string,
 	workDir = process.cwd(),
 	titlePrefix = "Milhouse Retry",
 ): Task | null {
-	const originalTask = readTask(originalTaskId, workDir);
+	const originalTask = readTaskForRun(runId, originalTaskId, workDir);
 
 	if (!originalTask) {
 		logWarn(`Cannot create follow-up task: original task ${originalTaskId} not found`);
 		return null;
 	}
 
-	const tasks = loadTasks(workDir);
-	const maxParallelGroup = tasks.reduce((max, t) => Math.max(max, t.parallel_group), 0);
+	const tasks = loadTasksForRun(runId, workDir);
+	const maxParallelGroup = tasks.reduce((max: number, t: Task) => Math.max(max, t.parallel_group), 0);
 
 	// Truncate error message if too long
 	const truncatedError =
 		errorMessage.length > 500 ? `${errorMessage.slice(0, 497)}...` : errorMessage;
 
-	const followUpTask = createTask(
+	const followUpTask = createTaskForRun(
+		runId,
 		{
 			issue_id: originalTask.issue_id,
 			title: `${titlePrefix}: ${originalTask.title}`,
@@ -322,11 +355,12 @@ export function createFollowUpTask(
 }
 
 /**
- * Mark a task as failed and optionally create a follow-up task
+ * Mark a task as failed and optionally create a follow-up task (run-aware version)
  *
- * This function uses updateTaskWithLock for concurrent-safe updates
+ * This function uses updateTaskForRunSafe for concurrent-safe updates
  * when called from parallel execution contexts.
  *
+ * @param runId - Run ID for run-aware state operations
  * @param taskId - Task ID to mark as failed
  * @param errorMessage - Error message
  * @param createFollowUp - Whether to create follow-up task
@@ -334,12 +368,14 @@ export function createFollowUpTask(
  * @returns Failed task and optional follow-up task
  */
 export async function failTaskWithFollowUp(
+	runId: string,
 	taskId: string,
 	errorMessage: string,
 	createFollowUp: boolean,
 	workDir = process.cwd(),
 ): Promise<{ failedTask: Task | null; followUpTask: Task | null }> {
-	const failedTask = await updateTaskWithLock(
+	const failedTask = await updateTaskForRunSafe(
+		runId,
 		taskId,
 		{
 			status: "failed",
@@ -351,7 +387,7 @@ export async function failTaskWithFollowUp(
 	let followUpTask: Task | null = null;
 
 	if (createFollowUp && failedTask) {
-		followUpTask = createFollowUpTask(taskId, errorMessage, workDir);
+		followUpTask = createFollowUpTask(runId, taskId, errorMessage, workDir);
 	}
 
 	return { failedTask, followUpTask };
@@ -362,48 +398,64 @@ export async function failTaskWithFollowUp(
 // ============================================================================
 
 /**
- * Get all follow-up tasks for a given original task
+ * Get all follow-up tasks for a given original task (run-aware version)
  *
+ * @param runId - Run ID for run-aware state operations
  * @param originalTaskId - Original task ID
  * @param workDir - Working directory
  * @returns Array of follow-up tasks
  */
-export function getFollowUpTasksFor(originalTaskId: string, workDir = process.cwd()): Task[] {
-	const tasks = loadTasks(workDir);
+export function getFollowUpTasksFor(
+	runId: string,
+	originalTaskId: string,
+	workDir = process.cwd(),
+): Task[] {
+	const tasks = loadTasksForRun(runId, workDir);
 
-	return tasks.filter((task) => {
+	return tasks.filter((task: Task) => {
 		const descriptionRef = `failed task ${originalTaskId}`;
 		return task.description?.toLowerCase().includes(descriptionRef.toLowerCase());
 	});
 }
 
 /**
- * Check if a task has any pending follow-up tasks
+ * Check if a task has any pending follow-up tasks (run-aware version)
  *
+ * @param runId - Run ID for run-aware state operations
  * @param taskId - Task ID to check
  * @param workDir - Working directory
  * @returns true if pending follow-ups exist
  */
-export function hasPendingFollowUps(taskId: string, workDir = process.cwd()): boolean {
-	const followUps = getFollowUpTasksFor(taskId, workDir);
-	return followUps.some((t) => t.status === "pending");
+export function hasPendingFollowUps(
+	runId: string,
+	taskId: string,
+	workDir = process.cwd(),
+): boolean {
+	const followUps = getFollowUpTasksFor(runId, taskId, workDir);
+	return followUps.some((t: Task) => t.status === "pending");
 }
 
 /**
- * Get the retry count for a task based on follow-up tasks
+ * Get the retry count for a task based on follow-up tasks (run-aware version)
  *
+ * @param runId - Run ID for run-aware state operations
  * @param taskId - Task ID to check
  * @param workDir - Working directory
  * @returns Number of retries (follow-up tasks)
  */
-export function getTaskRetryCount(taskId: string, workDir = process.cwd()): number {
-	const followUps = getFollowUpTasksFor(taskId, workDir);
+export function getTaskRetryCount(
+	runId: string,
+	taskId: string,
+	workDir = process.cwd(),
+): number {
+	const followUps = getFollowUpTasksFor(runId, taskId, workDir);
 	return followUps.length;
 }
 
 /**
- * Determine if a task should be retried based on error type and retry count
+ * Determine if a task should be retried based on error type and retry count (run-aware version)
  *
+ * @param runId - Run ID for run-aware state operations
  * @param taskId - Task ID
  * @param errorMessage - Error message
  * @param maxRetries - Maximum allowed retries
@@ -411,12 +463,13 @@ export function getTaskRetryCount(taskId: string, workDir = process.cwd()): numb
  * @returns true if task should be retried
  */
 export function shouldRetryTask(
+	runId: string,
 	taskId: string,
 	errorMessage: string,
 	maxRetries: number,
 	workDir = process.cwd(),
 ): boolean {
-	const retryCount = getTaskRetryCount(taskId, workDir);
+	const retryCount = getTaskRetryCount(runId, taskId, workDir);
 
 	if (retryCount >= maxRetries) {
 		logDebug(`Task ${taskId} has reached max retries (${maxRetries})`);
@@ -448,11 +501,17 @@ interface LegacyRetryOptions {
 /**
  * Execute a function with retry logic
  * @deprecated Use executeWithRetry() instead
+ *
+ * Note: This legacy function uses maxRetries as total attempts for backward compatibility.
+ * New code should use executeWithRetry() which correctly interprets maxRetries as
+ * additional attempts after the initial attempt.
  */
 export async function withRetry<T>(fn: () => Promise<T>, options: LegacyRetryOptions): Promise<T> {
 	const { maxRetries, retryDelay, onRetry } = options;
 	let lastError: Error | null = null;
 
+	// Legacy behavior: maxRetries is total attempts (not additional retries)
+	// This is kept for backward compatibility
 	for (let attempt = 1; attempt <= maxRetries; attempt++) {
 		try {
 			return await fn();
@@ -496,6 +555,10 @@ export interface RetryWithFollowUpResult<T> {
 /**
  * Execute a function with retry logic and follow-up task creation on failure
  * @deprecated Use executeWithRetry() with follow-up handling instead
+ *
+ * Note: This legacy function uses maxRetries as total attempts for backward compatibility.
+ * New code should use executeWithRetry() which correctly interprets maxRetries as
+ * additional attempts after the initial attempt.
  */
 export async function withRetryAndFollowUp<T>(
 	fn: () => Promise<T>,
@@ -505,6 +568,8 @@ export async function withRetryAndFollowUp<T>(
 	let lastError: Error | null = null;
 	let attempts = 0;
 
+	// Legacy behavior: maxRetries is total attempts (not additional retries)
+	// This is kept for backward compatibility
 	for (let attempt = 1; attempt <= maxRetries; attempt++) {
 		attempts = attempt;
 		try {
@@ -531,11 +596,12 @@ export async function withRetryAndFollowUp<T>(
 	const errorMessage = lastError?.message || "All retry attempts failed";
 	let followUpTask: Task | undefined;
 
-	if (followUp?.createFollowUp && followUp.taskId) {
+	if (followUp?.createFollowUp && followUp.taskId && followUp.runId) {
 		const created = createFollowUpTask(
+			followUp.runId,
 			followUp.taskId,
 			errorMessage,
-			followUp.workDir,
+			followUp.workDir ?? process.cwd(),
 			followUp.titlePrefix,
 		);
 		if (created) {

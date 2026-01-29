@@ -38,7 +38,7 @@ export {
 } from "../consolidate.ts";
 
 // Re-export exec command with Milhouse branding
-export { runExec, buildExecutorPrompt, getReadyTasks, type ExecResult } from "../exec.ts";
+export { runExec, buildExecutorPrompt, getReadyTasksForRun, type ExecResult } from "../exec.ts";
 
 // Re-export verify command with Milhouse branding
 export {

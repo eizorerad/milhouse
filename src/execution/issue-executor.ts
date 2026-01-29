@@ -186,6 +186,13 @@ export interface IssueBasedExecutionOptions {
 	onMergeComplete?: (results: MergeBranchResult[]) => void | Promise<void>;
 	/** Whether to stop on first failure */
 	failFast?: boolean;
+	/**
+	 * Retry any failure, not just retryable errors (safety net mode).
+	 * When true, all failures are retried up to maxRetries.
+	 * When false (default), only retryable errors trigger retries.
+	 * @default false
+	 */
+	retryOnAnyFailure?: boolean;
 }
 
 // ============================================================================
@@ -1058,6 +1065,7 @@ export async function runParallelByIssue(
 					...DEFAULT_RETRY_CONFIG,
 					maxRetries,
 					baseDelayMs: retryDelay,
+					retryOnAnyFailure: options.retryOnAnyFailure,
 				};
 				const retryResult = await executeWithRetry(
 					async () => {

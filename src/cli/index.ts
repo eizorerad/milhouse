@@ -118,7 +118,7 @@ export {
 export {
 	runExec,
 	buildExecutorPrompt,
-	getReadyTasks,
+	getReadyTasksForRun,
 	type ExecResult,
 } from "./commands/exec.ts";
 export {

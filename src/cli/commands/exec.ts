@@ -27,7 +27,7 @@ import {
 	updateRunPhaseInMeta,
 	updateRunStats,
 } from "../../state/runs.ts";
-import { loadTasksForRun, readTask, updateTaskForRun, updateTaskWithLock } from "../../state/tasks.ts";
+import { loadTasksForRun, readTask, updateTaskForRun, updateTaskForRunSafe } from "../../state/tasks.ts";
 import type { Issue } from "../../state/types.ts";
 import { AGENT_ROLES, type Task } from "../../state/types.ts";
 import { selectOrRequireRun } from "./utils/run-selector.ts";
@@ -609,10 +609,12 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 			modelOverride: options.modelOverride,
 			skipMerge: options.skipMerge,
 			failFast: options.failFast,
+			retryOnAnyFailure: options.retryOnAnyFailure,
 			onIssueComplete: async (issueId, issueResult) => {
 				// Update task statuses in state (using locked version for concurrent-safe updates)
 				for (const taskId of issueResult.completedTasks) {
-					await updateTaskWithLock(
+					await updateTaskForRunSafe(
+						runId,
 						taskId,
 						{
 							status: "done",
@@ -637,7 +639,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 				}
 
 				for (const taskId of issueResult.failedTasks) {
-					await updateTaskWithLock(
+					await updateTaskForRunSafe(
+						runId,
 						taskId,
 						{
 							status: "failed",
@@ -690,7 +693,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 						);
 
 						for (const task of tasksForIssue) {
-							await updateTaskWithLock(
+							await updateTaskForRunSafe(
+								runId,
 								task.id,
 								{
 									status: "merge_error",
@@ -766,9 +770,11 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 			modelOverride: options.modelOverride,
 			skipMerge: options.skipMerge,
 			failFast: options.failFast,
+			retryOnAnyFailure: options.retryOnAnyFailure,
 			onTaskComplete: async (taskId, success) => {
 				// Update task status in state (using locked version for concurrent-safe updates)
-				await updateTaskWithLock(
+				await updateTaskForRunSafe(
+					runId,
 					taskId,
 					{
 						status: success ? "done" : "failed",

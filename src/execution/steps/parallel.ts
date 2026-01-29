@@ -77,6 +77,7 @@ async function runAgentInWorktree(
 	skipLint: boolean,
 	browserEnabled: "auto" | "true" | "false",
 	modelOverride?: string,
+	retryOnAnyFailure?: boolean,
 ): Promise<WorktreeAgentResult> {
 	let worktreeDir = "";
 	let branchName = "";
@@ -150,6 +151,7 @@ async function runAgentInWorktree(
 			...DEFAULT_RETRY_CONFIG,
 			maxRetries,
 			baseDelayMs: retryDelay,
+			retryOnAnyFailure,
 		};
 		const retryResult = await executeWithRetry(
 			async () => {
@@ -655,6 +657,13 @@ export interface ParallelGroupExecutionOptions {
 	onGroupComplete?: (group: number, result: ParallelGroupResult) => void | Promise<void>;
 	/** Whether to stop on first failure */
 	failFast?: boolean;
+	/**
+	 * Retry any failure, not just retryable errors (safety net mode).
+	 * When true, all failures are retried up to maxRetries.
+	 * When false (default), only retryable errors trigger retries.
+	 * @default false
+	 */
+	retryOnAnyFailure?: boolean;
 }
 
 // ============================================================================
@@ -810,6 +819,7 @@ export async function runParallelGroup(
 					...DEFAULT_RETRY_CONFIG,
 					maxRetries,
 					baseDelayMs: retryDelay,
+					retryOnAnyFailure: options.retryOnAnyFailure,
 				};
 				const retryResult = await executeWithRetry(
 					async () => {

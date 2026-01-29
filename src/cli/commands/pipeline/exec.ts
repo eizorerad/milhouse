@@ -26,6 +26,6 @@
 export {
 	runExec,
 	buildExecutorPrompt,
-	getReadyTasks,
+	getReadyTasksForRun,
 	type ExecResult,
 } from "../exec.ts";

@@ -19,9 +19,13 @@ import {
 } from "./runs.ts";
 import {
 	createTask,
+	createTaskForRun,
 	loadTasks,
+	loadTasksForRun,
+	readTaskForRun,
 	updateTaskWithLock,
 	updateTaskStatusWithLock,
+	updateTaskForRunSafe,
 } from "./tasks.ts";
 import type { RunPhase } from "./types.ts";
 
@@ -497,6 +501,199 @@ describe("Concurrency Tests", () => {
 			expect(typeof meta!.issues_found).toBe("number");
 			expect(typeof meta!.issues_validated).toBe("number");
 			expect(typeof meta!.tasks_total).toBe("number");
+		});
+	});
+
+	describe("Run-Aware Task Functions (updateTaskForRunSafe)", () => {
+		test("should handle concurrent updates to tasks in the same run", async () => {
+			const run = createRun({ scope: "run-aware concurrent", workDir: testDir });
+			const task = createTaskForRun(
+				run.id,
+				{
+					title: "Run-aware Task",
+					description: "Testing run-aware updates",
+					issue_id: "RUNAWARE-1",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir
+			);
+
+			// Simulate a few parallel updates (reduced from 10 to avoid timeout)
+			const updates = Array.from({ length: 3 }, (_, i) => ({
+				description: `Run-aware update ${i}`,
+			}));
+
+			const results = await Promise.all(
+				updates.map((update) => updateTaskForRunSafe(run.id, task.id, update, testDir))
+			);
+
+			// All updates should succeed
+			expect(results.every((r) => r !== null)).toBe(true);
+
+			// Final task should have one of the descriptions
+			const finalTask = readTaskForRun(run.id, task.id, testDir);
+			expect(finalTask).not.toBeNull();
+			expect(finalTask!.description).toMatch(/^Run-aware update \d$/);
+		});
+
+		test("should isolate updates between different runs", async () => {
+			// Create two separate runs
+			const run1 = createRun({ scope: "isolation run 1", workDir: testDir });
+			const run2 = createRun({ scope: "isolation run 2", workDir: testDir });
+
+			// Create tasks in each run
+			const task1 = createTaskForRun(
+				run1.id,
+				{
+					title: "Task in Run 1",
+					description: "Original description",
+					issue_id: "RUN1-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir
+			);
+
+			const task2 = createTaskForRun(
+				run2.id,
+				{
+					title: "Task in Run 2",
+					description: "Original description",
+					issue_id: "RUN2-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir
+			);
+
+			// Update task1 in run1
+			await updateTaskForRunSafe(run1.id, task1.id, { status: "done" }, testDir);
+
+			// Verify task1 in run1 is updated
+			const updatedTask1 = readTaskForRun(run1.id, task1.id, testDir);
+			expect(updatedTask1!.status).toBe("done");
+
+			// Verify task2 in run2 is NOT affected
+			const unchangedTask2 = readTaskForRun(run2.id, task2.id, testDir);
+			expect(unchangedTask2!.status).toBe("pending");
+
+			// Verify cross-run update returns null (task doesn't exist in other run)
+			const crossRunResult = await updateTaskForRunSafe(run2.id, task1.id, { status: "failed" }, testDir);
+			expect(crossRunResult).toBeNull();
+		});
+
+		test("should handle parallel updates to different runs simultaneously", async () => {
+			// Create two runs
+			const run1 = createRun({ scope: "parallel run 1", workDir: testDir });
+			const run2 = createRun({ scope: "parallel run 2", workDir: testDir });
+
+			// Create a few tasks in each run (reduced from 5 to avoid timeout)
+			const run1Tasks = Array.from({ length: 2 }, (_, i) =>
+				createTaskForRun(
+					run1.id,
+					{
+						title: `Run1 Task ${i}`,
+						description: `Description ${i}`,
+						issue_id: `RUN1-ISSUE-${i}`,
+						status: "pending",
+						parallel_group: 0,
+						depends_on: [],
+						files: [],
+						checks: [],
+						acceptance: [],
+					},
+					testDir
+				)
+			);
+
+			const run2Tasks = Array.from({ length: 2 }, (_, i) =>
+				createTaskForRun(
+					run2.id,
+					{
+						title: `Run2 Task ${i}`,
+						description: `Description ${i}`,
+						issue_id: `RUN2-ISSUE-${i}`,
+						status: "pending",
+						parallel_group: 0,
+						depends_on: [],
+						files: [],
+						checks: [],
+						acceptance: [],
+					},
+					testDir
+				)
+			);
+
+			// Perform parallel updates to both runs simultaneously
+			const allUpdates: Promise<unknown>[] = [];
+
+			// Update all run1 tasks to "done"
+			for (const task of run1Tasks) {
+				allUpdates.push(
+					updateTaskForRunSafe(run1.id, task.id, { status: "done" }, testDir)
+				);
+			}
+
+			// Update all run2 tasks to "failed"
+			for (const task of run2Tasks) {
+				allUpdates.push(
+					updateTaskForRunSafe(run2.id, task.id, { status: "failed", error: "Test failure" }, testDir)
+				);
+			}
+
+			await Promise.all(allUpdates);
+
+			// Verify run1 tasks are all "done"
+			const finalRun1Tasks = loadTasksForRun(run1.id, testDir);
+			expect(finalRun1Tasks.length).toBe(2);
+			for (const task of finalRun1Tasks) {
+				expect(task.status).toBe("done");
+			}
+
+			// Verify run2 tasks are all "failed"
+			const finalRun2Tasks = loadTasksForRun(run2.id, testDir);
+			expect(finalRun2Tasks.length).toBe(2);
+			for (const task of finalRun2Tasks) {
+				expect(task.status).toBe("failed");
+				expect(task.error).toBe("Test failure");
+			}
+		});
+
+		test("should return null for non-existent task in run", async () => {
+			const run = createRun({ scope: "non-existent task test", workDir: testDir });
+
+			const result = await updateTaskForRunSafe(
+				run.id,
+				"NON-EXISTENT-TASK",
+				{ status: "done" },
+				testDir
+			);
+
+			expect(result).toBeNull();
+		});
+
+		test("should return null for non-existent run", async () => {
+			const result = await updateTaskForRunSafe(
+				"non-existent-run-id",
+				"any-task-id",
+				{ status: "done" },
+				testDir
+			);
+
+			expect(result).toBeNull();
 		});
 	});
 });

@@ -149,6 +149,7 @@ async function executeStep(
 			...DEFAULT_RETRY_CONFIG,
 			maxRetries,
 			baseDelayMs: retryDelay,
+			retryOnAnyFailure: options.retryOnAnyFailure,
 		};
 
 		const retryResult = await executeWithRetry(

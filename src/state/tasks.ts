@@ -305,6 +305,26 @@ export function readTask(id: string, workDir = process.cwd()): Task | null {
 }
 
 /**
+ * Read a single task by ID from a specific run
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param runId - The run ID to read the task from
+ * @param taskId - The ID of the task to read
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The task or null if not found
+ */
+export function readTaskForRun(
+	runId: string,
+	taskId: string,
+	workDir = process.cwd(),
+): Task | null {
+	const tasks = loadTasksForRun(runId, workDir);
+	return tasks.find((t) => t.id === taskId) || null;
+}
+
+/**
  * Update an existing task
  *
  * IMPORTANT: This function includes safeguards to prevent data loss:

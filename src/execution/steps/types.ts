@@ -87,6 +87,13 @@ export interface MilhouseStepOptions {
 	modelOverride?: string;
 	/** Skip merge phase after parallel execution */
 	skipMerge?: boolean;
+	/**
+	 * Retry any failure, not just retryable errors (safety net mode).
+	 * When true, all failures are retried up to maxRetries.
+	 * When false (default), only retryable errors trigger retries.
+	 * @default false
+	 */
+	retryOnAnyFailure?: boolean;
 }
 
 /**
