@@ -30,3 +30,6 @@ Thumbs.db
 # Logs
 *.log
 pnpm-debug.log*
+
+# progress tracking
+progress.md

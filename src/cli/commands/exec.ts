@@ -17,20 +17,20 @@ import {
 } from "../../vcs/services/branch-service.ts";
 import { createPullRequest } from "../../vcs/services/pr-service.ts";
 import { createExecution, updateExecution } from "../../state/executions.ts";
-import { buildFilterOptionsFromRuntime, filterIssues, loadIssues } from "../../state/issues.ts";
+import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import {
 	getMilhouseDir,
 	initializeDir,
 	updateProgress,
 } from "../../state/manager.ts";
 import {
-	requireActiveRun,
-	updateCurrentRunPhase,
-	updateCurrentRunStats,
+	updateRunPhaseInMeta,
+	updateRunStats,
 } from "../../state/runs.ts";
-import { loadTasks, readTask, updateTask, updateTaskWithLock } from "../../state/tasks.ts";
+import { loadTasksForRun, readTask, updateTaskForRun, updateTaskWithLock } from "../../state/tasks.ts";
 import type { Issue } from "../../state/types.ts";
 import { AGENT_ROLES, type Task } from "../../state/types.ts";
+import { selectOrRequireRun } from "./utils/run-selector.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -317,8 +317,8 @@ async function executeSingleTask(
  * Tasks with "merge_error" status are included because they executed successfully
  * but failed during the merge phase, so they should be re-executed.
  */
-export function getReadyTasks(workDir: string): Task[] {
-	const tasks = loadTasks(workDir);
+export function getReadyTasksForRun(runId: string, workDir: string): Task[] {
+	const tasks = loadTasksForRun(runId, workDir);
 	const readyTasks: Task[] = [];
 
 	for (const task of tasks) {
@@ -329,8 +329,8 @@ export function getReadyTasks(workDir: string): Task[] {
 		}
 
 		// Check if all dependencies are done
-		const allDepsDone = task.depends_on.every((depId) => {
-			const dep = tasks.find((t) => t.id === depId);
+		const allDepsDone = task.depends_on.every((depId: string) => {
+			const dep = tasks.find((t: Task) => t.id === depId);
 			return dep?.status === "done";
 		});
 
@@ -364,11 +364,13 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 	// Initialize milhouse directory if needed
 	initializeDir(workDir);
 
-	// Load current run state using new runs system
-	let currentRun;
-	try {
-		currentRun = requireActiveRun(workDir);
-	} catch (error) {
+	// Select or require a run using the run-selector utility
+	// This handles explicit runId from options, auto-selection, or prompting
+	const runSelection = await selectOrRequireRun(options.runId, workDir, {
+		requirePhase: ["plan", "exec"],
+	});
+
+	if (!runSelection) {
 		logError("No active run found. Run the previous pipeline steps first.");
 		return {
 			success: false,
@@ -381,8 +383,11 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		};
 	}
 
-	// Load tasks
-	const allTasks = loadTasks(workDir);
+	const { runId, runMeta } = runSelection;
+	let currentRun = runMeta;
+
+	// Load tasks for the selected run
+	const allTasks = loadTasksForRun(runId, workDir);
 	// Include both "pending" and "merge_error" tasks
 	// merge_error tasks need to be re-executed because their merge failed
 	const pendingTasks = allTasks.filter((t) => t.status === "pending" || t.status === "merge_error");
@@ -399,8 +404,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		};
 	}
 
-	// Update phase to exec using new runs system
-	currentRun = updateCurrentRunPhase("exec", workDir);
+	// Update phase to exec using run-aware function
+	currentRun = updateRunPhaseInMeta(runId, "exec", workDir) ?? currentRun;
 
 	// Check engine availability
 	const engine = await createEngine(options.aiEngine as AIEngineName);
@@ -488,6 +493,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 
 		// Execute single task
 		const result = await executeTaskWithTracking(
+			runId,
 			specificTask,
 			engine,
 			workDir,
@@ -514,8 +520,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		logInfo("Using issue-based parallel execution (default mode)");
 		logInfo("Each issue's tasks will run in a dedicated worktree");
 
-		// Load issues
-		let issues = loadIssues(workDir);
+		// Load issues for the selected run
+		let issues = loadIssuesForRun(runId, workDir);
 
 		// If no issues found but tasks have issue_ids, derive synthetic issues from tasks
 		// This handles the case where issues are in a different run than tasks
@@ -679,8 +685,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 					// For each failed merge, find all tasks for that issue and mark them as merge_error
 					for (const failedMerge of failedMerges) {
 						const issueId = failedMerge.issueId;
-						const tasksForIssue = loadTasks(workDir).filter(
-							(t) => t.issue_id === issueId && t.status === "done",
+						const tasksForIssue = loadTasksForRun(runId, workDir).filter(
+							(t: Task) => t.issue_id === issueId && t.status === "done",
 						);
 
 						for (const task of tasksForIssue) {
@@ -713,7 +719,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		totalOutputTokens = issueResult.totalOutputTokens;
 
 		// Collect errors from failed tasks
-		const reloadedTasks = loadTasks(workDir);
+		const reloadedTasks = loadTasksForRun(runId, workDir);
 		for (const task of reloadedTasks) {
 			if (task.status === "failed" && task.error) {
 				errors.push(`${task.id}: ${task.error}`);
@@ -801,7 +807,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		totalOutputTokens = parallelResult.totalOutputTokens;
 
 		// Collect errors from failed tasks
-		const reloadedTasks = loadTasks(workDir);
+		const reloadedTasks = loadTasksForRun(runId, workDir);
 		for (const task of reloadedTasks) {
 			if (task.status === "failed" && task.error) {
 				errors.push(`${task.id}: ${task.error}`);
@@ -814,10 +820,10 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 
 		while (iteration < maxIterations) {
 			// Get next ready task
-			const readyTasks = getReadyTasks(workDir);
+			const readyTasks = getReadyTasksForRun(runId, workDir);
 			if (readyTasks.length === 0) {
 				// Check if there are still pending tasks (blocked)
-				const remaining = loadTasks(workDir).filter((t) => t.status === "pending");
+				const remaining = loadTasksForRun(runId, workDir).filter((t: Task) => t.status === "pending");
 				if (remaining.length > 0) {
 					logWarn(`${remaining.length} tasks blocked due to failed dependencies`);
 				}
@@ -828,6 +834,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 			spinner.updateStep(`${task.id}: Starting`);
 
 			const result = await executeTaskWithTracking(
+				runId,
 				task,
 				engine,
 				workDir,
@@ -852,17 +859,17 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		}
 	}
 
-	// Update run state using new runs system
-	const finalTasks = loadTasks(workDir);
-	const allDone = finalTasks.every((t) => t.status === "done" || t.status === "skipped");
-	const anyFailed = finalTasks.some((t) => t.status === "failed");
+	// Update run state using run-aware functions
+	const finalTasks = loadTasksForRun(runId, workDir);
+	const allDone = finalTasks.every((t: Task) => t.status === "done" || t.status === "skipped");
+	const anyFailed = finalTasks.some((t: Task) => t.status === "failed");
 
 	const nextPhase = allDone ? "verify" : anyFailed ? "failed" : "exec";
-	currentRun = updateCurrentRunPhase(nextPhase, workDir);
-	currentRun = updateCurrentRunStats({
-		tasks_completed: finalTasks.filter((t) => t.status === "done").length,
-		tasks_failed: finalTasks.filter((t) => t.status === "failed").length,
-	}, workDir);
+	currentRun = updateRunPhaseInMeta(runId, nextPhase, workDir) ?? currentRun;
+	currentRun = updateRunStats(runId, {
+		tasks_completed: finalTasks.filter((t: Task) => t.status === "done").length,
+		tasks_failed: finalTasks.filter((t: Task) => t.status === "failed").length,
+	}, workDir) ?? currentRun;
 
 	const duration = Date.now() - startTime;
 
@@ -892,9 +899,9 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		}
 	}
 
-	const finalTasksForSummary = loadTasks(workDir);
-	const remainingPending = finalTasksForSummary.filter((t) => t.status === "pending");
-	const remainingMergeError = finalTasksForSummary.filter((t) => t.status === "merge_error");
+	const finalTasksForSummary = loadTasksForRun(runId, workDir);
+	const remainingPending = finalTasksForSummary.filter((t: Task) => t.status === "pending");
+	const remainingMergeError = finalTasksForSummary.filter((t: Task) => t.status === "merge_error");
 	const totalRemaining = remainingPending.length + remainingMergeError.length;
 
 	if (totalRemaining > 0) {
@@ -931,6 +938,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
  * Execute a task with full tracking (execution record, branch, PR)
  */
 async function executeTaskWithTracking(
+	runId: string,
 	task: Task,
 	engine: AIEngine,
 	workDir: string,
@@ -944,7 +952,7 @@ async function executeTaskWithTracking(
 	error?: string;
 }> {
 	// Mark task as running
-	updateTask(task.id, { status: "running" }, workDir);
+	updateTaskForRun(runId, task.id, { status: "running" }, workDir);
 
 	// Create execution record
 	const executionRecord = createExecution(
@@ -966,7 +974,7 @@ async function executeTaskWithTracking(
 		if (branchResult.ok) {
 			branch = branchResult.value.branchName;
 			logDebug(`Created branch: ${branch}`);
-			updateTask(task.id, { branch }, workDir);
+			updateTaskForRun(runId, task.id, { branch }, workDir);
 		} else {
 			logDebug(`Failed to create branch: ${branchResult.error.message}`);
 		}
@@ -991,7 +999,8 @@ async function executeTaskWithTracking(
 
 	// Update task status
 	if (result.success) {
-		updateTask(
+		updateTaskForRun(
+			runId,
 			task.id,
 			{
 				status: "done",
@@ -1018,7 +1027,8 @@ async function executeTaskWithTracking(
 			}
 		}
 	} else {
-		updateTask(
+		updateTaskForRun(
+			runId,
 			task.id,
 			{
 				status: "failed",

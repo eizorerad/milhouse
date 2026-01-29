@@ -6,19 +6,18 @@ import { getConfigService } from "../../services/config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngine, AIEngineName, AIResult } from "../../engines/types.ts";
 import type { InspectorProbeType } from "../../probes/index.ts";
-import { buildFilterOptionsFromRuntime, filterIssues, loadIssues, updateIssue } from "../../state/issues.ts";
+import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import { getMilhouseDir, initializeDir } from "../../state/manager.ts";
 import {
-	requireActiveRun,
-	updateCurrentRunPhase,
-	updateCurrentRunStats,
+	updateRunPhaseInMeta,
+	updateRunStats,
 } from "../../state/runs.ts";
-import { createTask, loadTasks } from "../../state/tasks.ts";
+import { createTaskForRun, loadTasksForRun } from "../../state/tasks.ts";
 import {
 	getCurrentPlansDir,
 	syncLegacyPlansView,
-	writeIssueWbsJson,
-	writeIssueWbsPlan,
+	writeIssueWbsJsonForRun,
+	writeIssueWbsPlanForRun,
 	createPlanMetadataHeader,
 } from "../../state/plan-store.ts";
 import { AGENT_ROLES, type DoDCriteria, type Issue } from "../../state/types.ts";
@@ -40,6 +39,7 @@ import {
 	loadExistingProbeResults,
 	runApplicableProbes,
 } from "./utils/probeIntegration.ts";
+import { selectOrRequireRun } from "./utils/run-selector.ts";
 
 /**
  * Default number of parallel planner agents
@@ -966,11 +966,11 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 	// Initialize milhouse directory if needed
 	initializeDir(workDir);
 
-	// Load current run state using new runs system
-	let currentRun;
-	try {
-		currentRun = requireActiveRun(workDir);
-	} catch (error) {
+	// Select or require an active run using explicit run ID
+	const runSelection = await selectOrRequireRun(options.runId, workDir, {
+		requirePhase: ["validate", "plan"],
+	});
+	if (!runSelection) {
 		logError("No active run found. Run 'milhouse scan' and 'milhouse validate' first.");
 		return {
 			success: false,
@@ -982,9 +982,10 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 			error: "No active run",
 		};
 	}
+	const { runId, runMeta: currentRun } = runSelection;
 
-	// Load issues
-	const issues = loadIssues(workDir);
+	// Load issues for this specific run
+	const issues = loadIssuesForRun(runId, workDir);
 
 	// Build filter options from CLI arguments
 	const filterOptions = buildFilterOptionsFromRuntime(options, ["CONFIRMED", "PARTIAL"]);
@@ -1016,8 +1017,8 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 		};
 	}
 
-	// Update phase to plan using new runs system
-	currentRun = updateCurrentRunPhase("plan", workDir);
+	// Update phase to plan using run-aware function
+	updateRunPhaseInMeta(runId, "plan", workDir);
 
 	// Check engine availability
 	const engine = await createEngine(options.aiEngine as AIEngineName);
@@ -1127,7 +1128,7 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 				// Load validation report for markdown generation
 				const validationReport = loadValidationReport(issue.id, workDir);
 
-				const planPath = processPlanResult(issue, result.wbs, validationReport, workDir);
+				const planPath = processPlanResult(runId, issue, result.wbs, validationReport, workDir);
 				planPaths.push(planPath);
 				issuesPlanned++;
 				tasksCreated += result.wbs.tasks.length;
@@ -1147,10 +1148,10 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 		console.log("");
 	}
 
-	// Update run state using new runs system
+	// Update run state using run-aware functions
 	const nextPhase = issuesPlanned > 0 ? "exec" : "completed";
-	currentRun = updateCurrentRunPhase(nextPhase, workDir);
-	currentRun = updateCurrentRunStats({ tasks_total: loadTasks(workDir).length }, workDir);
+	updateRunPhaseInMeta(runId, nextPhase, workDir);
+	updateRunStats(runId, { tasks_total: loadTasksForRun(runId, workDir).length }, workDir);
 
 	const duration = Date.now() - startTime;
 
@@ -1212,21 +1213,22 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
  * Process WBS result - save markdown and create tasks
  */
 function processPlanResult(
+	runId: string,
 	issue: Issue,
 	wbs: ParsedWBS,
 	validationReport: DeepValidationReport | null,
 	workDir: string,
 ): string {
-	// Generate and save WBS markdown using PlanStore
+	// Generate and save WBS markdown using PlanStore with run ID
 	const markdown = generateWBSMarkdown(issue, wbs, validationReport, workDir);
-	const planPath = writeIssueWbsPlan(workDir, issue.id, markdown);
+	const planPath = writeIssueWbsPlanForRun(workDir, runId, issue.id, markdown);
 	logDebug(`Wrote WBS plan to ${planPath}`);
 
-	// Also save the raw WBS JSON for reference using PlanStore
-	const wbsJsonPath = writeIssueWbsJson(workDir, issue.id, wbs);
+	// Also save the raw WBS JSON for reference using PlanStore with run ID
+	const wbsJsonPath = writeIssueWbsJsonForRun(workDir, runId, issue.id, wbs);
 	logDebug(`Wrote WBS JSON to ${wbsJsonPath}`);
 
-	// Create tasks in state
+	// Create tasks in state for this specific run
 	const createdTaskIds: string[] = [];
 	for (let i = 0; i < wbs.tasks.length; i++) {
 		const wbsTask = wbs.tasks[i];
@@ -1242,7 +1244,8 @@ function processPlanResult(
 			})
 			.filter((id): id is string => id !== null);
 
-		const task = createTask(
+		const task = createTaskForRun(
+			runId,
 			{
 				issue_id: issue.id,
 				title: wbsTask.title,
@@ -1266,8 +1269,9 @@ function processPlanResult(
 		createdTaskIds.push(task.id);
 	}
 
-	// Update issue with related task IDs
-	updateIssue(
+	// Update issue with related task IDs for this specific run
+	updateIssueForRun(
+		runId,
 		issue.id,
 		{
 			related_task_ids: [...issue.related_task_ids, ...createdTaskIds],

@@ -98,6 +98,7 @@ export function createProgram(): Command {
 			"--run",
 			`Run ${theme.highlight("full Milhouse pipeline")} (scan → validate → plan → consolidate → exec → verify)`,
 		)
+		.option("--run-id <id>", "Specify run ID to use (full or partial match)")
 		.option("--resume", "Resume Milhouse pipeline from where it left off")
 		.option("--force", "Force re-run even if phases already completed")
 		.option("--fail-fast", "Stop pipeline on first phase failure (default: true)")
@@ -409,6 +410,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 		minSeverity: parseSingleSeverity(opts.minSeverity),
 		severityFilter: parseSeverityLevels(opts.severity),
 		skipProbes: opts.skipProbes || false,
+		runId: opts.runId,
 		// Validation retry options
 		maxValidationRetries:
 			opts.maxValidationRetries !== undefined ? Number.parseInt(opts.maxValidationRetries, 10) : 2,

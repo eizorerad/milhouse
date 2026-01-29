@@ -34,26 +34,38 @@ export function getValidationReportsDir(workDir: string): string {
 
 /**
  * Save a deep validation report with run_id and update validation-index.json
+ *
+ * @param report - The deep validation report to save
+ * @param workDir - Working directory
+ * @param runId - Optional explicit run ID. If not provided, falls back to getCurrentRunId().
+ *                Providing an explicit runId is recommended to avoid race conditions
+ *                when multiple milhouse processes run in parallel.
+ * @returns Path to the saved report file
  */
-export function saveValidationReport(report: DeepValidationReport, workDir: string): string {
+export function saveValidationReport(
+	report: DeepValidationReport,
+	workDir: string,
+	runId?: string,
+): string {
 	const reportsDir = getValidationReportsDir(workDir);
 	const filename = `${report.issue_id}.json`;
 	const filepath = join(reportsDir, filename);
 
 	// Add run_id and created_at to the report
-	const currentRunId = getCurrentRunId(workDir);
+	// Use explicit runId if provided, otherwise fall back to getCurrentRunId()
+	const effectiveRunId = runId ?? getCurrentRunId(workDir);
 	const now = new Date().toISOString();
 	const enrichedReport: DeepValidationReport = {
 		...report,
-		run_id: currentRunId || undefined,
+		run_id: effectiveRunId || undefined,
 		created_at: now,
 	};
 
 	writeFileSync(filepath, JSON.stringify(enrichedReport, null, 2));
 
 	// Update validation-index.json in the run directory if we have an active run
-	if (currentRunId) {
-		updateValidationIndex(currentRunId, {
+	if (effectiveRunId) {
+		updateValidationIndex(effectiveRunId, {
 			issue_id: report.issue_id,
 			report_path: filepath,
 			created_at: now,
@@ -62,7 +74,7 @@ export function saveValidationReport(report: DeepValidationReport, workDir: stri
 
 		// Emit validation:report:created event
 		stateEvents.emitValidationReportCreated(
-			currentRunId,
+			effectiveRunId,
 			filename,
 			report.issue_id,
 			report.status,

@@ -435,6 +435,43 @@ milhouse runs import-legacy-plans
 
 ---
 
+## 🔒 Run Isolation
+
+Milhouse supports running multiple instances in parallel without data corruption. Each run is isolated in its own directory under `.milhouse/runs/`.
+
+### Specifying a run
+
+Commands that operate on existing runs accept `--run-id`:
+
+```bash
+# Use full run ID
+milhouse --validate --run-id run-20260128-after-ujb8
+
+# Use partial ID (suffix match)
+milhouse --plan --run-id after-ujb8
+
+# Use partial ID (name match)
+milhouse --exec --run-id after
+```
+
+### Behavior when `--run-id` is not specified
+
+- If only one eligible run exists, it is automatically selected
+- If multiple eligible runs exist, an interactive prompt is shown
+- If no eligible runs exist, an error is displayed
+
+### Interactive selection
+
+When multiple runs exist and no `--run-id` is specified, you'll be prompted to select one:
+
+```
+? Multiple runs available. Which one do you want to use:
+❯ run-20260128-after-ujb8 [VALIDATE] - 3 issues - fix auth bug - 2 hours ago
+  run-20260127-before-xyz1 [SCAN] - 5 issues - refactor api - 1 day ago
+```
+
+---
+
 ## 📄 License
 
 MIT

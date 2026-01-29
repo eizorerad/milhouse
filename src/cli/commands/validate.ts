@@ -2,16 +2,15 @@ import pc from "picocolors";
 import type { RuntimeOptions } from "../../config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngine, AIEngineName, AIResult } from "../../engines/types.ts";
-import { buildFilterOptionsFromRuntime, filterIssues, loadIssues, updateIssue } from "../../state/issues.ts";
+import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import {
 	syncLegacyPlansView,
-	writeProblemBrief,
+	writeProblemBriefForRun,
 } from "../../state/plan-store.ts";
 import { generateId, initializeDir } from "../../state/manager.ts";
 import {
-	requireActiveRun,
-	updateCurrentRunPhase,
-	updateCurrentRunStats,
+	updateRunPhaseInMeta,
+	updateRunStats,
 } from "../../state/runs.ts";
 import { saveProbeResult } from "../../state/probes.ts";
 import {
@@ -56,6 +55,7 @@ import {
 	getIssuesToValidateForRound,
 	sleep,
 } from "./utils/validation-round.ts";
+import { selectOrRequireRun } from "./utils/run-selector.ts";
 
 /**
  * Default number of parallel validation agents
@@ -371,12 +371,18 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 	// Initialize milhouse directory if needed
 	initializeDir(workDir);
 
-	// Load current run state using new runs system
-	let currentRun;
+	// Select or require a run using explicit run ID or interactive selection
+	let runId: string;
+	let runMeta;
 	try {
-		currentRun = requireActiveRun(workDir);
+		const selection = await selectOrRequireRun(options.runId, workDir, {
+			requirePhase: ["scan", "validate"],
+		});
+		runId = selection.runId;
+		runMeta = selection.runMeta;
 	} catch (error) {
-		logError("No active run found. Run 'milhouse scan' first to create a Problem Brief.");
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		logError(errorMsg);
 		return {
 			success: false,
 			issuesValidated: 0,
@@ -397,8 +403,8 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 		delayMs: options.retryDelayValidation ?? 2000,
 	};
 
-	// Load issues for initial check
-	const issues = loadIssues(workDir);
+	// Load issues for initial check using run-aware function
+	const issues = loadIssuesForRun(runId, workDir);
 
 	// Build filter options from CLI arguments
 	const filterOptions = buildFilterOptionsFromRuntime(options, ["UNVALIDATED"]);
@@ -432,8 +438,8 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 		};
 	}
 
-	// Update phase to validate using new runs system
-	currentRun = updateCurrentRunPhase("validate", workDir);
+	// Update phase to validate using run-aware function
+	updateRunPhaseInMeta(runId, "validate", workDir);
 
 	// Check engine availability
 	const engine = await createEngine(options.aiEngine as AIEngineName);
@@ -567,9 +573,9 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 	}
 
 	// Generate updated Problem Brief using PlanStore (run-aware)
-	const allIssues = loadIssues(workDir);
-	const problemBriefContent = generateValidatedProblemBrief(allIssues, currentRun.id);
-	const problemBriefPath = writeProblemBrief(workDir, problemBriefContent);
+	const allIssues = loadIssuesForRun(runId, workDir);
+	const problemBriefContent = generateValidatedProblemBrief(allIssues, runId);
+	const problemBriefPath = writeProblemBriefForRun(workDir, runId, problemBriefContent);
 	logDebug(`Problem Brief written to: ${problemBriefPath}`);
 
 	// Sync legacy plans view for backward compatibility
@@ -579,10 +585,10 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 	// Count final unvalidated
 	const finalUnvalidated = allIssues.filter((i) => i.status === "UNVALIDATED").length;
 
-	// Update run state using new runs system
+	// Update run state using run-aware functions
 	const nextPhase = totalConfirmed > 0 || totalPartial > 0 ? "plan" : "completed";
-	currentRun = updateCurrentRunPhase(nextPhase, workDir);
-	currentRun = updateCurrentRunStats({ issues_validated: totalValidated }, workDir);
+	updateRunPhaseInMeta(runId, nextPhase, workDir);
+	updateRunStats(runId, { issues_validated: totalValidated }, workDir);
 
 	const duration = Date.now() - startTime;
 
@@ -650,6 +656,7 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
  * Process validation result from deep report and update issue
  */
 function processValidationResultFromReport(
+	runId: string,
 	issue: Issue,
 	report: DeepValidationReport,
 	workDir: string,
@@ -661,7 +668,8 @@ function processValidationResultFromReport(
 	}));
 
 	// Update the issue with comprehensive data from deep report
-	updateIssue(
+	updateIssueForRun(
+		runId,
 		issue.id,
 		{
 			status: report.status,
@@ -684,6 +692,7 @@ function processValidationResultFromReport(
  * Process validation result and update issue
  */
 function processValidationResult(
+	runId: string,
 	issue: Issue,
 	validation: ParsedValidation,
 	workDir: string,
@@ -718,7 +727,8 @@ function processValidationResult(
 	}
 
 	// Update the issue
-	updateIssue(
+	updateIssueForRun(
+		runId,
 		issue.id,
 		{
 			status: validation.status,

@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { RuntimeOptions } from "../cli/runtime-options.ts";
 import { logError, logWarn } from "../ui/logger.ts";
-import { getStatePathForCurrentRun } from "./paths.ts";
-import { type Issue, IssueSchema, type IssueStatus, type Severity } from "./types.ts";
+import { withFileLock } from "./file-lock.ts";
+import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
+import { type Issue, IssueSchema, type IssueStatus, type Severity, STATE_FILES } from "./types.ts";
 
 /**
  * Get path to issues state file
@@ -11,6 +12,18 @@ import { type Issue, IssueSchema, type IssueStatus, type Severity } from "./type
  */
 function getIssuesPath(workDir = process.cwd()): string {
 	return getStatePathForCurrentRun("issues", workDir);
+}
+
+/**
+ * Get path to issues state file for a specific run
+ * This is the run-aware version that accepts an explicit runId parameter
+ *
+ * @param runId - The run ID to get the issues path for
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns Full path to the issues.json file for the specified run
+ */
+function getIssuesPathForRun(runId: string, workDir = process.cwd()): string {
+	return join(getRunStateDir(runId, workDir), STATE_FILES.issues);
 }
 
 /**
@@ -25,6 +38,10 @@ export function generateIssueId(): string {
 /**
  * Load all issues from state file
  * Uses safeParse to handle invalid issues gracefully instead of losing all data
+ *
+ * @deprecated Use loadIssuesForRun() with explicit runId to avoid race conditions
+ * when multiple milhouse processes run in parallel. This function relies on
+ * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
 export function loadIssues(workDir = process.cwd()): Issue[] {
 	const path = getIssuesPath(workDir);
@@ -63,11 +80,83 @@ export function loadIssues(workDir = process.cwd()): Issue[] {
 }
 
 /**
+ * Load all issues from state file for a specific run
+ * Uses safeParse to handle invalid issues gracefully instead of losing all data
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param runId - The run ID to load issues from
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns Array of valid issues from the specified run
+ */
+export function loadIssuesForRun(runId: string, workDir = process.cwd()): Issue[] {
+	const path = getIssuesPathForRun(runId, workDir);
+
+	if (!existsSync(path)) {
+		return [];
+	}
+
+	try {
+		const content = readFileSync(path, "utf-8");
+		const parsed = JSON.parse(content);
+
+		if (!Array.isArray(parsed)) {
+			return [];
+		}
+
+		// Parse each issue individually to avoid losing all data if one is invalid
+		const validIssues: Issue[] = [];
+		for (const item of parsed) {
+			const result = IssueSchema.safeParse(item);
+			if (result.success) {
+				validIssues.push(result.data);
+			} else {
+				// Log but don't fail - preserve other issues
+				logWarn(
+					`Skipping invalid issue ${item?.id || "unknown"}:`,
+					result.error.message,
+				);
+			}
+		}
+		return validIssues;
+	} catch (error) {
+		logError(`Failed to load issues from ${path}:`, error);
+		return [];
+	}
+}
+
+/**
  * Save issues array to state file
+ *
+ * @deprecated Use saveIssuesForRun() with explicit runId to avoid race conditions
+ * when multiple milhouse processes run in parallel. This function relies on
+ * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
 export function saveIssues(issues: Issue[], workDir = process.cwd()): void {
 	const path = getIssuesPath(workDir);
 	const dir = join(path, "..");
+
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+
+	writeFileSync(path, JSON.stringify(issues, null, 2));
+}
+
+/**
+ * Save issues array to state file for a specific run
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param runId - The run ID to save issues to
+ * @param issues - Array of issues to save
+ * @param workDir - Working directory (defaults to process.cwd())
+ */
+export function saveIssuesForRun(runId: string, issues: Issue[], workDir = process.cwd()): void {
+	const path = getIssuesPathForRun(runId, workDir);
+	const dir = dirname(path);
 
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
@@ -98,6 +187,36 @@ export function createIssue(
 }
 
 /**
+ * Create a new issue in a specific run
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param runId - The run ID to create the issue in
+ * @param issue - Issue data without id and timestamps
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The created issue with generated id and timestamps
+ */
+export function createIssueForRun(
+	runId: string,
+	issue: Omit<Issue, "id" | "created_at" | "updated_at">,
+	workDir = process.cwd(),
+): Issue {
+	const issues = loadIssuesForRun(runId, workDir);
+	const now = new Date().toISOString();
+
+	const newIssue: Issue = {
+		...issue,
+		id: generateIssueId(),
+		created_at: now,
+		updated_at: now,
+	};
+
+	saveIssuesForRun(runId, [...issues, newIssue], workDir);
+	return newIssue;
+}
+
+/**
  * Read a single issue by ID
  */
 export function readIssue(id: string, workDir = process.cwd()): Issue | null {
@@ -107,6 +226,10 @@ export function readIssue(id: string, workDir = process.cwd()): Issue | null {
 
 /**
  * Update an existing issue
+ *
+ * @deprecated Use updateIssueForRun() with explicit runId to avoid race conditions
+ * when multiple milhouse processes run in parallel. This function relies on
+ * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
 export function updateIssue(
 	id: string,
@@ -128,6 +251,42 @@ export function updateIssue(
 
 	const newIssues = [...issues.slice(0, index), updated, ...issues.slice(index + 1)];
 	saveIssues(newIssues, workDir);
+	return updated;
+}
+
+/**
+ * Update an existing issue in a specific run
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param runId - The run ID containing the issue
+ * @param issueId - The ID of the issue to update
+ * @param update - Partial issue data to update
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The updated issue or null if not found
+ */
+export function updateIssueForRun(
+	runId: string,
+	issueId: string,
+	update: Partial<Omit<Issue, "id" | "created_at">>,
+	workDir = process.cwd(),
+): Issue | null {
+	const issues = loadIssuesForRun(runId, workDir);
+	const index = issues.findIndex((i) => i.id === issueId);
+
+	if (index === -1) {
+		return null;
+	}
+
+	const updated: Issue = {
+		...issues[index],
+		...update,
+		updated_at: new Date().toISOString(),
+	};
+
+	const newIssues = [...issues.slice(0, index), updated, ...issues.slice(index + 1)];
+	saveIssuesForRun(runId, newIssues, workDir);
 	return updated;
 }
 
@@ -496,4 +655,77 @@ export function buildFilterOptionsFromRuntime(
 		severityFilter: options.severityFilter,
 		statusFilter,
 	};
+}
+
+// ============================================================================
+// CROSS-PROCESS SAFE FUNCTIONS (using proper-lockfile)
+// ============================================================================
+
+/**
+ * Update an issue with cross-process file locking for concurrent safety.
+ *
+ * This function uses proper-lockfile to ensure atomic read-modify-write
+ * operations even when multiple milhouse processes access the same file.
+ * Use this in scenarios where multiple processes might update issues
+ * simultaneously (e.g., during parallel exec phase).
+ *
+ * @param runId - The run ID containing the issue
+ * @param issueId - The ID of the issue to update
+ * @param update - Partial issue data to update
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The updated issue or null if not found
+ *
+ * @example
+ * ```typescript
+ * const updated = await updateIssueForRunSafe(runId, issueId, {
+ *   status: 'CONFIRMED',
+ *   evidence: [...newEvidence],
+ * });
+ * ```
+ */
+export async function updateIssueForRunSafe(
+	runId: string,
+	issueId: string,
+	update: Partial<Omit<Issue, "id" | "created_at">>,
+	workDir = process.cwd(),
+): Promise<Issue | null> {
+	const issuesPath = getIssuesPathForRun(runId, workDir);
+
+	return withFileLock(issuesPath, () => {
+		return updateIssueForRun(runId, issueId, update, workDir);
+	});
+}
+
+/**
+ * Batch update multiple issues with cross-process file locking.
+ *
+ * This function acquires a single lock and performs all updates atomically,
+ * which is more efficient than calling updateIssueForRunSafe() multiple times.
+ * Use this when you need to update multiple issues in a single operation.
+ *
+ * @param runId - The run ID containing the issues
+ * @param updates - Array of issue updates with issueId and update data
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns Array of updated issues (null for issues not found)
+ *
+ * @example
+ * ```typescript
+ * const results = await batchUpdateIssuesForRunSafe(runId, [
+ *   { issueId: 'P-abc123', update: { status: 'CONFIRMED' } },
+ *   { issueId: 'P-def456', update: { status: 'FALSE' } },
+ * ]);
+ * ```
+ */
+export async function batchUpdateIssuesForRunSafe(
+	runId: string,
+	updates: Array<{ issueId: string; update: Partial<Omit<Issue, "id" | "created_at">> }>,
+	workDir = process.cwd(),
+): Promise<(Issue | null)[]> {
+	const issuesPath = getIssuesPathForRun(runId, workDir);
+
+	return withFileLock(issuesPath, () => {
+		return updates.map(({ issueId, update }) =>
+			updateIssueForRun(runId, issueId, update, workDir),
+		);
+	});
 }

@@ -4,20 +4,19 @@ import { getConfigService } from "../../services/config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName, AIResult } from "../../engines/types.ts";
 import { saveGraph } from "../../state/graph.ts";
-import { loadIssues } from "../../state/issues.ts";
+import { loadIssuesForRun } from "../../state/issues.ts";
 import { initializeDir } from "../../state/manager.ts";
 import {
-	requireActiveRun,
-	updateCurrentRunPhase,
-	updateCurrentRunStats,
+	updateRunPhaseInMeta,
+	updateRunStats,
 } from "../../state/runs.ts";
-import { loadTasks, saveTasks } from "../../state/tasks.ts";
+import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
 import {
-	getCurrentPlansDir,
 	syncLegacyPlansView,
-	writeExecutionPlan,
+	writeExecutionPlanForRun,
 } from "../../state/plan-store.ts";
 import { AGENT_ROLES, type GraphNode, type Issue, type Task } from "../../state/types.ts";
+import { selectOrRequireRun } from "./utils/run-selector.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -572,11 +571,13 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 	// Initialize milhouse directory if needed
 	initializeDir(workDir);
 
-	// Load current run state using new runs system
-	let currentRun;
-	try {
-		currentRun = requireActiveRun(workDir);
-	} catch (error) {
+	// Select or require a run using the run-selector utility
+	// This handles explicit runId from options, auto-selection, or prompting
+	const runSelection = await selectOrRequireRun(options.runId, workDir, {
+		requirePhase: ["plan", "consolidate"],
+	});
+
+	if (!runSelection) {
 		logError(
 			"No active run found. Run 'milhouse scan', 'milhouse validate', and 'milhouse plan' first.",
 		);
@@ -592,9 +593,12 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 		};
 	}
 
-	// Load tasks
-	let tasks = loadTasks(workDir);
-	const pendingTasks = tasks.filter((t) => t.status === "pending");
+	const { runId, runMeta } = runSelection;
+	let currentRun = runMeta;
+
+	// Load tasks for the selected run
+	let tasks = loadTasksForRun(runId, workDir);
+	const pendingTasks = tasks.filter((t: Task) => t.status === "pending");
 
 	if (pendingTasks.length === 0) {
 		logWarn("No pending tasks found. Run 'milhouse plan' first to generate tasks.");
@@ -609,11 +613,11 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 		};
 	}
 
-	// Load issues
-	const issues = loadIssues(workDir);
+	// Load issues for the selected run
+	const issues = loadIssuesForRun(runId, workDir);
 
-	// Update phase to consolidate using new runs system
-	currentRun = updateCurrentRunPhase("consolidate", workDir);
+	// Update phase to consolidate using run-aware function
+	currentRun = updateRunPhaseInMeta(runId, "consolidate", workDir) ?? currentRun;
 
 	// Check engine availability
 	const engine = await createEngine(options.aiEngine as AIEngineName);
@@ -722,14 +726,14 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 	tasks = assignParallelGroups(tasks);
 
 	// Perform topological sort
-	const sortedTasks = topologicalSort(tasks.filter((t) => t.status === "pending"));
+	const sortedTasks = topologicalSort(tasks.filter((t: Task) => t.status === "pending"));
 
 	// Calculate parallel groups
 	const parallelGroups = new Set(sortedTasks.map((t) => t.parallel_group)).size;
 
-	// Save updated tasks
-	const allTasks = [...tasks.filter((t) => t.status !== "pending"), ...sortedTasks];
-	saveTasks(allTasks, workDir);
+	// Save updated tasks for the selected run
+	const allTasks = [...tasks.filter((t: Task) => t.status !== "pending"), ...sortedTasks];
+	saveTasksForRun(runId, allTasks, workDir);
 
 	// Build and save dependency graph
 	const graph = buildDependencyGraph(sortedTasks);
@@ -742,16 +746,16 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 		duplicatesRemoved,
 		parallelGroups,
 	);
-	const executionPlanPath = writeExecutionPlan(workDir, markdown);
+	const executionPlanPath = writeExecutionPlanForRun(workDir, runId, markdown);
 	logDebug(`Wrote execution plan to ${executionPlanPath}`);
 
 	// Sync legacy plans view after writing
 	syncLegacyPlansView(workDir);
 	logDebug("Synced legacy plans view");
 
-	// Update run state using new runs system
-	currentRun = updateCurrentRunPhase("exec", workDir);
-	currentRun = updateCurrentRunStats({ tasks_total: sortedTasks.length }, workDir);
+	// Update run state using run-aware functions
+	currentRun = updateRunPhaseInMeta(runId, "exec", workDir) ?? currentRun;
+	currentRun = updateRunStats(runId, { tasks_total: sortedTasks.length }, workDir) ?? currentRun;
 
 	const duration = Date.now() - startTime;
 

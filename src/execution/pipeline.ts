@@ -272,7 +272,10 @@ async function executePhase(
 	phase: PipelinePhase,
 	options: RuntimeOptions,
 	workDir: string,
+	runId?: string,
 ): Promise<PipelinePhaseResult> {
+	// Pass runId to the phase via options if provided
+	const phaseOptions = runId ? { ...options, runId } : options;
 	const startTime = Date.now();
 
 	try {
@@ -286,7 +289,7 @@ async function executePhase(
 
 		switch (phase) {
 			case "scan": {
-				const scanResult = await runScan(options);
+				const scanResult = await runScan(phaseOptions);
 				result = {
 					success: scanResult.success,
 					inputTokens: scanResult.inputTokens,
@@ -299,7 +302,7 @@ async function executePhase(
 				break;
 			}
 			case "validate": {
-				const validateResult = await runValidate(options);
+				const validateResult = await runValidate(phaseOptions);
 				result = {
 					success: validateResult.success,
 					inputTokens: validateResult.inputTokens,
@@ -314,7 +317,7 @@ async function executePhase(
 				break;
 			}
 			case "plan": {
-				const planResult = await runPlan(options);
+				const planResult = await runPlan(phaseOptions);
 				result = {
 					success: planResult.success,
 					inputTokens: planResult.inputTokens,
@@ -327,7 +330,7 @@ async function executePhase(
 				break;
 			}
 			case "consolidate": {
-				const consolidateResult = await runConsolidate(options);
+				const consolidateResult = await runConsolidate(phaseOptions);
 				result = {
 					success: consolidateResult.success,
 					inputTokens: consolidateResult.inputTokens,
@@ -344,8 +347,8 @@ async function executePhase(
 				// Enable exec-by-issue by default in pipeline mode for optimal parallelization
 				// Each issue runs in its own worktree with all its tasks
 				const execOptions = {
-					...options,
-					execByIssue: options.execByIssue !== false, // Enable by default unless explicitly disabled
+					...phaseOptions,
+					execByIssue: phaseOptions.execByIssue !== false, // Enable by default unless explicitly disabled
 					parallel: true, // Always enable parallel in pipeline mode
 				};
 				const execResult: ExecResult = await runExec(execOptions);
@@ -361,7 +364,7 @@ async function executePhase(
 				break;
 			}
 			case "verify": {
-				const verifyResult: VerifyResult = await runVerify(options);
+				const verifyResult: VerifyResult = await runVerify(phaseOptions);
 				result = {
 					success: verifyResult.success,
 					inputTokens: verifyResult.inputTokens,
@@ -475,7 +478,7 @@ export async function runPipeline(
 		// Emit phase start event
 		bus.emit("pipeline:phase:start", { runId: pipelineRunId || eventRunId, phase });
 
-		const phaseResult = await executePhase(phase, options, workDir);
+		const phaseResult = await executePhase(phase, options, workDir, pipelineRunId || undefined);
 		pipelineResult = addPhaseResult(pipelineResult, phaseResult);
 
 		// Capture the run ID from scan phase to use for subsequent phases

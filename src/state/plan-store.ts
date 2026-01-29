@@ -342,6 +342,233 @@ export function readExecutionPlan(workDir: string): string | null {
 }
 
 // ============================================================================
+// RUN-AWARE PLAN FILE OPERATIONS
+// ============================================================================
+
+/**
+ * Get the plans directory for a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to get the plans directory for
+ * @returns Full path to the plans directory for the specified run
+ */
+function getPlansDirForRun(workDir: string, runId: string): string {
+	return join(getRunDir(runId, workDir), "plans");
+}
+
+/**
+ * Ensures the plans directory exists for a specific run.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID
+ */
+function ensurePlansDirExistsForRun(workDir: string, runId: string): void {
+	const plansDir = getPlansDirForRun(workDir, runId);
+	if (!existsSync(plansDir)) {
+		mkdirSync(plansDir, { recursive: true });
+		log.debug({ plansDir, runId }, "Created plans directory for run");
+	}
+}
+
+/**
+ * Writes a file to a specific run's plans directory.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to write to
+ * @param filename - Name of the file to write
+ * @param content - Content to write
+ * @returns Full path to the written file
+ * @throws StateWriteError if write fails
+ */
+function writePlanFileForRun(workDir: string, runId: string, filename: string, content: string): string {
+	ensurePlansDirExistsForRun(workDir, runId);
+	const plansDir = getPlansDirForRun(workDir, runId);
+	const filePath = join(plansDir, filename);
+
+	try {
+		writeFileSync(filePath, content, "utf-8");
+		log.debug({ filePath, filename, runId }, "Wrote plan file for run");
+		return filePath;
+	} catch (error) {
+		throw new StateWriteError(`Failed to write plan file: ${filename}`, {
+			filePath,
+			cause: error instanceof Error ? error : new Error(String(error)),
+		});
+	}
+}
+
+/**
+ * Reads a file from a specific run's plans directory.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to read from
+ * @param filename - Name of the file to read
+ * @returns File content or null if not found
+ */
+function readPlanFileForRun(workDir: string, runId: string, filename: string): string | null {
+	const plansDir = getPlansDirForRun(workDir, runId);
+	const filePath = join(plansDir, filename);
+
+	if (!existsSync(filePath)) {
+		log.debug({ filePath, filename, runId }, "Plan file not found for run");
+		return null;
+	}
+
+	try {
+		const content = readFileSync(filePath, "utf-8");
+		log.debug({ filePath, filename, runId }, "Read plan file for run");
+		return content;
+	} catch (error) {
+		log.warn({ filePath, filename, runId, error }, "Failed to read plan file for run");
+		return null;
+	}
+}
+
+/**
+ * Writes an issue WBS plan markdown file to a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to write to
+ * @param issueId - Issue identifier
+ * @param markdown - Markdown content
+ * @returns Full path to the written file
+ */
+export function writeIssueWbsPlanForRun(workDir: string, runId: string, issueId: string, markdown: string): string {
+	const filename = `plan_${issueId}.md`;
+	return writePlanFileForRun(workDir, runId, filename, markdown);
+}
+
+/**
+ * Reads an issue WBS plan markdown file from a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to read from
+ * @param issueId - Issue identifier
+ * @returns Markdown content or null if not found
+ */
+export function readIssueWbsPlanForRun(workDir: string, runId: string, issueId: string): string | null {
+	const filename = `plan_${issueId}.md`;
+	return readPlanFileForRun(workDir, runId, filename);
+}
+
+/**
+ * Writes an issue WBS JSON file to a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to write to
+ * @param issueId - Issue identifier
+ * @param json - JSON object to write
+ * @returns Full path to the written file
+ */
+export function writeIssueWbsJsonForRun(workDir: string, runId: string, issueId: string, json: object): string {
+	const filename = `wbs_${issueId}.json`;
+	const content = JSON.stringify(json, null, 2);
+	return writePlanFileForRun(workDir, runId, filename, content);
+}
+
+/**
+ * Reads an issue WBS JSON file from a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to read from
+ * @param issueId - Issue identifier
+ * @returns Parsed JSON object or null if not found
+ */
+export function readIssueWbsJsonForRun(workDir: string, runId: string, issueId: string): object | null {
+	const filename = `wbs_${issueId}.json`;
+	const content = readPlanFileForRun(workDir, runId, filename);
+	if (!content) {
+		return null;
+	}
+
+	try {
+		return JSON.parse(content);
+	} catch (error) {
+		log.warn({ filename, runId, error }, "Failed to parse WBS JSON for run");
+		return null;
+	}
+}
+
+/**
+ * Writes the problem brief markdown file to a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to write to
+ * @param markdown - Markdown content
+ * @returns Full path to the written file
+ */
+export function writeProblemBriefForRun(workDir: string, runId: string, markdown: string): string {
+	return writePlanFileForRun(workDir, runId, "problem_brief.md", markdown);
+}
+
+/**
+ * Reads the problem brief markdown file from a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to read from
+ * @returns Markdown content or null if not found
+ */
+export function readProblemBriefForRun(workDir: string, runId: string): string | null {
+	return readPlanFileForRun(workDir, runId, "problem_brief.md");
+}
+
+/**
+ * Writes the execution plan markdown file to a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to write to
+ * @param markdown - Markdown content
+ * @returns Full path to the written file
+ */
+export function writeExecutionPlanForRun(workDir: string, runId: string, markdown: string): string {
+	return writePlanFileForRun(workDir, runId, "execution_plan.md", markdown);
+}
+
+/**
+ * Reads the execution plan markdown file from a specific run.
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param workDir - Working directory
+ * @param runId - The run ID to read from
+ * @returns Markdown content or null if not found
+ */
+export function readExecutionPlanForRun(workDir: string, runId: string): string | null {
+	return readPlanFileForRun(workDir, runId, "execution_plan.md");
+}
+
+// ============================================================================
 // VIEW SYNCHRONIZATION
 // ============================================================================
 

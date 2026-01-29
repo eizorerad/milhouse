@@ -1,18 +1,16 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import pc from "picocolors";
 import type { RuntimeOptions } from "../../config/index.ts";
 import { getConfigService } from "../../services/config/ConfigService.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName, AIResult } from "../../engines/types.ts";
+import { saveIssuesForRun } from "../../state/issues.ts";
 import {
 	syncLegacyPlansView,
-	writeProblemBrief,
+	writeProblemBriefForRun,
 } from "../../state/plan-store.ts";
 import { initializeDir } from "../../state/manager.ts";
 import {
 	createRun,
-	getRunStateDir,
 	updateRunPhaseInMeta,
 	updateRunStats,
 } from "../../state/runs.ts";
@@ -460,14 +458,12 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 		savedIssues.push(issue);
 	}
 
-	// Save issues to the run's state directory (new runs system)
-	const runStateDir = getRunStateDir(runMeta.id, workDir);
-	const issuesPath = join(runStateDir, "issues.json");
-	writeFileSync(issuesPath, JSON.stringify(savedIssues, null, 2));
+	// Save issues to the run's state directory using run-aware function
+	saveIssuesForRun(runMeta.id, savedIssues, workDir);
 
 	// Generate Problem Brief using PlanStore (run-aware)
 	const problemBriefContent = generateProblemBrief(savedIssues, runMeta.id);
-	const problemBriefPath = writeProblemBrief(workDir, problemBriefContent);
+	const problemBriefPath = writeProblemBriefForRun(workDir, runMeta.id, problemBriefContent);
 	logDebug(`Problem Brief written to: ${problemBriefPath}`);
 
 	// Sync legacy plans view for backward compatibility

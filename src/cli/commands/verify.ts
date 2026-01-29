@@ -13,9 +13,10 @@ import {
 	initializeDir,
 	updateProgress,
 } from "../../state/manager.ts";
-import { requireActiveRun, updateCurrentRunPhase } from "../../state/runs.ts";
-import { loadTasks, saveTasks } from "../../state/tasks.ts";
+import { updateRunPhaseInMeta } from "../../state/runs.ts";
+import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
 import { AGENT_ROLES, type Evidence, type GateResult, type Task } from "../../state/types.ts";
+import { selectOrRequireRun } from "./utils/run-selector.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -210,7 +211,7 @@ Respond with JSON in this exact format:
 /**
  * Run the placeholder gate - check for TODO/mock/stub code
  */
-export function runPlaceholderGate(workDir: string): GateResult {
+export function runPlaceholderGate(runId: string, workDir: string): GateResult {
 	const issues: VerificationIssue[] = [];
 	const evidence: Evidence[] = [];
 
@@ -227,7 +228,7 @@ export function runPlaceholderGate(workDir: string): GateResult {
 		};
 	}
 
-	const tasks = loadTasks(workDir);
+	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
 	const filesToCheck = new Set<string>();
 
@@ -290,9 +291,9 @@ export function runPlaceholderGate(workDir: string): GateResult {
 /**
  * Run the diff hygiene gate - check for silent refactors
  */
-export function runDiffHygieneGate(workDir: string): GateResult {
+export function runDiffHygieneGate(runId: string, workDir: string): GateResult {
 	const evidence: Evidence[] = [];
-	const tasks = loadTasks(workDir);
+	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
 
 	const declaredFiles = new Set<string>();
@@ -341,9 +342,9 @@ export function runDiffHygieneGate(workDir: string): GateResult {
 /**
  * Run the evidence gate - verify claims have proof
  */
-export function runEvidenceGate(workDir: string): GateResult {
+export function runEvidenceGate(runId: string, workDir: string): GateResult {
 	const evidence: Evidence[] = [];
-	const tasks = loadTasks(workDir);
+	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
 	let missingEvidence = 0;
 
@@ -405,9 +406,9 @@ function executeCheckCommand(command: string, workDir: string): { success: boole
  * Run the DoD gate - verify all acceptance criteria by executing check_commands
  * This will automatically run check_commands and update verified status
  */
-export function runDoDGate(workDir: string): GateResult {
+export function runDoDGate(runId: string, workDir: string): GateResult {
 	const evidence: Evidence[] = [];
-	const tasks = loadTasks(workDir);
+	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
 
 	let totalCriteria = 0;
@@ -464,7 +465,7 @@ export function runDoDGate(workDir: string): GateResult {
 
 	// Save updated tasks with verified status if any were modified
 	if (tasksModified) {
-		saveTasks(tasks, workDir);
+		saveTasksForRun(runId, tasks, workDir);
 		logDebug(`Updated ${verifiedCriteria} verified criteria in tasks.json`);
 	}
 
@@ -522,12 +523,12 @@ export function runEnvConsistencyGate(workDir: string): GateResult {
  * because DoD gate executes check_commands and updates verified status,
  * while Evidence gate checks that verified status.
  */
-export function runAllGates(workDir: string): GateResult[] {
+export function runAllGates(runId: string, workDir: string): GateResult[] {
 	return [
-		runPlaceholderGate(workDir),
-		runDiffHygieneGate(workDir),
-		runDoDGate(workDir),          // Must run BEFORE Evidence gate (executes check_commands)
-		runEvidenceGate(workDir),     // Checks verified status (set by DoD gate)
+		runPlaceholderGate(runId, workDir),
+		runDiffHygieneGate(runId, workDir),
+		runDoDGate(runId, workDir),          // Must run BEFORE Evidence gate (executes check_commands)
+		runEvidenceGate(runId, workDir),     // Checks verified status (set by DoD gate)
 		runEnvConsistencyGate(workDir),
 	];
 }
@@ -587,10 +588,12 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 	setVerbose(options.verbose);
 	initializeDir(workDir);
 
-	let currentRun;
-	try {
-		currentRun = requireActiveRun(workDir);
-	} catch {
+	// Select or require a run - verify operates on existing runs in exec or verify phase
+	const runSelection = await selectOrRequireRun(options.runId, workDir, {
+		requirePhase: ["exec", "verify"],
+	});
+
+	if (!runSelection) {
 		logError("No active run found. Run the previous pipeline steps first.");
 		return {
 			success: false,
@@ -604,7 +607,10 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 		};
 	}
 
-	const tasks = loadTasks(workDir);
+	const { runId, runMeta: currentRunMeta } = runSelection;
+	let currentRun = currentRunMeta;
+
+	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
 	const failedTasks = tasks.filter((t) => t.status === "failed");
 
@@ -621,7 +627,10 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 		};
 	}
 
-	currentRun = updateCurrentRunPhase("verify", workDir);
+	const updatedRun = updateRunPhaseInMeta(runId, "verify", workDir);
+	if (updatedRun) {
+		currentRun = updatedRun;
+	}
 
 	const engine = await createEngine(options.aiEngine as AIEngineName);
 	let available = false;
@@ -655,7 +664,7 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 	const spinner = new ProgressSpinner("Running verification gates", ["TV"]);
 
 	spinner.updateStep("Running automated gates");
-	const gateResults = runAllGates(workDir);
+	const gateResults = runAllGates(runId, workDir);
 
 	const gatesPassed = gateResults.filter((g) => g.passed).length;
 	const gatesFailed = gateResults.filter((g) => !g.passed).length;
@@ -729,7 +738,10 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 	const overallSuccess = allGatesPassed && aiPassed && failedTasks.length === 0;
 
 	const finalPhase = overallSuccess ? "completed" : "failed";
-	currentRun = updateCurrentRunPhase(finalPhase, workDir);
+	const finalRun = updateRunPhaseInMeta(runId, finalPhase, workDir);
+	if (finalRun) {
+		currentRun = finalRun;
+	}
 
 	const duration = Date.now() - startTime;
 

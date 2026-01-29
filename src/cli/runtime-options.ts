@@ -122,6 +122,9 @@ export interface RuntimeOptions {
 	// Probe control
 	skipProbes?: boolean;
 
+	/** Explicit run ID to use instead of current_run */
+	runId?: string;
+
 	// Validation retry settings
 	/**
 	 * Maximum retry attempts for UNVALIDATED issues during validation

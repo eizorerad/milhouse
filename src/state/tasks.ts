@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { stateEvents } from "./events.ts";
-import { getStatePathForCurrentRun } from "./paths.ts";
-import { type Task, TaskSchema, type TaskStatus } from "./types.ts";
+import { withFileLock } from "./file-lock.ts";
+import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
+import { type Task, TaskSchema, type TaskStatus, STATE_FILES } from "./types.ts";
 
 /**
  * Get path to tasks state file
@@ -10,6 +11,18 @@ import { type Task, TaskSchema, type TaskStatus } from "./types.ts";
  */
 function getTasksPath(workDir = process.cwd()): string {
 	return getStatePathForCurrentRun("tasks", workDir);
+}
+
+/**
+ * Get path to tasks state file for a specific run
+ * This is the run-aware version that accepts an explicit runId parameter
+ *
+ * @param runId - The run ID to get the tasks path for
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns Full path to the tasks.json file for the specified run
+ */
+function getTasksPathForRun(runId: string, workDir = process.cwd()): string {
+	return join(getRunStateDir(runId, workDir), STATE_FILES.tasks);
 }
 
 /**
@@ -115,9 +128,29 @@ export function loadTasksFromPath(fullPath: string): Task[] {
 /**
  * Load all tasks from state file
  * Uses safeParse to handle invalid tasks gracefully instead of losing all data
+ *
+ * @deprecated Use loadTasksForRun() with explicit runId to avoid race conditions
+ * when multiple milhouse processes run in parallel. This function relies on
+ * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
 export function loadTasks(workDir = process.cwd()): Task[] {
 	const filePath = getTasksPath(workDir);
+	return loadTasksFromPath(filePath);
+}
+
+/**
+ * Load all tasks from state file for a specific run
+ * Uses safeParse to handle invalid tasks gracefully instead of losing all data
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param runId - The run ID to load tasks from
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns Array of valid tasks from the specified run
+ */
+export function loadTasksForRun(runId: string, workDir = process.cwd()): Task[] {
+	const filePath = getTasksPathForRun(runId, workDir);
 	return loadTasksFromPath(filePath);
 }
 
@@ -127,6 +160,10 @@ export function loadTasks(workDir = process.cwd()): Task[] {
  * Note: Warns if saving empty array when file has existing data.
  * This provides defense-in-depth for bulk operations but allows
  * intentional clearing (callers may want to reset tasks).
+ *
+ * @deprecated Use saveTasksForRun() with explicit runId to avoid race conditions
+ * when multiple milhouse processes run in parallel. This function relies on
+ * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
 export function saveTasks(tasks: Task[], workDir = process.cwd()): void {
 	const filePath = getTasksPath(workDir);
@@ -151,7 +188,65 @@ export function saveTasks(tasks: Task[], workDir = process.cwd()): void {
 }
 
 /**
+ * Load raw tasks from file for a specific run without schema validation
+ * Used for checking if file has data when loadTasksForRun returns empty
+ */
+function loadRawTasksForRun(runId: string, workDir = process.cwd()): unknown[] {
+	const path = getTasksPathForRun(runId, workDir);
+	if (!existsSync(path)) {
+		return [];
+	}
+	try {
+		const content = readFileSync(path, "utf-8");
+		const parsed = JSON.parse(content);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Save tasks array to state file for a specific run
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * Note: Warns if saving empty array when file has existing data.
+ * This provides defense-in-depth for bulk operations but allows
+ * intentional clearing (callers may want to reset tasks).
+ *
+ * @param runId - The run ID to save tasks to
+ * @param tasks - Array of tasks to save
+ * @param workDir - Working directory (defaults to process.cwd())
+ */
+export function saveTasksForRun(runId: string, tasks: Task[], workDir = process.cwd()): void {
+	const filePath = getTasksPathForRun(runId, workDir);
+	const dir = dirname(filePath);
+
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+
+	// Warn on suspicious empty write (but allow it - callers may intentionally clear)
+	if (tasks.length === 0 && existsSync(filePath)) {
+		const rawTasks = loadRawTasksForRun(runId, workDir);
+		if (rawTasks.length > 0) {
+			console.error(
+				`[WARN] saveTasksForRun: Saving empty array but file has ${rawTasks.length} raw entries`,
+			);
+			console.error("[WARN] This may indicate unintended data loss. Check callers.");
+		}
+	}
+
+	writeFileSync(filePath, JSON.stringify(tasks, null, 2));
+}
+
+/**
  * Create a new task
+ *
+ * @deprecated Use createTaskForRun() with explicit runId to avoid race conditions
+ * when multiple milhouse processes run in parallel. This function relies on
+ * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
 export function createTask(
 	task: Omit<Task, "id" | "created_at" | "updated_at">,
@@ -172,6 +267,36 @@ export function createTask(
 }
 
 /**
+ * Create a new task in a specific run
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * @param runId - The run ID to create the task in
+ * @param taskData - Task data without id and timestamps
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The created task with generated id and timestamps
+ */
+export function createTaskForRun(
+	runId: string,
+	taskData: Omit<Task, "id" | "created_at" | "updated_at">,
+	workDir = process.cwd(),
+): Task {
+	const tasks = loadTasksForRun(runId, workDir);
+	const now = new Date().toISOString();
+
+	const newTask: Task = {
+		...taskData,
+		id: generateTaskId(taskData.issue_id, tasks),
+		created_at: now,
+		updated_at: now,
+	};
+
+	saveTasksForRun(runId, [...tasks, newTask], workDir);
+	return newTask;
+}
+
+/**
  * Read a single task by ID
  */
 export function readTask(id: string, workDir = process.cwd()): Task | null {
@@ -184,6 +309,10 @@ export function readTask(id: string, workDir = process.cwd()): Task | null {
  *
  * IMPORTANT: This function includes safeguards to prevent data loss:
  * - If loadTasks returns empty but file has data, it won't overwrite
+ *
+ * @deprecated Use updateTaskForRun() with explicit runId to avoid race conditions
+ * when multiple milhouse processes run in parallel. This function relies on
+ * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
 export function updateTask(
 	id: string,
@@ -221,6 +350,61 @@ export function updateTask(
 
 	const newTasks = [...tasks.slice(0, index), updated, ...tasks.slice(index + 1)];
 	saveTasks(newTasks, workDir);
+	return updated;
+}
+
+/**
+ * Update an existing task in a specific run
+ *
+ * This is the run-aware version that accepts an explicit runId parameter,
+ * avoiding race conditions when multiple milhouse processes run in parallel.
+ *
+ * IMPORTANT: This function includes safeguards to prevent data loss:
+ * - If loadTasksForRun returns empty but file has data, it won't overwrite
+ *
+ * @param runId - The run ID containing the task
+ * @param taskId - The ID of the task to update
+ * @param update - Partial task data to update
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The updated task or null if not found
+ */
+export function updateTaskForRun(
+	runId: string,
+	taskId: string,
+	update: Partial<Omit<Task, "id" | "created_at">>,
+	workDir = process.cwd(),
+): Task | null {
+	const tasks = loadTasksForRun(runId, workDir);
+
+	// CRITICAL: Check if we got empty tasks but file actually has data
+	// This can happen if Zod parsing failed for all tasks
+	if (tasks.length === 0) {
+		const rawTasks = loadRawTasksForRun(runId, workDir);
+		if (rawTasks.length > 0) {
+			console.error(
+				`[ERROR] updateTaskForRun: loadTasksForRun returned empty but file has ${rawTasks.length} raw entries`,
+			);
+			console.error(
+				"[ERROR] This indicates schema validation failures. Aborting to prevent data loss.",
+			);
+			return null;
+		}
+	}
+
+	const index = tasks.findIndex((t) => t.id === taskId);
+
+	if (index === -1) {
+		return null;
+	}
+
+	const updated: Task = {
+		...tasks[index],
+		...update,
+		updated_at: new Date().toISOString(),
+	};
+
+	const newTasks = [...tasks.slice(0, index), updated, ...tasks.slice(index + 1)];
+	saveTasksForRun(runId, newTasks, workDir);
 	return updated;
 }
 
@@ -783,4 +967,43 @@ export async function updateTaskStatusWithLock(
 		lockPromise = null;
 		releaseLock?.();
 	}
+}
+
+// ============================================================================
+// CROSS-PROCESS SAFE FUNCTIONS (using proper-lockfile)
+// ============================================================================
+
+/**
+ * Update a task with cross-process file locking for concurrent safety.
+ *
+ * This function uses proper-lockfile to ensure atomic read-modify-write
+ * operations even when multiple milhouse processes access the same file.
+ * Use this in scenarios where multiple processes might update tasks
+ * simultaneously (e.g., during parallel exec phase with multiple terminals).
+ *
+ * @param runId - The run ID containing the task
+ * @param taskId - The ID of the task to update
+ * @param update - Partial task data to update
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The updated task or null if not found
+ *
+ * @example
+ * ```typescript
+ * const updated = await updateTaskForRunSafe(runId, taskId, {
+ *   status: 'done',
+ *   completed_at: new Date().toISOString(),
+ * });
+ * ```
+ */
+export async function updateTaskForRunSafe(
+	runId: string,
+	taskId: string,
+	update: Partial<Omit<Task, "id" | "created_at">>,
+	workDir = process.cwd(),
+): Promise<Task | null> {
+	const tasksPath = getTasksPathForRun(runId, workDir);
+
+	return withFileLock(tasksPath, () => {
+		return updateTaskForRun(runId, taskId, update, workDir);
+	});
 }
