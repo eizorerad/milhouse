@@ -295,4 +295,149 @@ services:
 			]);
 		});
 	});
+
+	describe("YAML anchors and aliases", () => {
+		test("should parse anchor definition and alias reference", () => {
+			const yaml = `
+version: '3.8'
+x-common-env: &common-env
+  LOG_LEVEL: info
+  DEBUG: 'false'
+
+services:
+  app:
+    image: node:18
+    environment:
+      <<: *common-env
+      NODE_ENV: production
+  worker:
+    image: node:18
+    environment:
+      <<: *common-env
+      WORKER_TYPE: background
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app?.environment).toEqual({
+				LOG_LEVEL: "info",
+				DEBUG: "false",
+				NODE_ENV: "production",
+			});
+			expect(result?.services?.worker?.environment).toEqual({
+				LOG_LEVEL: "info",
+				DEBUG: "false",
+				WORKER_TYPE: "background",
+			});
+		});
+
+		test("should parse merge key (<<:) for object merging", () => {
+			const yaml = `
+version: '3.8'
+x-base-service: &base-service
+  restart: always
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  api:
+    <<: *base-service
+    image: api:latest
+    ports:
+      - "3000:3000"
+  web:
+    <<: *base-service
+    image: web:latest
+    ports:
+      - "80:80"
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.api?.restart).toBe("always");
+			expect(result?.services?.api?.image).toBe("api:latest");
+			expect(result?.services?.api?.logging).toEqual({
+				driver: "json-file",
+				options: {
+					"max-size": "10m",
+					"max-file": "3",
+				},
+			});
+			expect(result?.services?.web?.restart).toBe("always");
+			expect(result?.services?.web?.image).toBe("web:latest");
+		});
+
+		test("should parse common DRY patterns with &common_env and <<: *base", () => {
+			const yaml = `
+version: '3.8'
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+
+x-deploy: &default-deploy
+  resources:
+    limits:
+      cpus: '0.5'
+      memory: 512M
+
+services:
+  service1:
+    image: service1:latest
+    logging: *default-logging
+    deploy: *default-deploy
+  service2:
+    image: service2:latest
+    logging: *default-logging
+    deploy: *default-deploy
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.service1?.logging).toEqual({
+				driver: "json-file",
+				options: {
+					"max-size": "10m",
+				},
+			});
+			expect(result?.services?.service1?.deploy).toEqual({
+				resources: {
+					limits: {
+						cpus: "0.5",
+						memory: "512M",
+					},
+				},
+			});
+			expect(result?.services?.service2?.logging).toEqual(
+				result?.services?.service1?.logging
+			);
+		});
+
+		test("should parse extension fields with x- prefix", () => {
+			const yaml = `
+version: '3.8'
+x-custom-labels: &custom-labels
+  app.kubernetes.io/name: myapp
+  app.kubernetes.io/version: "1.0"
+
+services:
+  app:
+    image: myapp:1.0
+    labels:
+      <<: *custom-labels
+      environment: production
+`;
+			const result = probe.parseYaml(yaml);
+
+			expect(result).not.toBeNull();
+			expect(result?.services?.app?.labels).toEqual({
+				"app.kubernetes.io/name": "myapp",
+				"app.kubernetes.io/version": "1.0",
+				environment: "production",
+			});
+		});
+	});
 });

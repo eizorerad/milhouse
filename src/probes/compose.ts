@@ -469,7 +469,8 @@ export class ComposeProbe extends BaseProbe<ComposeProbeOutput> {
 		}
 
 		try {
-			return YAML.parse(content) as RawComposeFile;
+			// Enable merge key support (<<:) which is commonly used in Docker Compose files
+			return YAML.parse(content, { merge: true }) as RawComposeFile;
 		} catch {
 			return null;
 		}
