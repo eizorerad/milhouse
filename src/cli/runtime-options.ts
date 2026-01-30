@@ -161,6 +161,29 @@ export interface RuntimeOptions {
 	 * @default false
 	 */
 	retryOnAnyFailure?: boolean;
+
+	// Tmux mode options (OpenCode only)
+	/**
+	 * Enable tmux mode for interactive observation (OpenCode only).
+	 * When enabled, creates tmux sessions with OpenCode TUI attached.
+	 * Only supported with --opencode engine.
+	 * @default false
+	 */
+	tmux?: boolean;
+
+	/**
+	 * Automatically attach to the tmux session after starting.
+	 * Requires --tmux flag.
+	 * @default false
+	 */
+	tmuxAutoAttach?: boolean;
+
+	/**
+	 * Automatically install missing dependencies (OpenCode, tmux)
+	 * when they are not found on the system.
+	 * @default true
+	 */
+	autoInstall?: boolean;
 }
 
 /**
@@ -220,4 +243,9 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 
 	// Retry policy defaults
 	retryOnAnyFailure: false,
+
+	// Tmux mode defaults (OpenCode only)
+	tmux: false,
+	tmuxAutoAttach: false,
+	autoInstall: true,
 };

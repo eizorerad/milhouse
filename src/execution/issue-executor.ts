@@ -24,6 +24,19 @@ import { MILHOUSE_DIR } from "../domain/config/directories.ts";
 import { getConfigService } from "../services/config/index.ts";
 import type { AIEngine } from "../engines/types.ts";
 import {
+	OpencodeServerExecutor,
+	PortManager,
+	displayAttachInstructions,
+	displayTmuxCompletionSummary,
+	displayTmuxModeHeader,
+	updateAgentStatus,
+	clearAgentStatuses,
+	getMessageOptionsForPhase,
+	type ServerInfo,
+	type AgentStatus,
+} from "../engines/opencode/index.ts";
+import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../engines/tmux/index.ts";
+import {
 	getMilhouseDir,
 	getCurrentPlansDir,
 	readIssueWbsPlan,
@@ -193,6 +206,23 @@ export interface IssueBasedExecutionOptions {
 	 * @default false
 	 */
 	retryOnAnyFailure?: boolean;
+	/**
+	 * Enable tmux mode for interactive observation (OpenCode only).
+	 * When enabled, creates tmux sessions with OpenCode TUI attached.
+	 * @default false
+	 */
+	tmuxMode?: boolean;
+	/**
+	 * Configuration for tmux mode.
+	 */
+	tmuxConfig?: {
+		/** Show attach command in output */
+		showAttachCommand?: boolean;
+		/** Automatically attach to tmux session (not recommended for parallel execution) */
+		autoAttach?: boolean;
+		/** Prefix for tmux session names */
+		sessionPrefix?: string;
+	};
 }
 
 // ============================================================================
@@ -920,6 +950,203 @@ async function mergeCompletedBranches(
 }
 
 // ============================================================================
+// Tmux Mode Types
+// ============================================================================
+
+/**
+ * Information about a running OpenCode server for tmux mode
+ */
+interface TmuxServerInfo {
+	/** Issue ID */
+	issueId: string;
+	/** Server port */
+	port: number;
+	/** Server URL */
+	url: string;
+	/** Tmux session name */
+	tmuxSession: string;
+	/** Attach command */
+	attachCommand: string;
+	/** OpenCode server executor */
+	executor: OpencodeServerExecutor;
+}
+
+// ============================================================================
+// Tmux Mode Functions
+// ============================================================================
+
+/**
+ * Convert TmuxServerInfo to ServerInfo for UI display
+ */
+function toServerInfo(server: TmuxServerInfo, status: ServerInfo["status"] = "running"): ServerInfo {
+	return {
+		issueId: server.issueId,
+		port: server.port,
+		sessionName: server.tmuxSession,
+		status,
+		url: server.url,
+	};
+}
+
+/**
+ * Display tmux mode instructions with server URLs and attach commands
+ * Uses the new UI components from engines/opencode/ui
+ */
+function displayTmuxModeInstructions(servers: TmuxServerInfo[]): void {
+	const serverInfos: ServerInfo[] = servers.map((s) => toServerInfo(s, "running"));
+	displayAttachInstructions(serverInfos);
+}
+
+/**
+ * Execute an issue using tmux mode with OpenCode server
+ *
+ * This function:
+ * 1. Starts an OpenCode server for the issue
+ * 2. Creates a tmux session with `opencode attach` command
+ * 3. Sends the prompt via the Server API
+ * 4. Waits for completion
+ * 5. Returns the result
+ */
+async function executeIssueTmuxMode(
+	issueGroup: IssueGroup,
+	worktreeDir: string,
+	prompt: string,
+	tmuxManager: TmuxSessionManager,
+	options: {
+		showAttachCommand?: boolean;
+		modelOverride?: string;
+	},
+): Promise<{
+	success: boolean;
+	inputTokens: number;
+	outputTokens: number;
+	serverInfo: TmuxServerInfo;
+	error?: string;
+}> {
+	const executor = new OpencodeServerExecutor({
+		autoInstall: true,
+		verbose: false,
+	});
+
+	let serverInfo: TmuxServerInfo | null = null;
+
+	try {
+		// Start the OpenCode server
+		const port = await executor.startServer(worktreeDir);
+		const url = `http://localhost:${port}`;
+
+		// Create the session FIRST via the API so we have the session ID
+		// This allows us to pass the session ID to the attach command
+		const session = await executor.createSession({
+			title: `Milhouse: ${issueGroup.issueId}`,
+		});
+
+		// Create tmux session with opencode attach, including the session ID
+		// The -s flag tells opencode attach to navigate directly to this session
+		const sessionName = tmuxManager.buildSessionName(issueGroup.issueId);
+		const attachCmd = `opencode attach ${url} -s ${session.id}`;
+
+		// Kill any existing session with the same name before creating a new one
+		// This handles retry scenarios where old sessions still exist
+		await tmuxManager.killSessionIfExists(issueGroup.issueId);
+
+		const tmuxResult = await tmuxManager.createSession({
+			name: issueGroup.issueId,
+			command: attachCmd,
+			workDir: worktreeDir,
+		});
+
+		if (!tmuxResult.success) {
+			logWarn(`Failed to create tmux session: ${tmuxResult.error}`);
+		}
+
+		serverInfo = {
+			issueId: issueGroup.issueId,
+			port,
+			url,
+			tmuxSession: sessionName,
+			attachCommand: tmuxManager.getAttachCommand(sessionName),
+			executor,
+		};
+
+		// Show attach instructions if requested
+		if (options.showAttachCommand) {
+			logInfo(`  Issue ${issueGroup.issueId}: ${url}`);
+			logInfo(`    Attach: opencode attach ${url} -s ${session.id}`);
+			logInfo(`    Tmux:   ${serverInfo.attachCommand}`);
+		}
+
+		// Send the prompt and wait for completion
+		// Use execution phase options with full tool access (EXECUTION_TOOLS)
+		// and autonomy system prompt to prevent questions/hangs
+		const response = await executor.sendMessage(
+			session.id,
+			prompt,
+			getMessageOptionsForPhase("exec", options.modelOverride)
+		);
+
+		// Calculate tokens from response
+		const inputTokens = response.info.inputTokens ?? 0;
+		const outputTokens = response.info.outputTokens ?? 0;
+
+		return {
+			success: true,
+			inputTokens,
+			outputTokens,
+			serverInfo,
+		};
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		return {
+			success: false,
+			inputTokens: 0,
+			outputTokens: 0,
+			serverInfo: serverInfo ?? {
+				issueId: issueGroup.issueId,
+				port: 0,
+				url: "",
+				tmuxSession: "",
+				attachCommand: "",
+				executor,
+			},
+			error: errorMessage,
+		};
+	}
+}
+
+/**
+ * Cleanup tmux mode resources (servers and sessions)
+ */
+async function cleanupTmuxResources(
+	servers: TmuxServerInfo[],
+	tmuxManager: TmuxSessionManager,
+	killSessions = false,
+): Promise<void> {
+	for (const server of servers) {
+		try {
+			// Stop the OpenCode server
+			await server.executor.stopServer();
+			logDebug(`Stopped OpenCode server for ${server.issueId}`);
+		} catch (error) {
+			logWarn(`Failed to stop server for ${server.issueId}: ${error}`);
+		}
+
+		if (killSessions) {
+			try {
+				// Kill the tmux session
+				await tmuxManager.killSession(server.issueId);
+				logDebug(`Killed tmux session for ${server.issueId}`);
+			} catch (error) {
+				logWarn(`Failed to kill tmux session for ${server.issueId}: ${error}`);
+			}
+		}
+	}
+
+	// Release all ports
+	PortManager.releaseAllPorts();
+}
+
+// ============================================================================
 // Main Execution Function
 // ============================================================================
 
@@ -949,6 +1176,63 @@ export async function runParallelByIssue(
 			totalInputTokens: 0,
 			totalOutputTokens: 0,
 		};
+	}
+
+	// ============================================================================
+	// TMUX MODE CHECK: Validate tmux mode requirements
+	// ============================================================================
+	let tmuxManager: TmuxSessionManager | null = null;
+	const tmuxServers: TmuxServerInfo[] = [];
+
+	if (options.tmuxMode) {
+		// Try to ensure tmux is installed (with auto-install if possible)
+		const tmuxResult = await ensureTmuxInstalled({ autoInstall: true, verbose: true });
+		
+		if (!tmuxResult.installed) {
+			// Installation failed or not possible (e.g., Windows)
+			logWarn("tmux is not available and could not be installed automatically.");
+			if (tmuxResult.error) {
+				logInfo(tmuxResult.error);
+			}
+			logInfo("Falling back to standard execution.");
+			logInfo("");
+			logInfo(getInstallationInstructions());
+			options.tmuxMode = false;
+		} else {
+			// tmux is available (either was already installed or just installed)
+			if (tmuxResult.installedNow) {
+				logSuccess(`tmux ${tmuxResult.version ?? "unknown"} was installed successfully via ${tmuxResult.method}`);
+			} else {
+				logDebug(`tmux ${tmuxResult.version ?? "unknown"} is already installed`);
+			}
+			
+			// Initialize tmux manager
+			tmuxManager = new TmuxSessionManager({
+				sessionPrefix: options.tmuxConfig?.sessionPrefix ?? "milhouse",
+				verbose: false,
+			});
+			logInfo("Tmux mode enabled - OpenCode servers will be started with TUI attachment");
+		}
+	}
+
+	// Setup graceful shutdown handler for tmux mode
+	const cleanupHandler = async () => {
+		if (tmuxServers.length > 0 && tmuxManager) {
+			logInfo("\nCleaning up tmux resources...");
+			await cleanupTmuxResources(tmuxServers, tmuxManager, true);
+		}
+	};
+
+	// Register signal handlers for graceful shutdown
+	if (options.tmuxMode) {
+		process.on("SIGINT", async () => {
+			await cleanupHandler();
+			process.exit(130);
+		});
+		process.on("SIGTERM", async () => {
+			await cleanupHandler();
+			process.exit(143);
+		});
 	}
 
 	const limit = pLimit(maxConcurrent);
@@ -982,6 +1266,18 @@ export async function runParallelByIssue(
 	logInfo(
 		`Starting parallel execution of ${issueGroups.length} issue(s) with ${maxConcurrent} concurrent agents`,
 	);
+
+	// ============================================================================
+	// TMUX MODE: Display attach instructions header before execution starts
+	// This shows users how to attach to the tmux sessions that will be created
+	// ============================================================================
+	if (options.tmuxMode && tmuxManager) {
+		// Display the tmux mode header with placeholder instructions
+		// Individual server info will be shown as each server starts
+		displayTmuxModeHeader();
+		logInfo("  Servers will be started for each issue. Attach commands will be shown below.");
+		console.log("");
+	}
 
 	// Execute each issue in parallel (up to maxConcurrent)
 	// NOTE: We do NOT merge inside this loop to prevent race conditions
@@ -1059,33 +1355,63 @@ export async function runParallelByIssue(
 
 				spinner.updateSlot(slotNum, `executing ${issueGroup.tasks.length} tasks`);
 
-				// Execute with retry using modern API
-				const engineOptions = modelOverride ? { modelOverride } : undefined;
-				const retryConfig: MilhouseRetryConfig = {
-					...DEFAULT_RETRY_CONFIG,
-					maxRetries,
-					baseDelayMs: retryDelay,
-					retryOnAnyFailure: options.retryOnAnyFailure,
-				};
-				const retryResult = await executeWithRetry(
-					async () => {
-						const res = await engine.execute(prompt, worktreeDir, engineOptions);
-						if (!res.success && res.error && isRetryableError(res.error)) {
-							throw new Error(res.error);
-						}
-						return res;
-					},
-					retryConfig,
-				);
+				// ============================================================================
+				// EXECUTION: Choose between tmux mode and standard mode
+				// ============================================================================
+				if (options.tmuxMode && tmuxManager) {
+					// TMUX MODE: Use OpenCode server with tmux session
+					logDebug(`Executing issue ${issueGroup.issueId} in tmux mode`);
 
-				// Handle retry result
-				if (!retryResult.success || !retryResult.value) {
-					throw retryResult.error ?? new Error("Execution failed after retries");
+					const tmuxResult = await executeIssueTmuxMode(
+						issueGroup,
+						worktreeDir,
+						prompt,
+						tmuxManager,
+						{
+							showAttachCommand: options.tmuxConfig?.showAttachCommand ?? true,
+							modelOverride,
+						},
+					);
+
+					// Track server for cleanup
+					tmuxServers.push(tmuxResult.serverInfo);
+
+					if (tmuxResult.success) {
+						issueInputTokens = tmuxResult.inputTokens;
+						issueOutputTokens = tmuxResult.outputTokens;
+					} else {
+						throw new Error(tmuxResult.error ?? "Tmux mode execution failed");
+					}
+				} else {
+					// STANDARD MODE: Use engine.execute directly
+					// Execute with retry using modern API
+					const engineOptions = modelOverride ? { modelOverride } : undefined;
+					const retryConfig: MilhouseRetryConfig = {
+						...DEFAULT_RETRY_CONFIG,
+						maxRetries,
+						baseDelayMs: retryDelay,
+						retryOnAnyFailure: options.retryOnAnyFailure,
+					};
+					const retryResult = await executeWithRetry(
+						async () => {
+							const res = await engine.execute(prompt, worktreeDir, engineOptions);
+							if (!res.success && res.error && isRetryableError(res.error)) {
+								throw new Error(res.error);
+							}
+							return res;
+						},
+						retryConfig,
+					);
+
+					// Handle retry result
+					if (!retryResult.success || !retryResult.value) {
+						throw retryResult.error ?? new Error("Execution failed after retries");
+					}
+
+					const result = retryResult.value;
+					issueInputTokens = result.inputTokens;
+					issueOutputTokens = result.outputTokens;
 				}
-
-				const result = retryResult.value;
-				issueInputTokens = result.inputTokens;
-				issueOutputTokens = result.outputTokens;
 
 				// Analyze task completion by checking git commits in the worktree
 				// This enables partial success detection - if some tasks were committed
@@ -1379,6 +1705,26 @@ export async function runParallelByIssue(
 	// ============================================================================
 	if (allBranchStatuses.length > 0) {
 		displayBranchStatusSummary(allBranchStatuses, baseBranch);
+	}
+
+	// ============================================================================
+	// TMUX CLEANUP: Stop servers and optionally kill sessions
+	// ============================================================================
+	if (options.tmuxMode && tmuxManager && tmuxServers.length > 0) {
+		// Update server statuses based on results
+		const serverInfos: ServerInfo[] = tmuxServers.map((server) => {
+			const result = results.find((r) => r.issueId === server.issueId);
+			const status: ServerInfo["status"] = result?.success ? "completed" : "error";
+			return toServerInfo(server, status);
+		});
+
+		// Display completion summary using the new UI component
+		displayTmuxCompletionSummary(serverInfos);
+
+		logInfo("Cleaning up tmux resources...");
+		// Don't kill sessions by default so users can still attach and inspect
+		await cleanupTmuxResources(tmuxServers, tmuxManager, false);
+		logInfo("OpenCode servers stopped. Tmux sessions preserved for inspection.");
 	}
 
 	return {

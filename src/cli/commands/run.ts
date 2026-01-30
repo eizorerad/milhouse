@@ -78,6 +78,9 @@ export async function runPipelineMode(
 	}
 
 	logInfo(`Starting Milhouse Pipeline with ${engine.name}`);
+	if (options.tmux) {
+		logInfo("Tmux mode enabled - OpenCode servers will be started with TUI attachment");
+	}
 
 	// Check current pipeline status
 	const status = getPipelineStatus(workDir);

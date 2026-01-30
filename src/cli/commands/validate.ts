@@ -2,6 +2,15 @@ import pc from "picocolors";
 import type { RuntimeOptions } from "../../config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngine, AIEngineName, AIResult } from "../../engines/types.ts";
+import {
+	OpencodeServerExecutor,
+	PortManager,
+	displayTmuxModeHeader,
+	displayAttachInstructions,
+	displayTmuxCompletionSummary,
+	type ServerInfo,
+} from "../../engines/opencode/index.ts";
+import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../../engines/tmux/index.ts";
 import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import {
 	syncLegacyPlansView,
@@ -52,6 +61,7 @@ import {
 import { generateValidatedProblemBrief } from "./utils/problem-brief.ts";
 import {
 	executeValidationRound,
+	executeValidationRoundTmux,
 	getIssuesToValidateForRound,
 	sleep,
 } from "./utils/validation-round.ts";
@@ -472,7 +482,7 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 			? Math.min(options.maxParallel, initialUnvalidatedIssues.length, DEFAULT_PARALLEL_VALIDATORS)
 			: Math.min(DEFAULT_PARALLEL_VALIDATORS, initialUnvalidatedIssues.length);
 
-	logInfo(`Starting DEEP validation with ${engine.name}`);
+	logInfo(`Starting DEEP validation with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(`Mode: ${pc.cyan(`${maxParallel} parallel agents`)} (each agent = 1 issue)`);
 	logInfo(`Role: ${AGENT_ROLES.IV}`);
 	logInfo(`Issues to validate: ${initialUnvalidatedIssues.length}`);
@@ -483,6 +493,49 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 	} else {
 		logInfo(`Retry: ${pc.gray(`disabled`)}`);
 	}
+
+	// ============================================================================
+	// TMUX MODE CHECK: Validate tmux mode requirements
+	// ============================================================================
+	let tmuxManager: TmuxSessionManager | null = null;
+	let tmuxEnabled = false;
+
+	if (options.tmux) {
+		// Check if using OpenCode engine (tmux mode only works with OpenCode)
+		if (options.aiEngine !== "opencode") {
+			logWarn("Tmux mode is only supported with --opencode engine. Falling back to standard execution.");
+		} else {
+			// Try to ensure tmux is installed (with auto-install if possible)
+			const tmuxResult = await ensureTmuxInstalled({ autoInstall: true, verbose: true });
+			
+			if (!tmuxResult.installed) {
+				// Installation failed or not possible (e.g., Windows)
+				logWarn("tmux is not available and could not be installed automatically.");
+				if (tmuxResult.error) {
+					logInfo(tmuxResult.error);
+				}
+				logInfo("Falling back to standard execution.");
+				logInfo("");
+				logInfo(getInstallationInstructions());
+			} else {
+				// tmux is available (either was already installed or just installed)
+				if (tmuxResult.installedNow) {
+					logSuccess(`tmux ${tmuxResult.version ?? "unknown"} was installed successfully via ${tmuxResult.method}`);
+				} else {
+					logDebug(`tmux ${tmuxResult.version ?? "unknown"} is already installed`);
+				}
+				
+				// Initialize tmux manager
+				tmuxManager = new TmuxSessionManager({
+					sessionPrefix: "milhouse",
+					verbose: options.verbose,
+				});
+				tmuxEnabled = true;
+				logInfo("Tmux mode enabled - OpenCode servers will be started with TUI attachment");
+			}
+		}
+	}
+
 	console.log("");
 
 	// Track cumulative results across all rounds
@@ -526,15 +579,30 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 		}
 		console.log("");
 
-		// Execute validation for this round
-		const roundResult = await executeValidationRound(
-			issuesToValidate,
-			workDir,
-			options,
-			currentRound,
-			maxParallel,
-			validateSingleIssueDeep,
-		);
+		// Execute validation for this round - choose between tmux and standard mode
+		let roundResult: ValidationRoundResult;
+		if (tmuxEnabled && tmuxManager) {
+			// TMUX MODE: Use OpenCode server with tmux sessions
+			roundResult = await executeValidationRoundTmux(
+				issuesToValidate,
+				workDir,
+				options,
+				currentRound,
+				maxParallel,
+				tmuxManager,
+				runId,
+			);
+		} else {
+			// STANDARD MODE: Use engine.execute directly
+			roundResult = await executeValidationRound(
+				issuesToValidate,
+				workDir,
+				options,
+				currentRound,
+				maxParallel,
+				validateSingleIssueDeep,
+			);
+		}
 
 		// Accumulate results
 		totalInputTokens += roundResult.inputTokens;

@@ -674,7 +674,7 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 		};
 	}
 
-	logInfo(`Starting verification with ${engine.name}`);
+	logInfo(`Starting verification with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(`Role: ${AGENT_ROLES.TV}`);
 	logInfo(`Completed tasks: ${completedTasks.length}`);
 	logInfo(`Failed tasks: ${failedTasks.length}`);

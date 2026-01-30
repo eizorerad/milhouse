@@ -3,6 +3,16 @@ import type { RuntimeOptions } from "../runtime-options.ts";
 import { getConfigService } from "../../services/config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName, AIResult } from "../../engines/types.ts";
+import {
+	OpencodeServerExecutor,
+	PortManager,
+	displayTmuxModeHeader,
+	displayAttachInstructions,
+	displayTmuxCompletionSummary,
+	getMessageOptionsForPhase,
+	type ServerInfo,
+} from "../../engines/opencode/index.ts";
+import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../../engines/tmux/index.ts";
 import { saveGraph } from "../../state/graph.ts";
 import { loadIssuesForRun } from "../../state/issues.ts";
 import { initializeDir } from "../../state/manager.ts";
@@ -643,13 +653,53 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 		};
 	}
 
-	logInfo(`Starting consolidation with ${engine.name}`);
+	logInfo(`Starting consolidation with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(`Role: ${AGENT_ROLES.CDM}`);
 	logInfo(`Tasks to consolidate: ${pendingTasks.length}`);
-	console.log("");
 
-	// Create progress spinner
-	const spinner = new ProgressSpinner("Consolidating tasks", ["CDM"]);
+	// ============================================================================
+	// TMUX MODE CHECK: Validate tmux mode requirements
+	// ============================================================================
+	let tmuxManager: TmuxSessionManager | null = null;
+	let tmuxEnabled = false;
+
+	if (options.tmux) {
+		// Check if using OpenCode engine (tmux mode only works with OpenCode)
+		if (options.aiEngine !== "opencode") {
+			logWarn("Tmux mode is only supported with --opencode engine. Falling back to standard execution.");
+		} else {
+			// Try to ensure tmux is installed (with auto-install if possible)
+			const tmuxResult = await ensureTmuxInstalled({ autoInstall: true, verbose: true });
+			
+			if (!tmuxResult.installed) {
+				// Installation failed or not possible (e.g., Windows)
+				logWarn("tmux is not available and could not be installed automatically.");
+				if (tmuxResult.error) {
+					logInfo(tmuxResult.error);
+				}
+				logInfo("Falling back to standard execution.");
+				logInfo("");
+				logInfo(getInstallationInstructions());
+			} else {
+				// tmux is available (either was already installed or just installed)
+				if (tmuxResult.installedNow) {
+					logSuccess(`tmux ${tmuxResult.version ?? "unknown"} was installed successfully via ${tmuxResult.method}`);
+				} else {
+					logDebug(`tmux ${tmuxResult.version ?? "unknown"} is already installed`);
+				}
+				
+				// Initialize tmux manager
+				tmuxManager = new TmuxSessionManager({
+					sessionPrefix: "milhouse",
+					verbose: options.verbose,
+				});
+				tmuxEnabled = true;
+				logInfo("Tmux mode enabled - OpenCode server will be started with TUI attachment");
+			}
+		}
+	}
+
+	console.log("");
 
 	// Track results
 	let totalInputTokens = 0;
@@ -660,58 +710,178 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 	const prompt = buildConsolidatorPrompt(pendingTasks, issues, workDir);
 	logDebug(`Consolidating ${pendingTasks.length} tasks from ${issues.length} issues`);
 
-	// Execute AI engine
-	let result: AIResult;
-	try {
-		if (engine.executeStreaming) {
-			result = await engine.executeStreaming(
-				prompt,
-				workDir,
-				(step) => {
-					spinner.updateStep(`CDM: ${step || "Analyzing"}`);
-				},
-				{ modelOverride: options.modelOverride },
-			);
-		} else {
-			spinner.updateStep("CDM: Executing");
-			result = await engine.execute(prompt, workDir, {
-				modelOverride: options.modelOverride,
+	// ============================================================================
+	// EXECUTION: Choose between tmux mode and standard mode
+	// ============================================================================
+	let consolidation: ParsedConsolidation | null = null;
+
+	if (tmuxEnabled && tmuxManager) {
+		// TMUX MODE: Use OpenCode server with tmux session
+		logDebug("Executing consolidation in tmux mode");
+
+		const executor = new OpencodeServerExecutor({
+			autoInstall: options.autoInstall ?? true,
+			verbose: options.verbose,
+		});
+
+		let serverInfo: ServerInfo | null = null;
+		let sessionId: string | null = null;
+
+		try {
+			// Start the OpenCode server
+			logInfo("Starting OpenCode server for consolidation...");
+			const port = await executor.startServer(workDir);
+			const url = `http://localhost:${port}`;
+
+			// Create the session via the API
+			const session = await executor.createSession({
+				title: "Milhouse Consolidate: CDM",
 			});
+			sessionId = session.id;
+
+			// Create tmux session with opencode attach
+			const tmuxSessionBaseName = "consolidate-cdm";
+			const sessionName = tmuxManager.buildSessionName(tmuxSessionBaseName);
+			const attachCmd = `opencode attach ${url} -s ${session.id}`;
+
+			// Kill existing session if it exists (handles retry case)
+			await tmuxManager.killSessionIfExists(tmuxSessionBaseName);
+
+			const tmuxResult = await tmuxManager.createSession({
+				name: tmuxSessionBaseName,
+				command: attachCmd,
+				workDir,
+			});
+
+			if (!tmuxResult.success) {
+				logWarn(`Failed to create tmux session: ${tmuxResult.error}`);
+			}
+
+			serverInfo = {
+				issueId: "consolidate",
+				port,
+				sessionName,
+				status: "running",
+				url,
+			};
+
+			// Display tmux mode header and attach instructions
+			displayTmuxModeHeader();
+			displayAttachInstructions([serverInfo]);
+			console.log("");
+
+			// Send the prompt and wait for completion
+			// Use autonomy config to prevent questions and restrict to read-only tools
+			logDebug("CDM agent consolidating tasks via OpenCode server");
+			const response = await executor.sendMessage(
+				sessionId,
+				prompt,
+				getMessageOptionsForPhase("consolidate", options.modelOverride)
+			);
+
+			// Calculate tokens from response
+			totalInputTokens = response.info.inputTokens ?? 0;
+			totalOutputTokens = response.info.outputTokens ?? 0;
+
+			// Extract text from response parts
+			const responseText = response.parts
+				.filter((p) => p.type === "text")
+				.map((p) => (p as { type: "text"; text: string }).text)
+				.join("");
+
+			// Parse consolidation response
+			consolidation = parseConsolidationResponse(responseText);
+
+			// Display completion summary
+			const completedServerInfo: ServerInfo = {
+				...serverInfo,
+				status: "completed",
+			};
+			displayTmuxCompletionSummary([completedServerInfo]);
+
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			logError(`Consolidation failed: ${errorMsg}`);
+			return {
+				success: false,
+				tasksConsolidated: 0,
+				parallelGroups: 0,
+				duplicatesRemoved: 0,
+				inputTokens: totalInputTokens,
+				outputTokens: totalOutputTokens,
+				executionPlanPath: "",
+				error: errorMsg,
+			};
+		} finally {
+			// Cleanup: Stop server but keep tmux session for inspection
+			logInfo("Stopping OpenCode server (tmux session preserved for inspection)");
+			try {
+				await executor.stopServer();
+			} catch {
+				// Ignore cleanup errors
+			}
+			PortManager.releaseAllPorts();
 		}
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : String(error);
-		spinner.fail(`Consolidation failed: ${errorMsg}`);
-		return {
-			success: false,
-			tasksConsolidated: 0,
-			parallelGroups: 0,
-			duplicatesRemoved: 0,
-			inputTokens: 0,
-			outputTokens: 0,
-			executionPlanPath: "",
-			error: errorMsg,
-		};
+	} else {
+		// STANDARD MODE: Use engine.execute directly
+		// Create progress spinner
+		const spinner = new ProgressSpinner("Consolidating tasks", ["CDM"]);
+
+		// Execute AI engine
+		let result: AIResult;
+		try {
+			if (engine.executeStreaming) {
+				result = await engine.executeStreaming(
+					prompt,
+					workDir,
+					(step) => {
+						spinner.updateStep(`CDM: ${step || "Analyzing"}`);
+					},
+					{ modelOverride: options.modelOverride },
+				);
+			} else {
+				spinner.updateStep("CDM: Executing");
+				result = await engine.execute(prompt, workDir, {
+					modelOverride: options.modelOverride,
+				});
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			spinner.fail(`Consolidation failed: ${errorMsg}`);
+			return {
+				success: false,
+				tasksConsolidated: 0,
+				parallelGroups: 0,
+				duplicatesRemoved: 0,
+				inputTokens: 0,
+				outputTokens: 0,
+				executionPlanPath: "",
+				error: errorMsg,
+			};
+		}
+
+		totalInputTokens = result.inputTokens;
+		totalOutputTokens = result.outputTokens;
+
+		if (!result.success) {
+			spinner.fail(`Consolidation failed: ${result.error || "Unknown error"}`);
+			return {
+				success: false,
+				tasksConsolidated: 0,
+				parallelGroups: 0,
+				duplicatesRemoved: 0,
+				inputTokens: totalInputTokens,
+				outputTokens: totalOutputTokens,
+				executionPlanPath: "",
+				error: result.error || "Unknown error",
+			};
+		}
+
+		// Parse consolidation response
+		consolidation = parseConsolidationResponse(result.response);
+
+		spinner.success(`Consolidation complete ${formatTokens(totalInputTokens, totalOutputTokens)}`);
 	}
-
-	totalInputTokens = result.inputTokens;
-	totalOutputTokens = result.outputTokens;
-
-	if (!result.success) {
-		spinner.fail(`Consolidation failed: ${result.error || "Unknown error"}`);
-		return {
-			success: false,
-			tasksConsolidated: 0,
-			parallelGroups: 0,
-			duplicatesRemoved: 0,
-			inputTokens: totalInputTokens,
-			outputTokens: totalOutputTokens,
-			executionPlanPath: "",
-			error: result.error || "Unknown error",
-		};
-	}
-
-	// Parse consolidation response
-	const consolidation = parseConsolidationResponse(result.response);
 
 	if (consolidation) {
 		// Apply consolidation changes
@@ -758,8 +928,6 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 	currentRun = updateRunStats(runId, { tasks_total: sortedTasks.length }, workDir) ?? currentRun;
 
 	const duration = Date.now() - startTime;
-
-	spinner.success(`Consolidation complete ${formatTokens(totalInputTokens, totalOutputTokens)}`);
 
 	// Summary
 	console.log("");
