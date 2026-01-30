@@ -1,22 +1,17 @@
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import pc from "picocolors";
 import type { RuntimeOptions } from "../../config/index.ts";
-import { getConfigService } from "../../services/config/ConfigService.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName, AIResult } from "../../engines/types.ts";
 import { validateCheckCommand } from "../../gates/dod.ts";
+import { getConfigService } from "../../services/config/ConfigService.ts";
 import { loadExecutions } from "../../state/executions.ts";
-import {
-	getMilhouseDir,
-	initializeDir,
-	updateProgress,
-} from "../../state/manager.ts";
-import { updateRunPhaseInMeta } from "../../state/runs.ts";
+import { getMilhouseDir, initializeDir, updateProgress } from "../../state/manager.ts";
+import { getRunDir, updateRunPhaseInMeta } from "../../state/runs.ts";
 import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
 import { AGENT_ROLES, type Evidence, type GateResult, type Task } from "../../state/types.ts";
-import { selectOrRequireRun } from "./utils/run-selector.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -29,6 +24,12 @@ import {
 } from "../../ui/logger.ts";
 import { ProgressSpinner } from "../../ui/spinners.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import { selectOrRequireRun } from "./utils/run-selector.ts";
+import {
+	generateVerificationMarkdownReport,
+	saveVerificationReport,
+} from "./utils/verification-report.ts";
+import type { VerificationReport } from "./utils/verification-types.ts";
 
 /**
  * Result of verification
@@ -126,7 +127,7 @@ Your job is to ensure all changes are legitimate, complete, and meet quality sta
 
 	const configService = getConfigService(workDir);
 	const config = configService.getConfig();
-	
+
 	// Build project context from config
 	if (config) {
 		const contextParts: string[] = [];
@@ -134,7 +135,7 @@ Your job is to ensure all changes are legitimate, complete, and meet quality sta
 		if (config.project.language) contextParts.push(`Language: ${config.project.language}`);
 		if (config.project.framework) contextParts.push(`Framework: ${config.project.framework}`);
 		if (config.project.description) contextParts.push(`Description: ${config.project.description}`);
-		
+
 		if (contextParts.length > 0) {
 			parts.push(`## Project Context
 ${contextParts.join("\n")}`);
@@ -405,7 +406,7 @@ function executeCheckCommand(
 	}
 
 	try {
-			execSync(command, {
+		execSync(command, {
 			cwd: workDir,
 			stdio: "pipe",
 			timeout: 30000, // 30 second timeout per command
@@ -420,7 +421,11 @@ function executeCheckCommand(
  * Run the DoD gate - verify all acceptance criteria by executing check_commands
  * This will automatically run check_commands and update verified status
  */
-export function runDoDGate(runId: string, workDir: string, options?: { unsafeDoDChecks?: boolean }): GateResult {
+export function runDoDGate(
+	runId: string,
+	workDir: string,
+	options?: { unsafeDoDChecks?: boolean },
+): GateResult {
 	const evidence: Evidence[] = [];
 	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
@@ -541,8 +546,8 @@ export function runAllGates(runId: string, workDir: string): GateResult[] {
 	return [
 		runPlaceholderGate(runId, workDir),
 		runDiffHygieneGate(runId, workDir),
-		runDoDGate(runId, workDir),          // Must run BEFORE Evidence gate (executes check_commands)
-		runEvidenceGate(runId, workDir),     // Checks verified status (set by DoD gate)
+		runDoDGate(runId, workDir), // Must run BEFORE Evidence gate (executes check_commands)
+		runEvidenceGate(runId, workDir), // Checks verified status (set by DoD gate)
 		runEnvConsistencyGate(workDir),
 	];
 }
@@ -622,7 +627,7 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 	}
 
 	const { runId, runMeta: currentRunMeta } = runSelection;
-	let currentRun = currentRunMeta;
+	let _currentRun = currentRunMeta;
 
 	const tasks = loadTasksForRun(runId, workDir);
 	const completedTasks = tasks.filter((t) => t.status === "done");
@@ -643,7 +648,7 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 
 	const updatedRun = updateRunPhaseInMeta(runId, "verify", workDir);
 	if (updatedRun) {
-		currentRun = updatedRun;
+		_currentRun = updatedRun;
 	}
 
 	const engine = await createEngine(options.aiEngine as AIEngineName);
@@ -761,7 +766,7 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 	const finalPhase = overallSuccess ? "completed" : "failed";
 	const finalRun = updateRunPhaseInMeta(runId, finalPhase, workDir);
 	if (finalRun) {
-		currentRun = finalRun;
+		_currentRun = finalRun;
 	}
 
 	const duration = Date.now() - startTime;
@@ -828,6 +833,67 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 		`Verification: ${gatesPassed}/${gateResults.length} gates passed, ${issues.length} issues`,
 		workDir,
 	);
+
+	// Build and save verification report
+	const verificationReport: VerificationReport = {
+		run_id: runId,
+		created_at: new Date().toISOString(),
+		duration_ms: duration,
+		overall_success: overallSuccess,
+		gates: {
+			total: gateResults.length,
+			passed: gatesPassed,
+			failed: gatesFailed,
+			results: gateResults.map((g) => ({
+				gate: g.gate,
+				passed: g.passed,
+				message: g.message,
+				evidence: g.evidence,
+			})),
+		},
+		issues: issues.map((i) => ({
+			gate: i.gate,
+			severity: i.severity,
+			file: i.file,
+			line: i.line,
+			message: i.message,
+			evidence: i.evidence,
+		})),
+		ai_verification: aiVerification
+			? {
+					overall_pass: aiVerification.overall_pass,
+					recommendations: aiVerification.recommendations,
+					regressions_found: aiVerification.regressions_found,
+					summary: aiVerification.summary,
+				}
+			: undefined,
+		tokens: {
+			input: totalInputTokens,
+			output: totalOutputTokens,
+		},
+		tasks: {
+			completed: completedTasks.length,
+			failed: failedTasks.length,
+			total: tasks.length,
+		},
+	};
+
+	// Save JSON report
+	const jsonReportPath = saveVerificationReport(verificationReport, workDir, runId);
+	logDebug(`Saved verification JSON report: ${jsonReportPath}`);
+
+	// Generate and save markdown report
+	const markdownReport = generateVerificationMarkdownReport(verificationReport);
+	const runDir = getRunDir(runId, workDir);
+	const markdownReportPath = join(runDir, "verification-report.md");
+	writeFileSync(markdownReportPath, markdownReport);
+	logDebug(`Saved verification markdown report: ${markdownReportPath}`);
+
+	// Display report paths
+	console.log("");
+	logInfo("Reports saved:");
+	console.log(`  JSON:     ${pc.dim(jsonReportPath)}`);
+	console.log(`  Markdown: ${pc.dim(markdownReportPath)}`);
 
 	return {
 		success: overallSuccess,

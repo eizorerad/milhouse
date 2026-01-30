@@ -48,3 +48,13 @@ export {
 	getIssuesToValidateForRound,
 	sleep,
 } from "./validation-round.ts";
+
+// Verification utilities
+// Note: Not re-exporting verification-types.ts to avoid potential conflicts
+// Import directly from verification-types.ts if needed
+export {
+	generateVerificationMarkdownReport,
+	getVerificationReportsDir,
+	saveVerificationReport,
+	updateVerificationIndex,
+} from "./verification-report.ts";
