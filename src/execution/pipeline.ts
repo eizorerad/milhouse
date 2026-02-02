@@ -472,6 +472,7 @@ export async function runPipeline(
 		console.log("");
 		console.log("═".repeat(60));
 		logInfo(`Phase: ${pc.cyan(phase.toUpperCase())}`);
+		logInfo(`Engine: ${pc.cyan(options.aiEngine)}`);
 		console.log("═".repeat(60));
 		console.log("");
 

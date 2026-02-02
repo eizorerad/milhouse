@@ -3,6 +3,16 @@ import type { RuntimeOptions } from "../../config/index.ts";
 import { getConfigService } from "../../services/config/ConfigService.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName, AIResult } from "../../engines/types.ts";
+import {
+	OpencodeServerExecutor,
+	PortManager,
+	displayTmuxModeHeader,
+	displayAttachInstructions,
+	displayTmuxCompletionSummary,
+	getMessageOptionsForPhase,
+	type ServerInfo,
+} from "../../engines/opencode/index.ts";
+import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../../engines/tmux/index.ts";
 import { saveIssuesForRun } from "../../state/issues.ts";
 import {
 	syncLegacyPlansView,
@@ -356,11 +366,55 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 		};
 	}
 
-	logInfo(`Starting scan with ${engine.name}`);
+	logInfo(`Starting scan with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(`Role: ${AGENT_ROLES.LI}`);
 	if (options.scanFocus) {
 		logInfo(`Focus: ${options.scanFocus}`);
 	}
+
+	// ============================================================================
+	// TMUX MODE CHECK: Validate tmux mode requirements
+	// ============================================================================
+	let tmuxManager: TmuxSessionManager | null = null;
+	let tmuxEnabled = false;
+	let opencodeExecutor: OpencodeServerExecutor | null = null;
+
+	if (options.tmux) {
+		// Check if using OpenCode engine (tmux mode only works with OpenCode)
+		if (options.aiEngine !== "opencode") {
+			logWarn("Tmux mode is only supported with --opencode engine. Falling back to standard execution.");
+		} else {
+			// Try to ensure tmux is installed (with auto-install if possible)
+			const tmuxResult = await ensureTmuxInstalled({ autoInstall: true, verbose: true });
+			
+			if (!tmuxResult.installed) {
+				// Installation failed or not possible (e.g., Windows)
+				logWarn("tmux is not available and could not be installed automatically.");
+				if (tmuxResult.error) {
+					logInfo(tmuxResult.error);
+				}
+				logInfo("Falling back to standard execution.");
+				logInfo("");
+				logInfo(getInstallationInstructions());
+			} else {
+				// tmux is available (either was already installed or just installed)
+				if (tmuxResult.installedNow) {
+					logSuccess(`tmux ${tmuxResult.version ?? "unknown"} was installed successfully via ${tmuxResult.method}`);
+				} else {
+					logDebug(`tmux ${tmuxResult.version ?? "unknown"} is already installed`);
+				}
+				
+				// Initialize tmux manager
+				tmuxManager = new TmuxSessionManager({
+					sessionPrefix: "milhouse",
+					verbose: options.verbose,
+				});
+				tmuxEnabled = true;
+				logInfo("Tmux mode enabled - OpenCode server will be started with TUI attachment");
+			}
+		}
+	}
+
 	console.log("");
 
 	// Build the Lead Investigator prompt
@@ -373,30 +427,133 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 	// Execute the scan
 	let result: AIResult;
 	try {
-		if (engine.executeStreaming) {
-			result = await engine.executeStreaming(
-				prompt,
-				workDir,
-				(step) => {
-					// Handle both DetailedStep and string (legacy fallback)
-					if (step) {
-						spinner.updateStep(step);
-					} else {
-						spinner.updateStep("Analyzing");
-					}
-				},
-				{ modelOverride: options.modelOverride },
-			);
-		} else {
-			spinner.updateStep("Executing");
-			result = await engine.execute(prompt, workDir, {
-				modelOverride: options.modelOverride,
+		// ============================================================================
+		// EXECUTION: Choose between tmux mode and standard mode
+		// ============================================================================
+		if (tmuxEnabled && tmuxManager) {
+			// TMUX MODE: Use OpenCode server with tmux session
+			logDebug("Executing scan in tmux mode");
+			spinner.updateStep("Starting OpenCode server");
+
+			opencodeExecutor = new OpencodeServerExecutor({
+				autoInstall: options.autoInstall ?? true,
+				verbose: options.verbose,
 			});
+
+			// Start the OpenCode server
+			const port = await opencodeExecutor.startServer(workDir);
+			const url = `http://localhost:${port}`;
+
+			// Create the session FIRST via the API so we have the session ID
+			const session = await opencodeExecutor.createSession({
+				title: `Milhouse Scan: ${runMeta.id}`,
+			});
+
+			// Create tmux session with opencode attach, including the session ID
+			const tmuxSessionBaseName = `scan-${runMeta.id.slice(0, 8)}`;
+			const sessionName = tmuxManager.buildSessionName(tmuxSessionBaseName);
+			const attachCmd = `opencode attach ${url} -s ${session.id}`;
+
+			// Kill existing session if it exists (handles retry case)
+			await tmuxManager.killSessionIfExists(tmuxSessionBaseName);
+
+			const tmuxResult = await tmuxManager.createSession({
+				name: tmuxSessionBaseName,
+				command: attachCmd,
+				workDir,
+			});
+
+			if (!tmuxResult.success) {
+				logWarn(`Failed to create tmux session: ${tmuxResult.error}`);
+			}
+
+			// Display tmux mode header and attach instructions
+			displayTmuxModeHeader();
+			const serverInfo: ServerInfo = {
+				issueId: `scan-${runMeta.id.slice(0, 8)}`,
+				port,
+				sessionName,
+				status: "running",
+				url,
+			};
+			displayAttachInstructions([serverInfo]);
+			console.log("");
+
+			spinner.updateStep("Executing scan via OpenCode server");
+
+			// Send the prompt and wait for completion
+			// Use autonomy config to prevent questions and restrict to read-only tools
+			const response = await opencodeExecutor.sendMessage(
+				session.id,
+				prompt,
+				getMessageOptionsForPhase("scan", options.modelOverride)
+			);
+
+			// Calculate tokens from response
+			const inputTokens = response.info.inputTokens ?? 0;
+			const outputTokens = response.info.outputTokens ?? 0;
+
+			// Extract text from response parts
+			const responseText = response.parts
+				.filter((p) => p.type === "text")
+				.map((p) => (p as { type: "text"; text: string }).text)
+				.join("");
+
+			result = {
+				success: true,
+				response: responseText,
+				inputTokens,
+				outputTokens,
+			};
+
+			// Display completion summary
+			const completedServerInfo: ServerInfo = {
+				...serverInfo,
+				status: "completed",
+			};
+			displayTmuxCompletionSummary([completedServerInfo]);
+
+			// Cleanup: Stop the server but keep tmux session for inspection
+			logInfo("Stopping OpenCode server (tmux session preserved for inspection)");
+			await opencodeExecutor.stopServer();
+			PortManager.releaseAllPorts();
+		} else {
+			// STANDARD MODE: Use engine.execute directly
+			if (engine.executeStreaming) {
+				result = await engine.executeStreaming(
+					prompt,
+					workDir,
+					(step) => {
+						// Handle both DetailedStep and string (legacy fallback)
+						if (step) {
+							spinner.updateStep(step);
+						} else {
+							spinner.updateStep("Analyzing");
+						}
+					},
+					{ modelOverride: options.modelOverride },
+				);
+			} else {
+				spinner.updateStep("Executing");
+				result = await engine.execute(prompt, workDir, {
+					modelOverride: options.modelOverride,
+				});
+			}
 		}
 	} catch (error) {
 		spinner.error("Scan failed");
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		logError("Scan execution failed:", errorMsg);
+
+		// Cleanup tmux resources on error
+		if (opencodeExecutor) {
+			try {
+				await opencodeExecutor.stopServer();
+				PortManager.releaseAllPorts();
+			} catch {
+				// Ignore cleanup errors
+			}
+		}
 
 		// Update run state to failed
 		updateRunPhaseInMeta(runMeta.id, "failed", workDir);
@@ -414,6 +571,16 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 	if (!result.success) {
 		spinner.error("Scan failed");
 		logError("Scan failed:", result.error || "Unknown error");
+
+		// Cleanup tmux resources on error
+		if (opencodeExecutor) {
+			try {
+				await opencodeExecutor.stopServer();
+				PortManager.releaseAllPorts();
+			} catch {
+				// Ignore cleanup errors
+			}
+		}
 
 		// Update run state to failed
 		updateRunPhaseInMeta(runMeta.id, "failed", workDir);

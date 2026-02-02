@@ -394,6 +394,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 
 	if (pendingTasks.length === 0) {
 		logWarn("No pending or merge_error tasks found.");
+		// Advance to verify phase so pipeline can complete gracefully
+		updateRunPhaseInMeta(runId, "verify", workDir);
 		return {
 			success: true,
 			tasksExecuted: 0,
@@ -430,7 +432,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		};
 	}
 
-	logInfo(`Starting execution with ${engine.name}`);
+	logInfo(`Starting execution with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(`Role: ${AGENT_ROLES.EX}`);
 	logInfo(`Pending tasks: ${pendingTasks.length}`);
 	console.log("");
@@ -519,6 +521,9 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		// Each issue runs in its own worktree with all its tasks
 		logInfo("Using issue-based parallel execution (default mode)");
 		logInfo("Each issue's tasks will run in a dedicated worktree");
+		if (options.tmux) {
+			logInfo("Tmux mode enabled - OpenCode servers will be started with TUI attachment");
+		}
 
 		// Load issues for the selected run
 		let issues = loadIssuesForRun(runId, workDir);
@@ -610,6 +615,12 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 			skipMerge: options.skipMerge,
 			failFast: options.failFast,
 			retryOnAnyFailure: options.retryOnAnyFailure,
+			// Tmux mode options (OpenCode only)
+			tmuxMode: options.tmux,
+			tmuxConfig: {
+				autoAttach: options.tmuxAutoAttach,
+				showAttachCommand: true,
+			},
 			onIssueComplete: async (issueId, issueResult) => {
 				// Update task statuses in state (using locked version for concurrent-safe updates)
 				for (const taskId of issueResult.completedTasks) {

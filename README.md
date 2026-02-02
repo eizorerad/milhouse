@@ -121,6 +121,10 @@ milhouse --init
 # Run with severity filter (WARNING: automatic execution!)
 milhouse --run --min-severity HIGH --scope "frontend performance"
 ```
+```bash
+# or like this
+milhouse --run --opencode --tmux --model "amazon-bedrock/anthropic.claude-opus-4-5-20251101-v1:0" --scope "logic" --severity CRITICAL,HIGH
+```
 
 That's it. Milhouse scans → validates → plans → executes → verifies.
 

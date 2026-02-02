@@ -171,7 +171,21 @@ export function createProgram(): Command {
 			"--retry-on-any-failure",
 			"Retry any failure, not just retryable errors (safety net mode). When enabled, all failures are retried up to maxRetries.",
 		)
-		.option("-v, --verbose", "Verbose Milhouse output");
+		.option("-v, --verbose", "Verbose Milhouse output")
+		// Tmux mode options (OpenCode only)
+		.option(
+			"--tmux",
+			"Run agents in tmux windows for interactive observation. Only supported with --opencode engine. Starts OpenCode in server mode and creates tmux sessions for each issue, allowing real-time observation of agent execution.",
+		)
+		.option(
+			"--tmux-auto-attach",
+			"Automatically attach to the tmux session after starting. Requires --tmux flag.",
+		)
+		.option(
+			"--auto-install",
+			"Automatically install missing dependencies (OpenCode, tmux) when they are not found on the system.",
+		)
+		.option("--no-auto-install", "Disable automatic installation of dependencies");
 
 	return program;
 }
@@ -426,7 +440,25 @@ export function parseArgs(args: string[]): ParsedArgs {
 		retryDelayValidation: Number.parseInt(opts.retryDelayValidation, 10) || 2000,
 		unsafeDoDChecks: opts.unsafeDodChecks || false,
 		retryOnAnyFailure: opts.retryOnAnyFailure || false,
+		// Tmux mode options (OpenCode only)
+		tmux: opts.tmux || false,
+		tmuxAutoAttach: opts.tmuxAutoAttach || false,
+		autoInstall: opts.autoInstall !== false, // Default true, --no-auto-install sets to false
 	};
+
+	// Validate tmux mode options
+	if (options.tmux && aiEngine !== "opencode") {
+		console.error(
+			`Error: --tmux flag is only supported with --opencode engine.\n` +
+				`Other engines (claude, gemini, etc.) do not have a Server API with TUI attachment capability.`,
+		);
+		process.exit(1);
+	}
+
+	if (options.tmuxAutoAttach && !options.tmux) {
+		console.error(`Error: --tmux-auto-attach requires --tmux flag.`);
+		process.exit(1);
+	}
 
 	return {
 		options,

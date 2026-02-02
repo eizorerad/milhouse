@@ -1,10 +1,21 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import pLimit from "p-limit";
 import pc from "picocolors";
 import type { RuntimeOptions } from "../runtime-options.ts";
 import { getConfigService } from "../../services/config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngine, AIEngineName, AIResult } from "../../engines/types.ts";
+import {
+	OpencodeServerExecutor,
+	PortManager,
+	displayTmuxModeHeader,
+	displayAttachInstructions,
+	displayTmuxCompletionSummary,
+	getMessageOptionsForPhase,
+	type ServerInfo,
+} from "../../engines/opencode/index.ts";
+import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../../engines/tmux/index.ts";
 import type { InspectorProbeType } from "../../probes/index.ts";
 import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import { getMilhouseDir, initializeDir } from "../../state/manager.ts";
@@ -1007,6 +1018,8 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 
 	if (plannableIssues.length === 0) {
 		logWarn("No confirmed or partial issues found. Run 'milhouse validate' first.");
+		// Advance to verify phase so pipeline can complete gracefully
+		updateRunPhaseInMeta(runId, "verify", workDir);
 		return {
 			success: true,
 			issuesPlanned: 0,
@@ -1049,7 +1062,7 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 			? Math.min(options.maxParallel, plannableIssues.length, DEFAULT_PARALLEL_PLANNERS)
 			: Math.min(DEFAULT_PARALLEL_PLANNERS, plannableIssues.length);
 
-	logInfo(`Starting DEEP planning with ${engine.name}`);
+	logInfo(`Starting DEEP planning with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(
 		`Mode: ${pc.cyan(`${maxParallel} parallel agents`)} (each agent = 1 issue + validation report)`,
 	);
@@ -1062,13 +1075,50 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 		existsSync(join(reportsDir, `${i.id}.json`)),
 	);
 	logInfo(`Validation reports available: ${issuesWithReports.length}/${plannableIssues.length}`);
-	console.log("");
 
-	// Create progress spinner
-	const spinner = new ProgressSpinner(
-		"Deep planning in progress",
-		Array.from({ length: maxParallel }, (_, i) => `PL-${i + 1}`),
-	);
+	// ============================================================================
+	// TMUX MODE CHECK: Validate tmux mode requirements
+	// ============================================================================
+	let tmuxManager: TmuxSessionManager | null = null;
+	let tmuxEnabled = false;
+
+	if (options.tmux) {
+		// Check if using OpenCode engine (tmux mode only works with OpenCode)
+		if (options.aiEngine !== "opencode") {
+			logWarn("Tmux mode is only supported with --opencode engine. Falling back to standard execution.");
+		} else {
+			// Try to ensure tmux is installed (with auto-install if possible)
+			const tmuxResult = await ensureTmuxInstalled({ autoInstall: true, verbose: true });
+			
+			if (!tmuxResult.installed) {
+				// Installation failed or not possible (e.g., Windows)
+				logWarn("tmux is not available and could not be installed automatically.");
+				if (tmuxResult.error) {
+					logInfo(tmuxResult.error);
+				}
+				logInfo("Falling back to standard execution.");
+				logInfo("");
+				logInfo(getInstallationInstructions());
+			} else {
+				// tmux is available (either was already installed or just installed)
+				if (tmuxResult.installedNow) {
+					logSuccess(`tmux ${tmuxResult.version ?? "unknown"} was installed successfully via ${tmuxResult.method}`);
+				} else {
+					logDebug(`tmux ${tmuxResult.version ?? "unknown"} is already installed`);
+				}
+				
+				// Initialize tmux manager
+				tmuxManager = new TmuxSessionManager({
+					sessionPrefix: "milhouse",
+					verbose: options.verbose,
+				});
+				tmuxEnabled = true;
+				logInfo("Tmux mode enabled - OpenCode servers will be started with TUI attachment");
+			}
+		}
+	}
+
+	console.log("");
 
 	// Track results
 	let totalInputTokens = 0;
@@ -1078,88 +1128,311 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 	const planPaths: string[] = [];
 	const errors: string[] = [];
 
-	// Process issues in parallel batches
-	const batches: Issue[][] = [];
-	for (let i = 0; i < plannableIssues.length; i += maxParallel) {
-		batches.push(plannableIssues.slice(i, i + maxParallel));
-	}
+	// ============================================================================
+	// EXECUTION: Choose between tmux mode and standard mode
+	// ============================================================================
+	if (tmuxEnabled && tmuxManager) {
+		// TMUX MODE: Use OpenCode server with tmux sessions
+		logDebug("Executing planning in tmux mode");
 
-	let batchNum = 0;
-	for (const batch of batches) {
-		batchNum++;
-		logInfo(
-			`Batch ${batchNum}/${batches.length}: Planning ${batch.length} issue(s) in parallel...`,
+		// Track executors and contexts
+		interface AgentContext {
+			executor: OpencodeServerExecutor;
+			serverInfo: ServerInfo;
+			sessionId: string;
+		}
+		const agentContexts: AgentContext[] = [];
+
+		// Create progress spinner for tmux mode
+		const spinner = new ProgressSpinner(
+			"Deep planning in progress (tmux mode)",
+			Array.from({ length: maxParallel }, (_, i) => `PL-${i + 1}`),
 		);
 
-		// Create a map to track agent progress
-		const agentProgress = new Map<number, string>();
+		logInfo(`Starting ${maxParallel} OpenCode servers for planning...`);
 
-		const results = await Promise.all(
-			batch.map(async (issue, idx) => {
-				const agentNum = idx + 1;
-				// Create engine per agent to prevent prompt corruption when running concurrently
-				const agentEngine = await createEngine(options.aiEngine as AIEngineName);
-				return planSingleIssueDeep(issue, agentEngine, workDir, options, agentNum, (step) => {
-					agentProgress.set(agentNum, step);
-					const progressStr = Array.from(agentProgress.entries())
-						.map(([num, s]) => `PL-${num}: ${s.slice(0, 20)}`)
-						.join(" | ");
-					spinner.updateStep(progressStr);
+		try {
+			// Start servers and create tmux sessions for each agent slot
+			for (let i = 0; i < Math.min(maxParallel, plannableIssues.length); i++) {
+				const agentNum = i + 1;
+
+				// Update spinner to show server startup progress
+				spinner.updateStep(`Starting server ${agentNum}/${maxParallel}...`);
+
+				const executor = new OpencodeServerExecutor({
+					autoInstall: options.autoInstall ?? true,
+					verbose: options.verbose,
 				});
-			}),
-		);
 
-		// Process batch results
-		for (let i = 0; i < batch.length; i++) {
-			const issue = batch[i];
-			const result = results[i];
-			const agentNum = i + 1;
+				// Start the OpenCode server
+				const port = await executor.startServer(workDir);
+				const url = `http://localhost:${port}`;
 
-			totalInputTokens += result.inputTokens;
-			totalOutputTokens += result.outputTokens;
+				// Create the session via the API
+				const session = await executor.createSession({
+					title: `Milhouse Planner Agent #${agentNum}`,
+				});
 
-			if (result.error) {
-				errors.push(`PL-${agentNum} (${issue.id}): ${result.error}`);
-				console.log(`  ${pc.red("✗")} Agent #${agentNum}: ${issue.id} - ${pc.red(result.error)}`);
-				continue;
+				// Create tmux session with opencode attach
+				const tmuxSessionBaseName = `plan-PL${agentNum}`;
+				const sessionName = tmuxManager.buildSessionName(tmuxSessionBaseName);
+				const attachCmd = `opencode attach ${url} -s ${session.id}`;
+
+				// Kill existing session if it exists (handles retry case)
+				await tmuxManager.killSessionIfExists(tmuxSessionBaseName);
+
+				const tmuxResult = await tmuxManager.createSession({
+					name: tmuxSessionBaseName,
+					command: attachCmd,
+					workDir,
+				});
+
+				if (!tmuxResult.success) {
+					logWarn(`Failed to create tmux session for PL-${agentNum}: ${tmuxResult.error}`);
+				}
+
+				agentContexts.push({
+					executor,
+					serverInfo: {
+						issueId: `PL-${agentNum}`, // Agent ID, not issue ID
+						port,
+						sessionName,
+						status: "running",
+						url,
+					},
+					sessionId: session.id,
+				});
 			}
 
-			if (result.wbs) {
-				// Load validation report for markdown generation
+			// Display tmux mode header and attach instructions
+			displayTmuxModeHeader();
+			displayAttachInstructions(agentContexts.map((ctx) => ctx.serverInfo));
+			console.log("");
+
+			// Create a work queue - issues waiting to be processed
+			const workQueue = [...plannableIssues];
+			let workQueueIndex = 0;
+
+			// Helper to get next issue from queue
+			const getNextIssue = (): Issue | null => {
+				if (workQueueIndex >= workQueue.length) {
+					return null;
+				}
+				const issue = workQueue[workQueueIndex];
+				workQueueIndex++;
+				return issue;
+			};
+
+			// Helper to process a single issue with a specific agent
+			const processIssue = async (
+				issue: Issue,
+				context: typeof agentContexts[0],
+				agentNum: number,
+			): Promise<{ success: boolean; issue: Issue; wbs?: ParsedWBS }> => {
+				// Load validation report for this issue
 				const validationReport = loadValidationReport(issue.id, workDir);
 
-				const planPath = processPlanResult(runId, issue, result.wbs, validationReport, workDir);
-				planPaths.push(planPath);
-				issuesPlanned++;
-				tasksCreated += result.wbs.tasks.length;
+				// Build the planning prompt
+				const prompt = buildDeepPlannerPrompt(issue, validationReport, workDir, agentNum);
 
-				const durationSec = (result.durationMs / 1000).toFixed(1);
-				const hasReport = validationReport ? pc.green("✓ report") : pc.yellow("○ no report");
-				console.log(
-					`  ${pc.green("✓")} Agent #${agentNum}: ${issue.id} - ${pc.green(`${result.wbs.tasks.length} tasks`)} (${durationSec}s) [${hasReport}]`,
-				);
-			} else {
-				errors.push(`PL-${agentNum} (${issue.id}): Failed to parse WBS`);
-				console.log(
-					`  ${pc.red("✗")} Agent #${agentNum}: ${issue.id} - ${pc.red("Failed to parse WBS")}`,
-				);
+				logDebug(`Agent #${agentNum} planning issue ${issue.id} via OpenCode server`);
+
+				// Update spinner to show we're waiting for OpenCode response
+				spinner.updateStep(`PL-${agentNum}: Planning ${issue.id.slice(0, 12)}...`);
+
+				try {
+					// Send the prompt and wait for completion
+					// Use autonomy config to prevent questions and restrict to read-only tools
+					const response = await context.executor.sendMessage(
+						context.sessionId,
+						prompt,
+						getMessageOptionsForPhase("plan", options.modelOverride)
+					);
+
+					// Update spinner to show we're processing the response
+					spinner.updateStep(`PL-${agentNum}: Processing response...`);
+
+					// Calculate tokens from response
+					const respInputTokens = response.info.inputTokens ?? 0;
+					const respOutputTokens = response.info.outputTokens ?? 0;
+					totalInputTokens += respInputTokens;
+					totalOutputTokens += respOutputTokens;
+
+					// Extract text from response parts
+					const responseText = response.parts
+						.filter((p) => p.type === "text")
+						.map((p) => (p as { type: "text"; text: string }).text)
+						.join("");
+
+					// Parse the WBS
+					const wbs = parseWBSFromResponse(responseText, issue.id);
+
+					if (wbs) {
+						const planPath = processPlanResult(runId, issue, wbs, validationReport, workDir);
+						planPaths.push(planPath);
+						issuesPlanned++;
+						tasksCreated += wbs.tasks.length;
+
+						const hasReport = validationReport ? pc.green("✓ report") : pc.yellow("○ no report");
+						console.log(
+							`  ${pc.green("✓")} PL-${agentNum}: ${issue.id} - ${pc.green(`${wbs.tasks.length} tasks`)} [${hasReport}]`,
+						);
+						return { success: true, issue, wbs };
+					} else {
+						// Save debug info if parsing failed
+						if (responseText) {
+							const debugPath = saveDebugResponse(issue.id, responseText, workDir);
+							logDebug(`Saved debug response to: ${debugPath}`);
+						}
+						errors.push(`PL-${agentNum} (${issue.id}): Failed to parse WBS`);
+						console.log(
+							`  ${pc.red("✗")} PL-${agentNum}: ${issue.id} - ${pc.red("Failed to parse WBS")}`,
+						);
+						return { success: false, issue };
+					}
+				} catch (error) {
+					const errorMsg = error instanceof Error ? error.message : String(error);
+					errors.push(`PL-${agentNum} (${issue.id}): ${errorMsg}`);
+					console.log(`  ${pc.red("✗")} PL-${agentNum}: ${issue.id} - ${pc.red(errorMsg)}`);
+					return { success: false, issue };
+				}
+			};
+
+			// Worker function - each agent runs this to process issues from the queue
+			const runWorker = async (context: typeof agentContexts[0], agentNum: number): Promise<void> => {
+				while (true) {
+					const issue = getNextIssue();
+					if (!issue) {
+						// No more work
+						spinner.updateStep(`PL-${agentNum}: Done`);
+						break;
+					}
+					await processIssue(issue, context, agentNum);
+				}
+			};
+
+			// Start all workers - each processes issues sequentially from the shared queue
+			// This ensures each server handles ONE issue at a time
+			const workerPromises = agentContexts.map((context, idx) => runWorker(context, idx + 1));
+			await Promise.all(workerPromises);
+
+			// Display completion summary
+			const completedServerInfos: ServerInfo[] = agentContexts.map((ctx) => ({
+				...ctx.serverInfo,
+				status: "completed" as const,
+			}));
+			displayTmuxCompletionSummary(completedServerInfos);
+
+			// Mark spinner as successful
+			spinner.success(`Planning complete`);
+
+		} finally {
+			// Cleanup: Stop all servers but keep tmux sessions for inspection
+			logInfo("Stopping OpenCode servers (tmux sessions preserved for inspection)");
+			for (const context of agentContexts) {
+				try {
+					await context.executor.stopServer();
+				} catch {
+					// Ignore cleanup errors
+				}
 			}
+			PortManager.releaseAllPorts();
 		}
-		console.log("");
+	} else {
+		// STANDARD MODE: Use engine.execute directly
+		// Create progress spinner
+		const spinner = new ProgressSpinner(
+			"Deep planning in progress",
+			Array.from({ length: maxParallel }, (_, i) => `PL-${i + 1}`),
+		);
+
+		// Process issues in parallel batches
+		const batches: Issue[][] = [];
+		for (let i = 0; i < plannableIssues.length; i += maxParallel) {
+			batches.push(plannableIssues.slice(i, i + maxParallel));
+		}
+
+		let batchNum = 0;
+		for (const batch of batches) {
+			batchNum++;
+			logInfo(
+				`Batch ${batchNum}/${batches.length}: Planning ${batch.length} issue(s) in parallel...`,
+			);
+
+			// Create a map to track agent progress
+			const agentProgress = new Map<number, string>();
+
+			const results = await Promise.all(
+				batch.map(async (issue, idx) => {
+					const agentNum = idx + 1;
+					// Create engine per agent to prevent prompt corruption when running concurrently
+					const agentEngine = await createEngine(options.aiEngine as AIEngineName);
+					return planSingleIssueDeep(issue, agentEngine, workDir, options, agentNum, (step) => {
+						agentProgress.set(agentNum, step);
+						const progressStr = Array.from(agentProgress.entries())
+							.map(([num, s]) => `PL-${num}: ${s.slice(0, 20)}`)
+							.join(" | ");
+						spinner.updateStep(progressStr);
+					});
+				}),
+			);
+
+			// Process batch results
+			for (let i = 0; i < batch.length; i++) {
+				const issue = batch[i];
+				const result = results[i];
+				const agentNum = i + 1;
+
+				totalInputTokens += result.inputTokens;
+				totalOutputTokens += result.outputTokens;
+
+				if (result.error) {
+					errors.push(`PL-${agentNum} (${issue.id}): ${result.error}`);
+					console.log(`  ${pc.red("✗")} Agent #${agentNum}: ${issue.id} - ${pc.red(result.error)}`);
+					continue;
+				}
+
+				if (result.wbs) {
+					// Load validation report for markdown generation
+					const validationReport = loadValidationReport(issue.id, workDir);
+
+					const planPath = processPlanResult(runId, issue, result.wbs, validationReport, workDir);
+					planPaths.push(planPath);
+					issuesPlanned++;
+					tasksCreated += result.wbs.tasks.length;
+
+					const durationSec = (result.durationMs / 1000).toFixed(1);
+					const hasReport = validationReport ? pc.green("✓ report") : pc.yellow("○ no report");
+					console.log(
+						`  ${pc.green("✓")} Agent #${agentNum}: ${issue.id} - ${pc.green(`${result.wbs.tasks.length} tasks`)} (${durationSec}s) [${hasReport}]`,
+					);
+				} else {
+					errors.push(`PL-${agentNum} (${issue.id}): Failed to parse WBS`);
+					console.log(
+						`  ${pc.red("✗")} Agent #${agentNum}: ${issue.id} - ${pc.red("Failed to parse WBS")}`,
+					);
+				}
+			}
+			console.log("");
+		}
+
+		if (errors.length > 0) {
+			spinner.warn(`Planning completed with ${errors.length} error(s)`);
+		} else {
+			spinner.success(`Deep planning complete ${formatTokens(totalInputTokens, totalOutputTokens)}`);
+		}
 	}
 
 	// Update run state using run-aware functions
-	const nextPhase = issuesPlanned > 0 ? "exec" : "completed";
+	// Keep phase at "plan" after planning - consolidate will advance to "exec"
+	// This allows both workflows:
+	//   - Full pipeline: plan → consolidate → exec
+	//   - Skip consolidate: plan → exec (exec accepts phase="plan")
+	const nextPhase = issuesPlanned > 0 ? "plan" : "completed";
 	updateRunPhaseInMeta(runId, nextPhase, workDir);
 	updateRunStats(runId, { tasks_total: loadTasksForRun(runId, workDir).length }, workDir);
 
 	const duration = Date.now() - startTime;
-
-	if (errors.length > 0) {
-		spinner.warn(`Planning completed with ${errors.length} error(s)`);
-	} else {
-		spinner.success(`Deep planning complete ${formatTokens(totalInputTokens, totalOutputTokens)}`);
-	}
 
 	// Sync legacy plans view after all writes
 	if (planPaths.length > 0) {
