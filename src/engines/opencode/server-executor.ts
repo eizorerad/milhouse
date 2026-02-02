@@ -574,7 +574,8 @@ export class OpencodeServerExecutor {
 			agent?: string;
 			noReply?: boolean;
 			system?: string;
-			tools?: string[];
+			/** Tools to enable - record of tool name to enabled status */
+			tools?: Record<string, boolean>;
 		},
 	): Promise<MessageResponse> {
 		const parts: Part[] = [{ type: "text", text: prompt }];
@@ -632,7 +633,8 @@ export class OpencodeServerExecutor {
 			agent?: string;
 			noReply?: boolean;
 			system?: string;
-			tools?: string[];
+			/** Tools to enable - record of tool name to enabled status */
+			tools?: Record<string, boolean>;
 		},
 	): Promise<void> {
 		const parts: Part[] = [{ type: "text", text: prompt }];
@@ -960,6 +962,7 @@ export class OpencodeServerExecutor {
 			if (!response.ok) {
 				const errorText = await response.text();
 				let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+				
 				try {
 					const errorJson = JSON.parse(errorText);
 					errorMessage = errorJson.message ?? errorMessage;

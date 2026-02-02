@@ -22,6 +22,12 @@
 export type PipelinePhase = "scan" | "validate" | "plan" | "consolidate" | "exec" | "verify";
 
 /**
+ * Tools record type - maps tool names to enabled status.
+ * OpenCode API expects tools as a record, not an array.
+ */
+export type ToolsRecord = Record<string, boolean>;
+
+/**
  * Message options for OpenCode sendMessage API.
  */
 export interface AutonomyMessageOptions {
@@ -29,8 +35,8 @@ export interface AutonomyMessageOptions {
 	model?: string;
 	/** System prompt override for autonomous operation */
 	system: string;
-	/** Tools to enable for this message */
-	tools: string[];
+	/** Tools to enable for this message (record of tool name to enabled status) */
+	tools: ToolsRecord;
 }
 
 // ============================================================================
@@ -119,15 +125,17 @@ Work autonomously until the task is complete or you've exhausted all reasonable 
  * Note: bash is included because some analysis requires running commands
  * like `npm test`, `git status`, `git log`, etc. The system prompt
  * instructs the agent not to use bash for modifications.
+ *
+ * OpenCode API expects tools as a record of {toolName: boolean}, not an array.
  */
-export const READ_ONLY_TOOLS = [
-	"read",
-	"glob",
-	"grep",
-	"ls",
-	"tree",
-	"bash", // For read-only commands like 'npm test', 'git status', 'cat', etc.
-];
+export const READ_ONLY_TOOLS: ToolsRecord = {
+	read: true,
+	glob: true,
+	grep: true,
+	ls: true,
+	tree: true,
+	bash: true, // For read-only commands like 'npm test', 'git status', 'cat', etc.
+};
 
 /**
  * Full tools for execution phase (exec).
@@ -143,18 +151,20 @@ export const READ_ONLY_TOOLS = [
  * - Running tests
  * - Git operations (commit, push)
  * - Package management (npm install, etc.)
+ *
+ * OpenCode API expects tools as a record of {toolName: boolean}, not an array.
  */
-export const EXECUTION_TOOLS = [
-	"read",
-	"write",
-	"edit",
-	"patch",
-	"glob",
-	"grep",
-	"ls",
-	"tree",
-	"bash",
-];
+export const EXECUTION_TOOLS: ToolsRecord = {
+	read: true,
+	write: true,
+	edit: true,
+	patch: true,
+	glob: true,
+	grep: true,
+	ls: true,
+	tree: true,
+	bash: true,
+};
 
 // ============================================================================
 // Helper Functions
@@ -185,9 +195,9 @@ export function getSystemPromptForPhase(phase: PipelinePhase): string {
  * Get the appropriate tools for a pipeline phase.
  *
  * @param phase - The pipeline phase
- * @returns Array of tool names to enable
+ * @returns Record of tool names to enabled status
  */
-export function getToolsForPhase(phase: PipelinePhase): string[] {
+export function getToolsForPhase(phase: PipelinePhase): ToolsRecord {
 	switch (phase) {
 		case "scan":
 		case "validate":

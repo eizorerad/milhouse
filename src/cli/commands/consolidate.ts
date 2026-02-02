@@ -612,6 +612,8 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 
 	if (pendingTasks.length === 0) {
 		logWarn("No pending tasks found. Run 'milhouse plan' first to generate tasks.");
+		// Advance to verify phase so pipeline can complete gracefully
+		updateRunPhaseInMeta(runId, "verify", workDir);
 		return {
 			success: true,
 			tasksConsolidated: 0,

@@ -1018,6 +1018,8 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 
 	if (plannableIssues.length === 0) {
 		logWarn("No confirmed or partial issues found. Run 'milhouse validate' first.");
+		// Advance to verify phase so pipeline can complete gracefully
+		updateRunPhaseInMeta(runId, "verify", workDir);
 		return {
 			success: true,
 			issuesPlanned: 0,
@@ -1422,7 +1424,11 @@ export async function runPlan(options: RuntimeOptions): Promise<PlanResult> {
 	}
 
 	// Update run state using run-aware functions
-	const nextPhase = issuesPlanned > 0 ? "exec" : "completed";
+	// Keep phase at "plan" after planning - consolidate will advance to "exec"
+	// This allows both workflows:
+	//   - Full pipeline: plan → consolidate → exec
+	//   - Skip consolidate: plan → exec (exec accepts phase="plan")
+	const nextPhase = issuesPlanned > 0 ? "plan" : "completed";
 	updateRunPhaseInMeta(runId, nextPhase, workDir);
 	updateRunStats(runId, { tasks_total: loadTasksForRun(runId, workDir).length }, workDir);
 

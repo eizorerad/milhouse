@@ -394,6 +394,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 
 	if (pendingTasks.length === 0) {
 		logWarn("No pending or merge_error tasks found.");
+		// Advance to verify phase so pipeline can complete gracefully
+		updateRunPhaseInMeta(runId, "verify", workDir);
 		return {
 			success: true,
 			tasksExecuted: 0,

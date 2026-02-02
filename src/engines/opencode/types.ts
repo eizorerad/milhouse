@@ -146,8 +146,8 @@ export interface SendMessageOptions {
 	noReply?: boolean;
 	/** System prompt override */
 	system?: string;
-	/** Tools to enable/disable */
-	tools?: string[];
+	/** Tools to enable/disable - record of tool name to enabled status */
+	tools?: Record<string, boolean>;
 	/** Message parts to send */
 	parts: Part[];
 }
