@@ -29,23 +29,29 @@ function getRunsIndexPath(workDir = process.cwd()): string {
 function loadRunsIndex(workDir = process.cwd()): RunsIndex {
 	const path = getRunsIndexPath(workDir);
 	if (!existsSync(path)) {
-		return { current_run: null, runs: [] };
+		return { runs: [] };
 	}
 	try {
 		const content = readFileSync(path, "utf-8");
 		const parsed = JSON.parse(content);
 		return RunsIndexSchema.parse(parsed);
 	} catch {
-		return { current_run: null, runs: [] };
+		return { runs: [] };
 	}
 }
 
 /**
- * Get current active run ID
+ * Get the latest run ID from the runs index.
+ * Returns the most recently created run, or null if no runs exist.
+ *
+ * NOTE: This replaces the old current_run pointer. Instead of a mutable
+ * global pointer, we derive the "current" run from the sorted runs list.
  */
 export function getCurrentRunId(workDir = process.cwd()): string | null {
 	const index = loadRunsIndex(workDir);
-	return index.current_run;
+	if (index.runs.length === 0) return null;
+	// Return the last run in the list (most recently added)
+	return index.runs[index.runs.length - 1].id;
 }
 
 /**
@@ -71,7 +77,7 @@ export function getRunStateDir(runId: string, workDir = process.cwd()): string {
 
 /**
  * Get state file path - supports both runs and legacy mode
- * If a run is active, uses run-specific state directory
+ * If a run exists, uses the latest run's state directory
  * Otherwise, falls back to legacy .milhouse/state/ directory
  *
  * @param file - The state file key (issues, tasks, graph, executions, run)

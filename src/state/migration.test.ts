@@ -207,14 +207,15 @@ describe("Migration Tests", () => {
 			expect(existsSync(join(runProbesDir, "probe-1.json"))).toBe(true);
 		});
 
-		test("should set migrated run as current run", () => {
+		test("should set migrated run as latest run", () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 
 			const run = migrateLegacyToRun({ workDir: testDir });
 
 			const index = loadRunsIndex(testDir);
-			expect(index.current_run).toBe(run!.id);
+			// The migrated run should be the last (latest) in the runs list
+			expect(index.runs[index.runs.length - 1].id).toBe(run!.id);
 		});
 	});
 

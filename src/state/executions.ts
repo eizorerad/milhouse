@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getStatePathForCurrentRun } from "./paths.ts";
-import { type ExecutionRecord, ExecutionRecordSchema } from "./types.ts";
+import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
+import { type ExecutionRecord, ExecutionRecordSchema, STATE_FILES } from "./types.ts";
 
 /**
  * Get path to executions state file
@@ -9,6 +9,71 @@ import { type ExecutionRecord, ExecutionRecordSchema } from "./types.ts";
  */
 function getExecutionsPath(workDir = process.cwd()): string {
 	return getStatePathForCurrentRun("executions", workDir);
+}
+
+// ============================================
+// ForRun Variants (explicit runId)
+// ============================================
+
+/**
+ * Get path to executions state file for a specific run
+ */
+function getExecutionsPathForRun(runId: string, workDir = process.cwd()): string {
+	return join(getRunStateDir(runId, workDir), STATE_FILES.executions);
+}
+
+/**
+ * Load all executions for a specific run
+ */
+export function loadExecutionsForRun(runId: string, workDir = process.cwd()): ExecutionRecord[] {
+	const path = getExecutionsPathForRun(runId, workDir);
+	if (!existsSync(path)) return [];
+	try {
+		const content = readFileSync(path, "utf-8");
+		const parsed = JSON.parse(content);
+		if (!Array.isArray(parsed)) return [];
+		const validRecords: ExecutionRecord[] = [];
+		for (const item of parsed) {
+			const result = ExecutionRecordSchema.safeParse(item);
+			if (result.success) validRecords.push(result.data);
+		}
+		return validRecords;
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Save executions for a specific run
+ */
+export function saveExecutionsForRun(runId: string, executions: ExecutionRecord[], workDir = process.cwd()): void {
+	const path = getExecutionsPathForRun(runId, workDir);
+	const dir = join(path, "..");
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+	writeFileSync(path, JSON.stringify(executions, null, 2));
+}
+
+/**
+ * Create a new execution record for a specific run
+ */
+export function createExecutionForRun(runId: string, execution: Omit<ExecutionRecord, "id">, workDir = process.cwd()): ExecutionRecord {
+	const executions = loadExecutionsForRun(runId, workDir);
+	const newExecution: ExecutionRecord = { ...execution, id: generateExecutionId() };
+	saveExecutionsForRun(runId, [...executions, newExecution], workDir);
+	return newExecution;
+}
+
+/**
+ * Update an existing execution for a specific run
+ */
+export function updateExecutionForRun(runId: string, id: string, update: Partial<Omit<ExecutionRecord, "id">>, workDir = process.cwd()): ExecutionRecord | null {
+	const executions = loadExecutionsForRun(runId, workDir);
+	const index = executions.findIndex((e) => e.id === id);
+	if (index === -1) return null;
+	const updated: ExecutionRecord = { ...executions[index], ...update };
+	const newExecutions = [...executions.slice(0, index), updated, ...executions.slice(index + 1)];
+	saveExecutionsForRun(runId, newExecutions, workDir);
+	return updated;
 }
 
 /**

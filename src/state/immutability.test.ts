@@ -116,17 +116,19 @@ describe("Immutability Tests", () => {
 
 			// Load original index
 			const originalIndex = loadRunsIndex(testDir);
-			const originalCurrentRun = originalIndex.current_run;
+			const originalRunsLength = originalIndex.runs.length;
+			const originalLastRunId = originalIndex.runs[originalIndex.runs.length - 1]?.id;
 
-			// Set current run to run1
+			// Set current run to run1 (moves run1 to end of list)
 			setCurrentRun(run1.id, testDir);
 
 			// Verify the original index object was not mutated
-			expect(originalIndex.current_run).toBe(originalCurrentRun);
+			expect(originalIndex.runs.length).toBe(originalRunsLength);
+			expect(originalIndex.runs[originalIndex.runs.length - 1]?.id).toBe(originalLastRunId);
 
-			// Verify the file was updated
+			// Verify the file was updated — run1 should now be last (latest)
 			const newIndex = loadRunsIndex(testDir);
-			expect(newIndex.current_run).toBe(run1.id);
+			expect(newIndex.runs[newIndex.runs.length - 1].id).toBe(run1.id);
 		});
 
 		test("saveRunsIndex should not mutate input index object", () => {
@@ -135,12 +137,11 @@ describe("Immutability Tests", () => {
 			// Load index and create a copy
 			const index = loadRunsIndex(testDir);
 			const originalRunsLength = index.runs.length;
-			const originalCurrentRun = index.current_run;
 
-			// Create a modified copy to save
+			// Create a modified copy to save (with an empty runs array)
 			const modifiedIndex: RunsIndex = {
 				...index,
-				current_run: null,
+				runs: [],
 			};
 
 			// Save the modified index
@@ -148,7 +149,6 @@ describe("Immutability Tests", () => {
 
 			// Verify original index was not mutated
 			expect(index.runs.length).toBe(originalRunsLength);
-			expect(index.current_run).toBe(originalCurrentRun);
 		});
 	});
 

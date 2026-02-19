@@ -4,12 +4,15 @@
  * Handles all run-related operations including:
  * - Run creation and deletion
  * - Run metadata management
- * - Current run tracking
  * - Run state directories
  * - Concurrent-safe updates with locking
+ *
+ * NOTE: The global `current_run` pointer has been removed.
+ * All state operations should take an explicit `runId`.
+ * The "latest run" is derived from the runs index (last entry).
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { logStateError, StateParseError } from "./errors.ts";
 import { stateEvents } from "./events.ts";
@@ -68,14 +71,27 @@ function loadJsonFile<T>(
 }
 
 /**
- * Save JSON file
+ * Save JSON file atomically where possible.
+ * Uses write-to-tmp + rename for atomicity. When combined with
+ * withFileLock(), provides both atomic writes and concurrency safety.
+ *
+ * On systems where rename fails (e.g., Windows with file watchers),
+ * falls back to direct write - the file lock still provides safety.
  */
 function saveJsonFile(filePath: string, data: unknown): void {
 	const dir = join(filePath, "..");
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
-	writeFileSync(filePath, JSON.stringify(data, null, 2));
+	const content = JSON.stringify(data, null, 2);
+	try {
+		const tmpPath = filePath + ".tmp";
+		writeFileSync(tmpPath, content);
+		renameSync(tmpPath, filePath);
+	} catch {
+		// Fallback: direct write (rename can fail on Windows or across devices)
+		writeFileSync(filePath, content);
+	}
 }
 
 // ============================================================================
@@ -127,17 +143,20 @@ export function getRunMetaPath(runId: string, workDir = process.cwd()): string {
 export function loadRunsIndex(workDir = process.cwd()): RunsIndex {
 	const path = getRunsIndexPath(workDir);
 	if (!existsSync(path)) {
-		return { current_run: null, runs: [] };
+		return { runs: [] };
 	}
-	return loadJsonFile(path, RunsIndexSchema, { current_run: null, runs: [] });
+	return loadJsonFile(path, RunsIndexSchema, { runs: [] });
 }
 
 /**
- * Save runs index
+ * Save runs index.
+ * Strips any legacy `current_run` field before writing.
  */
 export function saveRunsIndex(index: RunsIndex, workDir = process.cwd()): void {
 	const path = getRunsIndexPath(workDir);
-	saveJsonFile(path, index);
+	// Strip current_run if present (legacy compat via passthrough)
+	const { current_run: _stripped, ...clean } = index as RunsIndex & { current_run?: unknown };
+	saveJsonFile(path, clean);
 }
 
 // ============================================================================
@@ -168,19 +187,25 @@ export function saveRunMeta(meta: RunMeta, workDir = process.cwd()): void {
 }
 
 // ============================================================================
-// CURRENT RUN FUNCTIONS
+// LATEST RUN FUNCTIONS (replaces current_run pointer)
 // ============================================================================
 
 /**
- * Get current active run ID
+ * Get the latest run ID from the runs index.
+ * Returns the most recently added run, or null if no runs exist.
+ *
+ * NOTE: This replaces the old current_run pointer. Instead of a mutable
+ * global pointer, we derive the "current" run from the runs list order.
  */
 export function getCurrentRunId(workDir = process.cwd()): string | null {
 	const index = loadRunsIndex(workDir);
-	return index.current_run;
+	if (index.runs.length === 0) return null;
+	return index.runs[index.runs.length - 1].id;
 }
 
 /**
- * Get current active run metadata
+ * Get the latest run metadata.
+ * Returns metadata for the most recently added run, or null if none.
  */
 export function getCurrentRun(workDir = process.cwd()): RunMeta | null {
 	const runId = getCurrentRunId(workDir);
@@ -191,17 +216,22 @@ export function getCurrentRun(workDir = process.cwd()): RunMeta | null {
 }
 
 /**
- * Set current active run
+ * Set the "current" run by moving it to the end of the runs list.
+ * This replaces the old current_run pointer approach.
  */
 export function setCurrentRun(runId: string, workDir = process.cwd()): boolean {
 	const index = loadRunsIndex(workDir);
 
 	// Verify run exists
-	if (!index.runs.find((r) => r.id === runId)) {
+	const runEntry = index.runs.find((r) => r.id === runId);
+	if (!runEntry) {
 		return false;
 	}
 
-	saveRunsIndex({ ...index, current_run: runId }, workDir);
+	// Move the target run to the end of the list (making it "current")
+	const filtered = index.runs.filter((r) => r.id !== runId);
+	filtered.push(runEntry);
+	saveRunsIndex({ ...index, runs: filtered }, workDir);
 	return true;
 }
 
@@ -277,7 +307,7 @@ export function createRun(options: {
 	// Save run metadata
 	saveRunMeta(meta, workDir);
 
-	// Update runs index
+	// Update runs index — new run is appended at the end (making it "latest")
 	const index = loadRunsIndex(workDir);
 	index.runs.push({
 		id: runId,
@@ -286,7 +316,6 @@ export function createRun(options: {
 		created_at: now,
 		phase: "scan",
 	});
-	index.current_run = runId;
 	saveRunsIndex(index, workDir);
 
 	// Emit run:created event
@@ -310,11 +339,6 @@ export function deleteRun(runId: string, workDir = process.cwd()): boolean {
 	// Remove from index
 	index.runs.splice(runIndex, 1);
 
-	// If this was current run, set to null or last run
-	if (index.current_run === runId) {
-		index.current_run = index.runs.length > 0 ? index.runs[index.runs.length - 1].id : null;
-	}
-
 	saveRunsIndex(index, workDir);
 
 	// Delete run directory
@@ -327,7 +351,8 @@ export function deleteRun(runId: string, workDir = process.cwd()): boolean {
 }
 
 /**
- * List all runs
+ * List all runs.
+ * The last run in the list is considered "latest" (replaces is_current).
  */
 export function listRuns(workDir = process.cwd()): Array<{
 	id: string;
@@ -338,10 +363,13 @@ export function listRuns(workDir = process.cwd()): Array<{
 	is_current: boolean;
 }> {
 	const index = loadRunsIndex(workDir);
+	const latestRunId = index.runs.length > 0
+		? index.runs[index.runs.length - 1].id
+		: null;
 
 	return index.runs.map((run) => ({
 		...run,
-		is_current: run.id === index.current_run,
+		is_current: run.id === latestRunId,
 	}));
 }
 
@@ -566,69 +594,6 @@ export async function saveRunsIndexWithLock(
 }
 
 // ============================================================================
-// CURRENT RUN CONVENIENCE FUNCTIONS
-// ============================================================================
-
-/**
- * Get current active run or throw error if none exists
- * Use this in commands that require an active run
- */
-export function requireActiveRun(workDir = process.cwd()): RunMeta {
-	const run = getCurrentRun(workDir);
-	if (!run) {
-		throw new Error(
-			'No active run found. Start with: milhouse scan --scope "your scope"'
-		);
-	}
-	return run;
-}
-
-/**
- * Update current run's phase
- * This is the primary way to update run phase in all commands
- */
-export function updateCurrentRunPhase(
-	phase: RunPhase,
-	workDir = process.cwd(),
-): RunMeta {
-	const run = requireActiveRun(workDir);
-	const updated = updateRunPhaseInMeta(run.id, phase, workDir);
-	if (!updated) {
-		throw new Error(`Failed to update run ${run.id} phase to ${phase}`);
-	}
-	return updated;
-}
-
-/**
- * Update current run's statistics
- */
-export function updateCurrentRunStats(
-	stats: Partial<Pick<RunMeta,
-		| "issues_found"
-		| "issues_validated"
-		| "tasks_total"
-		| "tasks_completed"
-		| "tasks_failed"
-	>>,
-	workDir = process.cwd(),
-): RunMeta {
-	const run = requireActiveRun(workDir);
-	const updated = updateRunStats(run.id, stats, workDir);
-	if (!updated) {
-		throw new Error(`Failed to update run ${run.id} stats`);
-	}
-	return updated;
-}
-
-/**
- * Get current run phase (for display purposes)
- */
-export function getCurrentRunPhase(workDir = process.cwd()): RunPhase | null {
-	const run = getCurrentRun(workDir);
-	return run?.phase ?? null;
-}
-
-// ============================================================================
 // RUN STATE PATH HELPERS
 // ============================================================================
 
@@ -641,8 +606,8 @@ export function hasRuns(workDir = process.cwd()): boolean {
 }
 
 /**
- * Get state file path - now supports both runs and legacy mode
- * If runs exist, uses current run's state directory
+ * Get state file path - supports both runs and legacy mode
+ * If runs exist, uses the latest run's state directory
  * Otherwise, falls back to legacy .milhouse/state/ directory
  */
 export function getStatePathForCurrentRun(
@@ -689,55 +654,6 @@ export function getProbesPathForCurrentRun(probeType: string, workDir = process.
 }
 
 // ============================================================================
-// ENSURE ACTIVE RUN
-// ============================================================================
-
-/**
- * Ensure a run exists and is active
- * If no runs exist, creates one with given scope
- * If runs exist but none active, returns error message
- */
-export function ensureActiveRun(
-	options: {
-		scope?: string;
-		createIfMissing?: boolean;
-		workDir?: string;
-	} = {},
-): { run: RunMeta | null; error?: string } {
-	const workDir = options.workDir ?? process.cwd();
-
-	const currentRun = getCurrentRun(workDir);
-	if (currentRun) {
-		return { run: currentRun };
-	}
-
-	const index = loadRunsIndex(workDir);
-
-	// If runs exist but none is current
-	if (index.runs.length > 0) {
-		const runsList = index.runs
-			.map((r) => `  • ${r.id}${r.scope ? ` (${r.scope})` : ""}`)
-			.join("\n");
-
-		return {
-			run: null,
-			error: `No active run selected.\n\nAvailable runs:\n${runsList}\n\nTo continue: milhouse runs switch <run-id>`,
-		};
-	}
-
-	// No runs at all
-	if (options.createIfMissing && options.scope) {
-		const run = createRun({ scope: options.scope, workDir });
-		return { run };
-	}
-
-	return {
-		run: null,
-		error: `No runs found. Start by scanning:\n  milhouse --scan --scope "your investigation scope"`,
-	};
-}
-
-// ============================================================================
 // CLEANUP OLD RUNS
 // ============================================================================
 
@@ -753,8 +669,6 @@ export interface CleanupOldRunsOptions {
 	workDir?: string;
 	/** Dry run - don't actually delete, just return what would be deleted */
 	dryRun?: boolean;
-	/** Exclude the current run from cleanup */
-	excludeCurrent?: boolean;
 }
 
 /**
@@ -789,7 +703,6 @@ export interface CleanupResult {
  */
 export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResult {
 	const workDir = options.workDir ?? process.cwd();
-	const excludeCurrent = options.excludeCurrent ?? true;
 
 	const result: CleanupResult = {
 		deleted: [],
@@ -816,13 +729,6 @@ export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResu
 		const runDate = new Date(run.created_at);
 		let shouldDelete = false;
 		let reason = "";
-
-		// Check if this is the current run
-		if (excludeCurrent && run.id === index.current_run) {
-			runsToKeep.push(run);
-			result.kept.push({ id: run.id, created_at: run.created_at, reason: "current run" });
-			continue;
-		}
 
 		// Check keepLast constraint
 		if (options.keepLast !== undefined) {

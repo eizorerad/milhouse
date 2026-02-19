@@ -176,12 +176,11 @@ describe("Concurrency Tests", () => {
 			// Create initial run
 			createRun({ scope: "initial run", workDir: testDir });
 
-			// Simulate concurrent index updates
+			// Simulate concurrent index updates (no-op identity updates)
 			const updates = Array.from({ length: 5 }, () =>
 				saveRunsIndexWithLock(
 					(index) => ({
 						...index,
-						current_run: index.runs[0]?.id ?? null,
 					}),
 					testDir
 				)
@@ -200,19 +199,19 @@ describe("Concurrency Tests", () => {
 			const run2 = createRun({ scope: "run 2", workDir: testDir });
 			const run3 = createRun({ scope: "run 3", workDir: testDir });
 
-			// Concurrent updates to switch current run
+			// Concurrent no-op updates to the index
 			await Promise.all([
-				saveRunsIndexWithLock((index) => ({ ...index, current_run: run1.id }), testDir),
-				saveRunsIndexWithLock((index) => ({ ...index, current_run: run2.id }), testDir),
-				saveRunsIndexWithLock((index) => ({ ...index, current_run: run3.id }), testDir),
+				saveRunsIndexWithLock((index) => ({ ...index }), testDir),
+				saveRunsIndexWithLock((index) => ({ ...index }), testDir),
+				saveRunsIndexWithLock((index) => ({ ...index }), testDir),
 			]);
 
 			// Index should have all 3 runs
 			const finalIndex = loadRunsIndex(testDir);
 			expect(finalIndex.runs.length).toBe(3);
-			// Current run should be one of the three
-			expect(finalIndex.current_run).not.toBeNull();
-			expect([run1.id, run2.id, run3.id]).toContain(finalIndex.current_run!);
+			// Latest run should be the last one created (run3)
+			const latestRunId = finalIndex.runs[finalIndex.runs.length - 1].id;
+			expect(latestRunId).toBe(run3.id);
 		});
 	});
 

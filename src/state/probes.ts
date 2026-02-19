@@ -60,7 +60,49 @@ function saveJsonFile(filePath: string, data: unknown): void {
 }
 
 // ============================================================================
-// PROBE RESULTS FUNCTIONS
+// ForRun Variants (explicit runId)
+// ============================================================================
+
+/**
+ * Save a probe result for a specific run
+ */
+export function saveProbeResultForRun(runId: string, result: ProbeResult, workDir = process.cwd()): void {
+	const dir = join(getRunDir(runId, workDir), "probes", result.probe_type);
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+	const path = join(dir, `${result.probe_id}.json`);
+	saveJsonFile(path, result);
+}
+
+/**
+ * Load all probe results of a specific type for a specific run
+ */
+export function loadProbeResultsForRun(runId: string, probeType: string, workDir = process.cwd()): ProbeResult[] {
+	const dir = join(getRunDir(runId, workDir), "probes", probeType);
+	if (!existsSync(dir)) return [];
+	const results: ProbeResult[] = [];
+	const files = readdirSync(dir);
+	for (const file of files) {
+		if (file.endsWith(".json")) {
+			const path = join(dir, file);
+			const result = loadJsonFile(path, ProbeResultSchema, null as unknown as ProbeResult);
+			if (result) results.push(result);
+		}
+	}
+	return results;
+}
+
+/**
+ * Get all probe types that have results for a specific run
+ */
+export function getProbeTypesForRun(runId: string, workDir = process.cwd()): string[] {
+	const probesDir = join(getRunDir(runId, workDir), "probes");
+	if (!existsSync(probesDir)) return [];
+	const entries = readdirSync(probesDir, { withFileTypes: true });
+	return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+}
+
+// ============================================================================
+// PROBE RESULTS FUNCTIONS (implicit latest run)
 // ============================================================================
 
 /**

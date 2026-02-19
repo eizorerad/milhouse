@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getStatePathForCurrentRun } from "./paths.ts";
-import { type GraphNode, GraphNodeSchema, type Task } from "./types.ts";
+import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
+import { type GraphNode, GraphNodeSchema, STATE_FILES, type Task } from "./types.ts";
 
 /**
  * Get path to graph state file
@@ -9,6 +9,48 @@ import { type GraphNode, GraphNodeSchema, type Task } from "./types.ts";
  */
 function getGraphPath(workDir = process.cwd()): string {
 	return getStatePathForCurrentRun("graph", workDir);
+}
+
+// ============================================
+// ForRun Variants (explicit runId)
+// ============================================
+
+/**
+ * Get path to graph state file for a specific run
+ */
+function getGraphPathForRun(runId: string, workDir = process.cwd()): string {
+	return join(getRunStateDir(runId, workDir), STATE_FILES.graph);
+}
+
+/**
+ * Load dependency graph for a specific run
+ */
+export function loadGraphForRun(runId: string, workDir = process.cwd()): GraphNode[] {
+	const path = getGraphPathForRun(runId, workDir);
+	if (!existsSync(path)) return [];
+	try {
+		const content = readFileSync(path, "utf-8");
+		const parsed = JSON.parse(content);
+		if (!Array.isArray(parsed)) return [];
+		const validNodes: GraphNode[] = [];
+		for (const item of parsed) {
+			const result = GraphNodeSchema.safeParse(item);
+			if (result.success) validNodes.push(result.data);
+		}
+		return validNodes;
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Save dependency graph for a specific run
+ */
+export function saveGraphForRun(runId: string, nodes: GraphNode[], workDir = process.cwd()): void {
+	const path = getGraphPathForRun(runId, workDir);
+	const dir = join(path, "..");
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+	writeFileSync(path, JSON.stringify(nodes, null, 2));
 }
 
 // ============================================

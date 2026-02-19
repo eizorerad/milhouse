@@ -470,7 +470,6 @@ export type RunMeta = z.infer<typeof RunMetaSchema>;
  * Tracks all runs and which one is currently active
  */
 export const RunsIndexSchema = z.object({
-	current_run: z.string().nullable(),
 	runs: z.array(
 		z.object({
 			id: z.string(),
@@ -480,7 +479,7 @@ export const RunsIndexSchema = z.object({
 			phase: RunPhaseSchema,
 		}),
 	),
-});
+}).passthrough(); // passthrough so old files with current_run don't fail
 
 export type RunsIndex = z.infer<typeof RunsIndexSchema>;
 

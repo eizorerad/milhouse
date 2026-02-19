@@ -106,6 +106,8 @@ export {
 export {
 	loadGraph,
 	saveGraph,
+	loadGraphForRun,
+	saveGraphForRun,
 	createGraphNode,
 	readGraphNode,
 	updateGraphNode,
@@ -143,6 +145,10 @@ export {
 	generateExecutionId,
 	loadExecutions,
 	saveExecutions,
+	loadExecutionsForRun,
+	saveExecutionsForRun,
+	createExecutionForRun,
+	updateExecutionForRun,
 	createExecution,
 	readExecution,
 	updateExecution,
@@ -198,28 +204,32 @@ export {
 	updateRunPhaseInMetaWithLock,
 	updateRunStatsWithLock,
 	saveRunsIndexWithLock,
-	requireActiveRun,
-	updateCurrentRunPhase,
-	updateCurrentRunStats,
-	getCurrentRunPhase,
 	hasRuns,
 	getStatePathForCurrentRun,
 	getPlansPathForCurrentRun,
 	getProbesPathForCurrentRun,
-	ensureActiveRun,
 	cleanupOldRuns,
 	parseDuration,
 	getDateFromDuration,
 } from "./runs.ts";
 export type { CleanupOldRunsOptions, CleanupResult } from "./runs.ts";
 
+// Run lock module - Per-run per-phase execution locks
+export {
+	acquireRunLock,
+	isRunLocked,
+} from "./run-lock.ts";
+
 // Probes module - Probe result storage
 export {
 	saveProbeResult,
+	saveProbeResultForRun,
 	loadProbeResults,
+	loadProbeResultsForRun,
 	loadProbeResult,
 	deleteProbeResult,
 	getProbeTypes,
+	getProbeTypesForRun,
 	countProbeResults,
 	getProbeResultsBySeverity,
 } from "./probes.ts";
