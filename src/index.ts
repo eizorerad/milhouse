@@ -1,18 +1,18 @@
 #!/usr/bin/env bun
 import { parseArgs } from "./cli/args.ts";
 import { addRule, showConfig } from "./cli/commands/config.ts";
-import { runConsolidate } from "./cli/commands/consolidate.ts";
 import { runExec } from "./cli/commands/exec.ts";
 import { parseFormats, runExport } from "./cli/commands/export.ts";
 import { runInit } from "./cli/commands/init.ts";
-import { runPlan } from "./cli/commands/plan.ts";
-import { runLoop, runPipelineMode } from "./cli/commands/run.ts";
+import { runLoop, runPipelineV2 } from "./cli/commands/run.ts";
 import { runsCommand } from "./cli/commands/runs.ts";
-import { runScan } from "./cli/commands/scan.ts";
+import { runReport } from "./cli/commands/report.ts";
 import { runTask } from "./cli/commands/task.ts";
-import { runValidate } from "./cli/commands/validate.ts";
-import { runVerify } from "./cli/commands/verify.ts";
-import type { PipelinePhase } from "./execution/pipeline.ts";
+import { runScanPipeline } from "./cli/commands/pipeline/scan.ts";
+import { runValidatePipeline } from "./cli/commands/pipeline/validate.ts";
+import { runPlanPipeline } from "./cli/commands/pipeline/plan.ts";
+import { runConsolidatePipeline } from "./cli/commands/pipeline/consolidate.ts";
+import { runVerifyPipeline } from "./cli/commands/pipeline/verify.ts";
 import { logError } from "./ui/logger.ts";
 
 async function main(): Promise<void> {
@@ -45,7 +45,6 @@ async function main(): Promise<void> {
 		// Handle "milhouse runs" subcommand
 		if (runsMode) {
 			if (!runsSubcommand) {
-				// Default to list
 				await runsCommand("list", runsArgs, { workDir: process.cwd() });
 			} else {
 				await runsCommand(runsSubcommand, runsArgs, { workDir: process.cwd() });
@@ -71,39 +70,39 @@ async function main(): Promise<void> {
 			return;
 		}
 
-		// Handle --scan
+		// Handle --scan (PhaseRunner)
 		if (scanMode) {
-			await runScan(options);
+			await runScanPipeline(options);
 			return;
 		}
 
-		// Handle --validate
+		// Handle --validate (PhaseRunner)
 		if (validateMode) {
-			await runValidate(options);
+			await runValidatePipeline(options);
 			return;
 		}
 
-		// Handle --plan
+		// Handle --plan (PhaseRunner)
 		if (planMode) {
-			await runPlan(options);
+			await runPlanPipeline(options);
 			return;
 		}
 
-		// Handle --consolidate
+		// Handle --consolidate (PhaseRunner)
 		if (consolidateMode) {
-			await runConsolidate(options);
+			await runConsolidatePipeline(options);
 			return;
 		}
 
-		// Handle --exec
+		// Handle --exec (stays specialized, not in PhaseRunner)
 		if (execMode) {
 			await runExec(options);
 			return;
 		}
 
-		// Handle --verify
+		// Handle --verify (PhaseRunner)
 		if (verifyMode) {
-			await runVerify(options);
+			await runVerifyPipeline(options);
 			return;
 		}
 
@@ -113,29 +112,27 @@ async function main(): Promise<void> {
 			return;
 		}
 
-		// Handle --run (full pipeline mode)
+		// Handle --run (new pipeline orchestrator)
 		if (runMode || resumeMode) {
-			await runPipelineMode(options, {
-				startPhase: startPhase as PipelinePhase | undefined,
-				endPhase: endPhase as PipelinePhase | undefined,
+			await runPipelineV2(options, {
+				startPhase,
+				endPhase,
 				resume: resumeMode,
 				force: forceMode,
-				failFast,
 			});
 			return;
 		}
 
-		// Single task mode (brownfield)
-		// Note: Check for command aliases first (scan, validate, plan, etc.)
+		// Command aliases (e.g., "milhouse scan" as alias for "milhouse --scan")
 		if (task) {
-			// Handle command aliases (e.g., "milhouse scan" as alias for "milhouse --scan")
 			const commandAliases: Record<string, () => Promise<unknown>> = {
-				scan: () => runScan(options),
-				validate: () => runValidate(options),
-				plan: () => runPlan(options),
-				consolidate: () => runConsolidate(options),
+				scan: () => runScanPipeline(options),
+				validate: () => runValidatePipeline(options),
+				plan: () => runPlanPipeline(options),
+				consolidate: () => runConsolidatePipeline(options),
 				exec: () => runExec(options),
-				verify: () => runVerify(options),
+				verify: () => runVerifyPipeline(options),
+				report: () => runReport(options),
 				init: () => runInit(),
 				config: () => showConfig(),
 			};
@@ -146,7 +143,7 @@ async function main(): Promise<void> {
 				return;
 			}
 
-			// Otherwise, treat as a single task (brownfield mode)
+			// Single task mode (brownfield)
 			await runTask(task, options);
 			return;
 		}
