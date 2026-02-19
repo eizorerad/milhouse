@@ -86,56 +86,13 @@ export {
 export * from "./hooks/index.ts";
 
 // ============================================================================
-// Agent Re-exports
+// Agent Re-exports (minimal — import agents/ directly for full API)
 // ============================================================================
-// Re-export agent types and utilities needed for execution
 export {
-	type AgentConfig,
 	type AgentMetrics,
-	type AgentRequest,
-	type AgentResponse,
-	type EXInput,
-	type EXOutput,
 	createEmptyMetrics,
 	createMetricsFromResult,
 } from "../agents/types.ts";
-
-export {
-	ExecutorAgent,
-	createExecutorAgent,
-	buildExecutorPrompt as buildAgentExecutorPrompt,
-	isExecutionSuccessful,
-	hasModifiedFiles,
-	getModifiedFileCount,
-	wasFileModified,
-	getModifiedFilesMatching,
-	getModifiedFilesByExtension,
-	hasExecutionError,
-	getExecutionError,
-	convertToTaskUpdate,
-	createExecutionRecordData,
-	validateTaskForExecution,
-	areAcceptanceCriteriaSatisfiable,
-	getCriteriaWithCheckCommands,
-	getCriteriaWithoutCheckCommands,
-	formatExecutionAsMarkdown,
-	parseExecutionFromResponse,
-} from "../agents/executor.ts";
-
-export {
-	BaseAgent,
-	AgentExecutionError,
-	AgentTimeoutError,
-	executeAgentsInParallel,
-} from "../agents/base.ts";
-
-export {
-	createAgent,
-	createEX,
-	AGENT_REGISTRY,
-	getAgentRegistryEntry,
-	type PipelineAgentRole,
-} from "../agents/index.ts";
 
 // ============================================================================
 // Unified Strategy-based Execution Function

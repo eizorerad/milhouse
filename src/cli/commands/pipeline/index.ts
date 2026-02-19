@@ -28,42 +28,6 @@ export { runConsolidatePipeline } from "./consolidate.ts";
 export { runVerifyPipeline } from "./verify.ts";
 
 // ============================================================================
-// LEGACY: Re-exports from monolithic command files (backward compatibility)
-// These will be removed in T10 when old commands are deleted.
+// Exec command (exec stays as-is, not runner-based yet)
 // ============================================================================
-
-// Re-export scan command
-export { runScan } from "../scan.ts";
-
-// Re-export validate command
-export { runValidate } from "../validate.ts";
-
-// Re-export plan command
-export { runPlan } from "../plan.ts";
-
-// Re-export consolidate command
-export {
-	runConsolidate,
-	topologicalSort,
-	buildDependencyGraph,
-	assignParallelGroups,
-} from "../consolidate.ts";
-
-// Re-export exec command (exec stays as-is, not runner-based)
 export { runExec, buildExecutorPrompt, getReadyTasksForRun, type ExecResult } from "../exec.ts";
-
-// Re-export verify command
-export {
-	runVerify,
-	buildVerifierPrompt,
-	runPlaceholderGate,
-	runDiffHygieneGate,
-	runEvidenceGate,
-	runDoDGate,
-	runEnvConsistencyGate,
-	runAllGates,
-	GATES,
-	type GateName,
-	type VerifyResult,
-	type VerificationIssue,
-} from "../verify.ts";
