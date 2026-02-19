@@ -3,6 +3,8 @@
  */
 
 import type { PipelinePhase } from "../domain/config/types.ts";
+import type { AIEngine } from "../engines/types.ts";
+import type { AgentRole, RunPhase } from "../state/types.ts";
 
 /** Per-phase model override */
 export interface PhaseModelConfig {
@@ -89,4 +91,99 @@ export interface ResolvedConfig {
  */
 export function resolvePhaseModel(config: ResolvedConfig, phase: string): string {
 	return config.phases[phase]?.model ?? config.model;
+}
+
+// ============================================================================
+// PHASE RUNNER TYPES
+// ============================================================================
+
+/** How the phase processes items */
+export type PhaseMode = "per-item" | "single-agent";
+
+/** Result of processing a single item */
+export interface PhaseItemResult<TResult = unknown> {
+	item: unknown;
+	result: TResult;
+	success: boolean;
+	error?: string;
+	inputTokens: number;
+	outputTokens: number;
+}
+
+/** Overall result of a phase run */
+export interface PhaseRunResult<TResult = unknown> {
+	phase: string;
+	runId: string;
+	success: boolean;
+	items: PhaseItemResult<TResult>[];
+	totalInputTokens: number;
+	totalOutputTokens: number;
+	cost: number;
+	duration: number;
+	/** Data passed to next phase */
+	data?: Record<string, unknown>;
+}
+
+/** Context passed to phase hooks and functions */
+export interface PhaseContext {
+	runId: string;
+	workDir: string;
+	engine: AIEngine;
+	config: ResolvedConfig;
+	/** Shared store for passing data between hooks */
+	store: Record<string, unknown>;
+}
+
+/**
+ * PhaseConfig — the single interface that all phases implement
+ *
+ * Each phase provides:
+ * - Identity (name, role)
+ * - JSON schema for structured output
+ * - Mode (per-item or single-agent)
+ * - Functions to load items, build prompts, parse responses, save results
+ * - Lifecycle hooks
+ * - Retry configuration (optional)
+ */
+export interface PhaseConfig<TItem = unknown, TResult = unknown> {
+	/** Phase identity */
+	name: string;
+	role: AgentRole;
+
+	/** JSON schema for --json-schema (forces structured output) */
+	jsonSchema?: Record<string, unknown>;
+
+	/** How to run: one agent for all items, or one agent per item */
+	mode: PhaseMode;
+
+	/** Default parallel agents (overridden by config.workers) */
+	defaultParallel: number;
+
+	/** Load work items for this phase */
+	loadItems(ctx: PhaseContext): Promise<TItem[]> | TItem[];
+
+	/** Build the prompt for one item (per-item) or all items (single-agent) */
+	buildPrompt(item: TItem, ctx: PhaseContext): string;
+
+	/** Parse AI response into structured result */
+	parseResponse(response: string, item: TItem, ctx: PhaseContext): TResult;
+
+	/** Save all results to state */
+	saveResults(results: PhaseItemResult<TResult>[], ctx: PhaseContext): Promise<void> | void;
+
+	/** Determine next pipeline phase based on results */
+	nextPhase?(results: PhaseItemResult<TResult>[], ctx: PhaseContext): RunPhase;
+
+	/** Format summary for terminal output */
+	formatSummary?(results: PhaseItemResult<TResult>[], ctx: PhaseContext): void;
+
+	// --- Lifecycle hooks ---
+	beforeRun?(ctx: PhaseContext): Promise<void> | void;
+	afterRun?(results: PhaseItemResult<TResult>[], ctx: PhaseContext): Promise<void> | void;
+	beforeItem?(item: TItem, ctx: PhaseContext): Promise<TItem> | TItem;
+
+	// --- Retry (validate only) ---
+	isRetryable?: boolean;
+	maxRetryRounds?: number;
+	retryFilter?(items: TItem[], results: PhaseItemResult<TResult>[]): TItem[];
 }
