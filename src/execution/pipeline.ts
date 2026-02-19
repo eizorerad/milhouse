@@ -489,6 +489,18 @@ export async function runPipeline(
 			// Ensure it's set as current (scan should have done this, but be explicit)
 			setCurrentRun(pipelineRunId, workDir);
 		}
+		
+		// If scan found 0 issues, the run is marked as "completed" and there's nothing
+		// for subsequent phases to do. Exit the pipeline gracefully.
+		// Check this separately to ensure it's evaluated even if runId handling changes.
+		if (phase === "scan" && phaseResult.success) {
+			const issuesFound = phaseResult.data?.issuesFound;
+			logDebug(`Scan completed with issuesFound=${issuesFound} (type: ${typeof issuesFound})`);
+			if (issuesFound === 0) {
+				logSuccess("No issues found - pipeline completed early");
+				break;
+			}
+		}
 
 		if (!phaseResult.success) {
 			// Emit phase error event
