@@ -25,7 +25,7 @@ import { Command } from "commander";
 import type { RuntimeOptions } from "./runtime-options.ts";
 import type { Severity } from "../state/types.ts";
 import { banner, theme } from "../ui/theme";
-import { MILHOUSE_BRANDING, type MilhousePhase } from "./types.ts";
+import { MILHOUSE_BRANDING, MILHOUSE_PHASES, type MilhousePhase } from "./types.ts";
 
 /**
  * Milhouse CLI version
@@ -105,14 +105,14 @@ export function createProgram(): Command {
 		.option("--run-id <id>", "Specify run ID to use (full or partial match)")
 		.option("--resume", "Resume Milhouse pipeline from where it left off")
 		.option("--force", "Force re-run even if phases already completed")
-		.option("--fail-fast", "Stop pipeline on first phase failure (default: true)")
+		.option("--fail-fast", "Stop on first failure — applies to both pipeline phases and task execution (default: true)")
 		.option(
 			"--start-phase <phase>",
-			"Start from a specific phase (scan, validate, plan, consolidate, exec, verify)",
+			"Start from a specific phase",
 		)
 		.option(
 			"--end-phase <phase>",
-			"Stop after a specific phase (scan, validate, plan, consolidate, exec, verify)",
+			"Stop after a specific phase",
 		)
 		.option("--no-tests, --skip-tests", "Skip running tests")
 		.option("--no-lint, --skip-lint", "Skip running lint")
@@ -253,6 +253,17 @@ function parseSingleSeverity(str: string | undefined): Severity | undefined {
 	const valid: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
 	const normalized = str.trim().toUpperCase() as Severity;
 	return valid.includes(normalized) ? normalized : undefined;
+}
+
+/**
+ * Validate and parse a pipeline phase name
+ */
+function validatePhase(value: string | undefined): MilhousePhase | undefined {
+	if (!value) return undefined;
+	const phases: readonly string[] = MILHOUSE_PHASES;
+	if (phases.includes(value)) return value as MilhousePhase;
+	console.error(`Error: invalid phase "${value}". Valid phases: ${MILHOUSE_PHASES.join(", ")}`);
+	process.exit(1);
 }
 
 /**
@@ -424,7 +435,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 		browserEnabled: opts.browser === true ? "true" : opts.browser === false ? "false" : "auto",
 		modelOverride,
 		skipMerge: opts.merge === false,
-		failFast: opts.execFailFast || false,
+		failFast: opts.execFailFast || opts.failFast !== false,
 		useWorktrees: opts.worktrees || useParallel || false,
 		// execByIssue defaults to true (issue-based parallel execution is the default)
 		// --no-exec-by-issue explicitly sets it to false
@@ -482,8 +493,8 @@ export function parseArgs(args: string[]): ParsedArgs {
 		resumeMode: opts.resume || false,
 		forceMode: opts.force || false,
 		failFast: opts.failFast !== false,
-		startPhase: opts.startPhase as MilhousePhase | undefined,
-		endPhase: opts.endPhase as MilhousePhase | undefined,
+		startPhase: validatePhase(opts.startPhase),
+		endPhase: validatePhase(opts.endPhase),
 		runsMode,
 		runsSubcommand,
 		runsArgs,

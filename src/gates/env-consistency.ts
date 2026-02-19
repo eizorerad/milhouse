@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ProbeResult, ProbeType } from "../probes/types.ts";
+import { ProbeTypeSchema, type ProbeResult, type ProbeType } from "../probes/types.ts";
 import { getCurrentRunId, getRunDir } from "../state/paths.ts";
-import { type Issue, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
+import { type Issue, IssueSchema, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
 import { logDebug, logInfo } from "../ui/logger.ts";
 
 /** Resolve a path relative to the current run dir, falling back to .milhouse/ */
@@ -247,13 +247,11 @@ export function loadIssues(workDir: string, issuesPath?: string): Issue[] {
 		const data = JSON.parse(content);
 
 		// Handle both array format and object with issues array
-		if (Array.isArray(data)) {
-			return data as Issue[];
-		}
-		if (data.issues && Array.isArray(data.issues)) {
-			return data.issues as Issue[];
-		}
-		return [];
+		const raw = Array.isArray(data) ? data : (data?.issues && Array.isArray(data.issues) ? data.issues : []);
+		return raw.flatMap((item: unknown) => {
+			const result = IssueSchema.safeParse(item);
+			return result.success ? [result.data] : [];
+		});
 	} catch {
 		return [];
 	}
@@ -283,7 +281,9 @@ export function getProbeResults(
 
 		for (const entry of entries) {
 			if (entry.isDirectory()) {
-				const probeType = entry.name as ProbeType;
+				const parsed = ProbeTypeSchema.safeParse(entry.name);
+				if (!parsed.success) continue;
+				const probeType = parsed.data;
 				const probeDirPath = path.join(fullPath, entry.name);
 				const probeResults: ProbeResult[] = [];
 
