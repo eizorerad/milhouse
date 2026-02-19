@@ -17,7 +17,27 @@ export const EvidenceSchema = z.object({
 export type Evidence = z.infer<typeof EvidenceSchema>;
 
 /**
- * Issue/Problem status
+ * Work item type - classifies the kind of work
+ */
+export const WorkItemTypeSchema = z.enum([
+	"bug", // Bug fix / defect
+	"feature", // New functionality
+	"refactor", // Code restructuring
+	"improvement", // Performance, security, DX improvements
+	"task", // Generic task
+]);
+
+export type WorkItemType = z.infer<typeof WorkItemTypeSchema>;
+
+/**
+ * Work item status
+ *
+ * Status meanings vary by work item type:
+ * - UNVALIDATED: Not yet validated (all types)
+ * - CONFIRMED: Bug confirmed / Feature feasible / Refactor needed / Task valid
+ * - FALSE: Bug is false positive / Feature not needed / Task invalid
+ * - PARTIAL: Partially valid - scope or priority differs from described
+ * - MISDIAGNOSED: Valid need exists but different approach recommended
  */
 export const IssueStatusSchema = z.enum([
 	"UNVALIDATED",
@@ -37,18 +57,32 @@ export const SeveritySchema = z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW"]);
 export type Severity = z.infer<typeof SeveritySchema>;
 
 /**
- * Issue/Problem model
+ * Work item model (historically called "Issue" - name kept for backward compatibility)
+ *
+ * Supports all work types: bugs, features, refactoring, improvements, tasks.
+ * Fields `symptom` and `hypothesis` are kept for backward compatibility;
+ * prefer `title` and `rationale` for new code.
  */
 export const IssueSchema = z.object({
 	id: z.string(),
+	/** Work item type (optional for backward compatibility, defaults to "bug" in helpers) */
+	type: WorkItemTypeSchema.optional(),
+	/** Universal title for the work item (preferred over symptom) */
+	title: z.string().optional(),
+	/** Universal rationale/analysis (preferred over hypothesis) */
+	rationale: z.string().optional(),
+	/** @deprecated Use `title` instead. Observable symptom (for bugs) */
 	symptom: z.string(),
+	/** @deprecated Use `rationale` instead. Root cause hypothesis (for bugs) */
 	hypothesis: z.string(),
 	evidence: z.array(EvidenceSchema).default([]),
 	status: IssueStatusSchema.default("UNVALIDATED"),
-	corrected_description: z.string().nullish(), // Accept both null and undefined
+	corrected_description: z.string().nullish(),
 	severity: SeveritySchema.default("MEDIUM"),
 	frequency: z.string().nullish(),
 	blast_radius: z.string().nullish(),
+	/** Scope of impact for this work item (universal alternative to blast_radius) */
+	scope_impact: z.string().nullish(),
 	strategy: z.string().nullish(),
 	related_task_ids: z.array(z.string()).default([]),
 	created_at: z.string(),
@@ -57,6 +91,22 @@ export const IssueSchema = z.object({
 });
 
 export type Issue = z.infer<typeof IssueSchema>;
+
+/**
+ * Helper: get the display title for a work item
+ * Returns `title` if set, falls back to `symptom`
+ */
+export function getWorkItemTitle(issue: Issue): string {
+	return issue.title ?? issue.symptom;
+}
+
+/**
+ * Helper: get the rationale/analysis for a work item
+ * Returns `rationale` if set, falls back to `hypothesis`
+ */
+export function getWorkItemRationale(issue: Issue): string {
+	return issue.rationale ?? issue.hypothesis;
+}
 
 /**
  * Task status
@@ -224,12 +274,12 @@ export type AgentRole = z.infer<typeof AgentRoleSchema>;
  * Agent role descriptions
  */
 export const AGENT_ROLES: Record<AgentRole, string> = {
-	LI: "Lead Investigator - Initial scan and problem candidate identification",
-	IV: "Issue Validator - Per-problem validation with evidence",
-	PL: "Planner - WBS generation for validated issues",
+	LI: "Lead Investigator - Codebase analysis and work item identification",
+	IV: "Work Item Validator - Validation with evidence",
+	PL: "Planner - WBS generation for validated work items",
 	PR: "Plan Reviewer - WBS review and refinement",
 	CDM: "Consistency & Dependency Manager - Deduplication and unified planning",
-	EX: "Executor - Story execution with minimal changes",
+	EX: "Executor - Task execution with minimal changes",
 	TV: "Truth Verifier Gate - Evidence validation blocker",
 	RL: "Repo Librarian - Fast context collection",
 	ETI: "Environment Topology Inspector - compose/k8s/.env",

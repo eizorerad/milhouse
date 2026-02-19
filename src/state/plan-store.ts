@@ -27,6 +27,7 @@ import { MILHOUSE_DIR, PLANS_DIR } from "../domain/config/directories.ts";
 import { createLogger } from "../observability/logger.ts";
 import { StateWriteError } from "./errors.ts";
 import { getCurrentRunId, getRunDir } from "./paths.ts";
+import { PLAN_FILES } from "./types.ts";
 
 // ============================================================================
 // METADATA HEADER GENERATION
@@ -307,7 +308,7 @@ export function readIssueWbsJson(workDir: string, issueId: string): object | nul
  * @returns Full path to the written file
  */
 export function writeProblemBrief(workDir: string, markdown: string): string {
-	return writePlanFile(workDir, "problem_brief.md", markdown);
+	return writePlanFile(workDir, PLAN_FILES.problem_brief, markdown);
 }
 
 /**
@@ -317,7 +318,7 @@ export function writeProblemBrief(workDir: string, markdown: string): string {
  * @returns Markdown content or null if not found
  */
 export function readProblemBrief(workDir: string): string | null {
-	return readPlanFile(workDir, "problem_brief.md");
+	return readPlanFile(workDir, PLAN_FILES.problem_brief);
 }
 
 /**
@@ -522,7 +523,7 @@ export function readIssueWbsJsonForRun(workDir: string, runId: string, issueId: 
  * @returns Full path to the written file
  */
 export function writeProblemBriefForRun(workDir: string, runId: string, markdown: string): string {
-	return writePlanFileForRun(workDir, runId, "problem_brief.md", markdown);
+	return writePlanFileForRun(workDir, runId, PLAN_FILES.problem_brief, markdown);
 }
 
 /**
@@ -536,7 +537,7 @@ export function writeProblemBriefForRun(workDir: string, runId: string, markdown
  * @returns Markdown content or null if not found
  */
 export function readProblemBriefForRun(workDir: string, runId: string): string | null {
-	return readPlanFileForRun(workDir, runId, "problem_brief.md");
+	return readPlanFileForRun(workDir, runId, PLAN_FILES.problem_brief);
 }
 
 /**

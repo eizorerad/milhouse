@@ -1,5 +1,5 @@
 import { getConfigService } from "../services/config/index.ts";
-import type { Evidence, Issue, IssueStatus } from "../state/types.ts";
+import { type Evidence, type Issue, type IssueStatus, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
 import { extractJsonFromResponse } from "../utils/json-extractor.ts";
 import { BaseAgent } from "./base.ts";
 import {
@@ -28,10 +28,10 @@ interface ParsedValidation {
 }
 
 /**
- * Issue Validator Agent
+ * Work Item Validator Agent
  *
- * Responsible for validating issues identified by the Lead Investigator.
- * Confirms or refutes each issue with concrete evidence.
+ * Responsible for validating work items identified by the Lead Investigator.
+ * Confirms validity, feasibility, and correctness of each work item with evidence.
  *
  * Capabilities:
  * - Read files from the repository
@@ -55,10 +55,11 @@ export class IssueValidatorAgent extends BaseAgent<IVInput, IVOutput> {
 		const sections: PromptSection[] = [];
 
 		// Role section
+		const itemType = input.issue.type ?? "bug";
 		sections.push(
 			createRoleSection(
 				"IV",
-				"You are validating a specific issue identified by the Lead Investigator. Your task is to confirm or refute this issue with concrete evidence.",
+				`You are validating a specific work item (type: ${itemType}) identified by the Lead Investigator. Your task is to validate this work item with concrete evidence.`,
 			),
 		);
 
@@ -97,15 +98,19 @@ export class IssueValidatorAgent extends BaseAgent<IVInput, IVOutput> {
 			});
 		}
 
-		// Issue section
+		// Work item section
 		const issue = input.issue;
 		const issueDetails = [
 			`**ID**: ${issue.id}`,
-			`**Symptom**: ${issue.symptom}`,
-			`**Hypothesis**: ${issue.hypothesis}`,
+			`**Type**: ${itemType}`,
+			`**Title**: ${getWorkItemTitle(issue)}`,
+			`**Rationale**: ${getWorkItemRationale(issue)}`,
 			`**Severity**: ${issue.severity}`,
 		];
 
+		if (issue.scope_impact) {
+			issueDetails.push(`**Scope Impact**: ${issue.scope_impact}`);
+		}
 		if (issue.frequency) {
 			issueDetails.push(`**Frequency**: ${issue.frequency}`);
 		}
@@ -118,7 +123,7 @@ export class IssueValidatorAgent extends BaseAgent<IVInput, IVOutput> {
 
 		sections.push({
 			type: "input",
-			header: "Issue to Validate",
+			header: "Work Item to Validate",
 			content: issueDetails.join("\n"),
 			priority: SECTION_PRIORITIES.input,
 		});
@@ -152,15 +157,15 @@ export class IssueValidatorAgent extends BaseAgent<IVInput, IVOutput> {
 		sections.push({
 			type: "task",
 			header: "Task",
-			content: `Investigate this issue thoroughly and determine its validity.
+			content: `Investigate this work item thoroughly and determine its validity.
 
 1. Search for evidence in the codebase (file:line references)
 2. Run any necessary probes or checks to verify claims
-3. Determine the issue status:
-   - **CONFIRMED**: Issue exists as described with evidence
-   - **FALSE**: Issue does not exist or is a false positive
-   - **PARTIAL**: Issue exists but scope/severity differs
-   - **MISDIAGNOSED**: Real problem exists but with different root cause`,
+3. Determine the status:
+   - **CONFIRMED**: Work item is valid and actionable with evidence
+   - **FALSE**: Work item is not valid or not needed
+   - **PARTIAL**: Work item is valid but scope/severity/priority differs
+   - **MISDIAGNOSED**: Valid need exists but a different approach is recommended`,
 			priority: SECTION_PRIORITIES.task,
 		});
 
@@ -224,9 +229,9 @@ export class IssueValidatorAgent extends BaseAgent<IVInput, IVOutput> {
 		}
 
 		// Fallback simple prompt
-		return `You are the Issue Validator (IV) agent.
-Validate issue ${input.issue.id}: ${input.issue.symptom}
-Hypothesis: ${input.issue.hypothesis}
+		return `You are the Work Item Validator (IV) agent.
+Validate work item ${input.issue.id}: ${getWorkItemTitle(input.issue)}
+Rationale: ${getWorkItemRationale(input.issue)}
 Respond with JSON containing status and evidence.`;
 	}
 

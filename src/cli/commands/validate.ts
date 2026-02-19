@@ -12,6 +12,7 @@ import {
 } from "../../engines/opencode/index.ts";
 import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../../engines/tmux/index.ts";
 import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
+import { getWorkItemTitle } from "../../state/types.ts";
 import {
 	syncLegacyPlansView,
 	writeProblemBriefForRun,
@@ -260,7 +261,7 @@ async function validateSingleIssueDeep(
 
 	const prompt = buildDeepIssueValidatorPrompt(issue, workDir, agentNum, probeEvidence);
 
-	logDebug(`Agent #${agentNum} validating issue ${issue.id}: ${issue.symptom.slice(0, 50)}...`);
+	logDebug(`Agent #${agentNum} validating ${issue.id}: ${getWorkItemTitle(issue).slice(0, 50)}...`);
 
 	let result: AIResult;
 	try {
@@ -485,7 +486,7 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 	logInfo(`Starting DEEP validation with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(`Mode: ${pc.cyan(`${maxParallel} parallel agents`)} (each agent = 1 issue)`);
 	logInfo(`Role: ${AGENT_ROLES.IV}`);
-	logInfo(`Issues to validate: ${initialUnvalidatedIssues.length}`);
+	logInfo(`Work items to validate: ${initialUnvalidatedIssues.length}`);
 	if (retryConfig.enabled) {
 		logInfo(
 			`Retry: ${pc.cyan(`enabled`)} (max ${retryConfig.maxRetries} retries, ${retryConfig.delayMs}ms delay)`,
@@ -640,11 +641,11 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 		currentRound++;
 	}
 
-	// Generate updated Problem Brief using PlanStore (run-aware)
+	// Generate updated Work Brief using PlanStore (run-aware)
 	const allIssues = loadIssuesForRun(runId, workDir);
 	const problemBriefContent = generateValidatedProblemBrief(allIssues, runId);
 	const problemBriefPath = writeProblemBriefForRun(workDir, runId, problemBriefContent);
-	logDebug(`Problem Brief written to: ${problemBriefPath}`);
+	logDebug(`Work Brief written to: ${problemBriefPath}`);
 
 	// Sync legacy plans view for backward compatibility
 	syncLegacyPlansView(workDir);
@@ -663,10 +664,10 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 	// Summary
 	console.log("");
 	console.log("=".repeat(60));
-	logInfo("Deep Validation Summary:");
-	console.log(`  Issues validated:  ${pc.cyan(String(totalValidated))}`);
+	logInfo("Validation Summary:");
+	console.log(`  Items validated:   ${pc.cyan(String(totalValidated))}`);
 	console.log(`  ${pc.red("●")} Confirmed:       ${pc.red(String(totalConfirmed))}`);
-	console.log(`  ${pc.green("✓")} False positives: ${pc.green(String(totalFalse))}`);
+	console.log(`  ${pc.green("✓")} Not valid:       ${pc.green(String(totalFalse))}`);
 	console.log(`  ${pc.yellow("◐")} Partial:         ${pc.yellow(String(totalPartial))}`);
 	console.log(`  ${pc.magenta("◑")} Misdiagnosed:    ${pc.magenta(String(totalMisdiagnosed))}`);
 	if (finalUnvalidated > 0) {
@@ -675,7 +676,7 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 	console.log(`  Validation rounds: ${pc.cyan(String(totalRounds))}`);
 	console.log(`  Duration:          ${formatDuration(duration)}`);
 	console.log(`  Tokens:            ${formatTokens(totalInputTokens, totalOutputTokens)}`);
-	console.log(`  Problem Brief:     ${pc.cyan(problemBriefPath)}`);
+	console.log(`  Work Brief:        ${pc.cyan(problemBriefPath)}`);
 	console.log(`  Validation Reports: ${pc.cyan(getValidationReportsDir(workDir))}`);
 	console.log("=".repeat(60));
 
@@ -687,13 +688,13 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 		}
 	}
 
-	// Show high-confidence confirmed issues
+	// Show high-confidence confirmed items
 	const highConfidenceConfirmed = allReports.filter(
 		(r) => r.status === "CONFIRMED" && r.confidence === "HIGH",
 	);
 	if (highConfidenceConfirmed.length > 0) {
 		console.log("");
-		logInfo(`High-confidence issues requiring attention (${highConfidenceConfirmed.length}):`);
+		logInfo(`High-confidence work items requiring attention (${highConfidenceConfirmed.length}):`);
 		for (const report of highConfidenceConfirmed) {
 			console.log(`  ${pc.red("●")} ${report.issue_id}: ${report.summary.slice(0, 60)}...`);
 		}
@@ -701,10 +702,10 @@ export async function runValidate(options: RuntimeOptions): Promise<ValidateResu
 
 	if (totalConfirmed > 0 || totalPartial > 0) {
 		console.log("");
-		logSuccess(`Run ${pc.cyan("milhouse plan")} to generate WBS for confirmed issues`);
+		logSuccess(`Run ${pc.cyan("milhouse plan")} to generate WBS for confirmed work items`);
 	} else if (totalFalse === totalValidated && totalValidated > 0) {
 		console.log("");
-		logSuccess("All issues were false positives. No planning needed.");
+		logSuccess("All work items were invalid. No planning needed.");
 	}
 
 	return {

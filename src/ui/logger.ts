@@ -85,5 +85,6 @@ export function formatDuration(ms: number): string {
 export function formatTokens(input: number, output: number): string {
 	const total = input + output;
 	if (total === 0) return "";
-	return pc.dim(`(${input.toLocaleString()} in / ${output.toLocaleString()} out)`);
+	const fmt = new Intl.NumberFormat("en-US");
+	return pc.dim(`(${fmt.format(input)} in / ${fmt.format(output)} out)`);
 }

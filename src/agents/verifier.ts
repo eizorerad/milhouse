@@ -23,7 +23,7 @@ export const GATE_DESCRIPTIONS: Record<GateName, string> = {
 	evidence: "Evidence Gate - No claims without proof",
 	diffHygiene: "Diff Hygiene Gate - No silent refactors",
 	placeholder: "Placeholder Gate - No TODO/mock/stubs",
-	envConsistency: "Environment Consistency Gate - Probes required for infra issues",
+	envConsistency: "Environment Consistency Gate - Probes required for infra changes",
 	dod: "Definition of Done Gate - All acceptance criteria verifiable",
 };
 

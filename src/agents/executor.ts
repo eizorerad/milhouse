@@ -1,5 +1,5 @@
 import { getConfigService } from "../services/config/index.ts";
-import type { DoDCriteria, Issue, Task } from "../state/types.ts";
+import { type DoDCriteria, type Issue, type Task, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
 import { extractJsonFromResponse } from "../utils/json-extractor.ts";
 import { BaseAgent } from "./base.ts";
 import {
@@ -99,13 +99,15 @@ export class ExecutorAgent extends BaseAgent<EXInput, EXOutput> {
 			});
 		}
 
-		// Issue context section (if provided)
+		// Work item context section (if provided)
 		if (issue) {
+			const itemType = issue.type ?? "bug";
 			const issueDetails = [
 				`**ID**: ${issue.id}`,
+				`**Type**: ${itemType}`,
 				`**Status**: ${issue.status}`,
-				`**Symptom**: ${issue.symptom}`,
-				`**Hypothesis**: ${issue.hypothesis}`,
+				`**Title**: ${getWorkItemTitle(issue)}`,
+				`**Rationale**: ${getWorkItemRationale(issue)}`,
 			];
 
 			if (issue.corrected_description) {
@@ -116,7 +118,7 @@ export class ExecutorAgent extends BaseAgent<EXInput, EXOutput> {
 
 			sections.push({
 				type: "context",
-				header: "Related Issue",
+				header: "Related Work Item",
 				content: issueDetails.join("\n"),
 				priority: SECTION_PRIORITIES.context + 1,
 			});

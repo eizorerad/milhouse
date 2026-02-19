@@ -68,16 +68,20 @@ export function createProgram(): Command {
 		.option("--init", `Initialize ${MILHOUSE_BRANDING.configDir}/ configuration`)
 		.option("--config", "Show current Milhouse configuration")
 		.option("--add-rule <rule>", "Add a rule to Milhouse config")
-		.option("--scan", `Run ${theme.phase.scan("Lead Investigator")} to create Problem Brief v0`)
+		.option("--scan", `Run ${theme.phase.scan("Lead Investigator")} to create Work Brief v0`)
 		.option(
 			"--scope <focus>",
-			"Focus scan on specific area (e.g., 'frontend zustand', 'auth flow')",
+			"Focus scan on specific area (e.g., 'add auth flow', 'frontend bugs', 'refactor API')",
+		)
+		.option(
+			"--type <type>",
+			"Work item type hint: bug, feature, refactor, improvement, task",
 		)
 		.option(
 			"--validate",
-			`Run ${theme.phase.validate("Issue Validators")} to validate issues with probes`,
+			`Run ${theme.phase.validate("Validators")} to validate work items with evidence`,
 		)
-		.option("--plan", `Run ${theme.phase.plan("Planners")} to generate WBS for validated issues`)
+		.option("--plan", `Run ${theme.phase.plan("Planners")} to generate WBS for validated work items`)
 		.option(
 			"--consolidate",
 			`${theme.phase.consolidate("Merge")} WBS into unified Execution Plan with dependencies`,

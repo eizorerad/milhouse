@@ -1,5 +1,5 @@
 import { getConfigService } from "../services/config/index.ts";
-import type { Evidence, Severity } from "../state/types.ts";
+import type { Evidence, Severity, WorkItemType } from "../state/types.ts";
 import { extractJsonFromResponse } from "../utils/json-extractor.ts";
 import { BaseAgent } from "./base.ts";
 import {
@@ -12,22 +12,27 @@ import {
 } from "./types.ts";
 
 /**
- * Parsed issue from AI response
+ * Parsed work item from AI response
  */
 interface ParsedIssue {
-	symptom: string;
-	hypothesis: string;
+	type?: WorkItemType;
+	title?: string;
+	rationale?: string;
+	symptom?: string;
+	hypothesis?: string;
 	severity: Severity;
 	frequency?: string;
 	blast_radius?: string;
+	scope_impact?: string;
 	strategy?: string;
 }
 
 /**
  * Lead Investigator Agent
  *
- * Responsible for initial repository scanning to identify potential problems,
- * issues, and technical debt. Produces Problem Brief v0 (UNVALIDATED).
+ * Responsible for initial repository analysis to identify work items.
+ * Supports all work types: bugs, features, refactoring, improvements, tasks.
+ * Produces Work Brief v0 (UNVALIDATED).
  *
  * Capabilities:
  * - Read files from the repository
@@ -35,8 +40,8 @@ interface ParsedIssue {
  * - Cannot write files or create branches/commits/PRs
  *
  * Output:
- * - List of candidate issues with symptom, hypothesis, severity
- * - Each issue starts as UNVALIDATED
+ * - List of candidate work items with title, rationale, type, severity
+ * - Each work item starts as UNVALIDATED
  */
 export class LeadInvestigatorAgent extends BaseAgent<LIInput, LIOutput> {
 	constructor(configOverrides?: Partial<AgentConfig>) {
@@ -53,7 +58,7 @@ export class LeadInvestigatorAgent extends BaseAgent<LIInput, LIOutput> {
 		sections.push(
 			createRoleSection(
 				"LI",
-				"You are scanning this repository to identify potential problems, issues, or technical debt.",
+				"You are analyzing this repository to identify work items. Work items can be bugs, features, refactoring opportunities, improvements, or general tasks. Determine the intent from the scope and produce appropriate work items.",
 			),
 		);
 
@@ -106,14 +111,18 @@ export class LeadInvestigatorAgent extends BaseAgent<LIInput, LIOutput> {
 		sections.push({
 			type: "task",
 			header: "Task",
-			content: `Scan the repository and identify candidate problems. For each issue found, provide:
+			content: `Analyze the repository and identify work items based on the scope. For each work item, provide:
 
-1. **Symptom**: What observable behavior indicates a problem?
-2. **Hypothesis**: What is the likely root cause?
-3. **Severity**: CRITICAL | HIGH | MEDIUM | LOW
-4. **Frequency**: How often does this occur? (optional)
-5. **Blast Radius**: What is affected if this fails? (optional)
-6. **Strategy**: Suggested fix approach (optional)`,
+1. **Type**: bug | feature | refactor | improvement | task
+2. **Title**: Clear, concise title describing the work item
+3. **Rationale**: Why this work is needed (root cause for bugs, justification for features, etc.)
+4. **Severity**: CRITICAL | HIGH | MEDIUM | LOW (priority level)
+5. **Scope Impact**: What areas of the codebase are affected (optional)
+6. **Strategy**: Suggested implementation approach (optional)
+
+If the scope describes a specific task (e.g. "add dark mode", "refactor auth module"), create work items that break down that task.
+If the scope describes an area to investigate (e.g. "authentication bugs", "performance issues"), scan for problems in that area.
+If no scope is given, scan for bugs, technical debt, and improvement opportunities.`,
 			priority: SECTION_PRIORITIES.task,
 		});
 
@@ -121,22 +130,24 @@ export class LeadInvestigatorAgent extends BaseAgent<LIInput, LIOutput> {
 		sections.push({
 			type: "output",
 			header: "Output Format",
-			content: `Respond with a JSON array of issues in this exact format:
+			content: `Respond with a JSON array of work items in this exact format:
 
 \`\`\`json
 [
   {
-    "symptom": "Description of the observable problem",
-    "hypothesis": "Root cause analysis",
+    "type": "bug",
+    "title": "Clear title describing the work item",
+    "rationale": "Why this work is needed - root cause, justification, or analysis",
     "severity": "HIGH",
-    "frequency": "On every page load",
-    "blast_radius": "All user sessions",
-    "strategy": "Implement connection pooling"
+    "scope_impact": "Components or areas affected",
+    "strategy": "Suggested implementation approach"
   }
 ]
 \`\`\`
 
-If no significant issues are found, return an empty array: \`[]\``,
+Valid types: bug, feature, refactor, improvement, task.
+
+If no significant work items are found, return an empty array: \`[]\``,
 			priority: SECTION_PRIORITIES.output,
 		});
 
@@ -144,13 +155,15 @@ If no significant issues are found, return an empty array: \`[]\``,
 		sections.push({
 			type: "guidelines",
 			header: "Guidelines",
-			content: `- Focus on real, actionable issues (bugs, technical debt, security concerns, performance problems)
+			content: `- Focus on real, actionable work items (bugs, features, refactoring, improvements, tasks)
 - Do NOT report style preferences or minor nitpicks
-- Each issue should be independently fixable
+- Each work item should be independently actionable
 - Be specific about file locations when possible
-- Prioritize issues that block functionality or affect users
-- Look for: missing error handling, race conditions, security vulnerabilities, performance bottlenecks, deprecated dependencies, missing tests for critical paths
-- Status of all issues will be UNVALIDATED (they need probe validation later)
+- Prioritize work items by impact and feasibility
+- For bugs: look for missing error handling, race conditions, security vulnerabilities, performance bottlenecks
+- For features/tasks: analyze existing code structure, identify integration points, assess prerequisites
+- For refactoring: identify code duplication, tight coupling, architectural issues
+- All work items start as UNVALIDATED (they need validation later)
 - Do NOT make claims without evidence in the codebase
 - Investigate thoroughly before reporting`,
 			priority: SECTION_PRIORITIES.guidelines,
@@ -174,7 +187,7 @@ If no significant issues are found, return an empty array: \`[]\``,
 
 		// Fallback simple prompt
 		return `You are the Lead Investigator (LI) agent.
-Scan the repository at ${workDir} for issues and report them as JSON.`;
+Analyze the repository at ${workDir} for work items (bugs, features, refactoring, improvements) and report them as JSON.`;
 	}
 
 	/**
@@ -222,7 +235,8 @@ export function parseIssuesFromResponse(response: string): LIOutput["issues"] {
 }
 
 /**
- * Validate parsed issue has required fields
+ * Validate parsed work item has required fields.
+ * Accepts both new format (title/rationale) and legacy format (symptom/hypothesis).
  */
 function isValidParsedIssue(issue: unknown): issue is ParsedIssue {
 	if (typeof issue !== "object" || issue === null) {
@@ -231,11 +245,16 @@ function isValidParsedIssue(issue: unknown): issue is ParsedIssue {
 
 	const obj = issue as Record<string, unknown>;
 
-	if (typeof obj.symptom !== "string" || obj.symptom.trim() === "") {
+	// Accept new format (title/rationale) or legacy format (symptom/hypothesis)
+	const hasTitle = typeof obj.title === "string" && obj.title.trim() !== "";
+	const hasSymptom = typeof obj.symptom === "string" && obj.symptom.trim() !== "";
+	if (!hasTitle && !hasSymptom) {
 		return false;
 	}
 
-	if (typeof obj.hypothesis !== "string" || obj.hypothesis.trim() === "") {
+	const hasRationale = typeof obj.rationale === "string" && obj.rationale.trim() !== "";
+	const hasHypothesis = typeof obj.hypothesis === "string" && obj.hypothesis.trim() !== "";
+	if (!hasRationale && !hasHypothesis) {
 		return false;
 	}
 
@@ -243,7 +262,8 @@ function isValidParsedIssue(issue: unknown): issue is ParsedIssue {
 }
 
 /**
- * Normalize parsed issue to LIOutput issue format
+ * Normalize parsed work item to LIOutput format.
+ * Supports both new (title/rationale) and legacy (symptom/hypothesis) formats.
  */
 function normalizeIssue(issue: ParsedIssue): LIOutput["issues"][number] {
 	const validSeverities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const;
@@ -251,12 +271,26 @@ function normalizeIssue(issue: ParsedIssue): LIOutput["issues"][number] {
 		? (issue.severity as (typeof validSeverities)[number])
 		: "MEDIUM";
 
+	const validTypes = ["bug", "feature", "refactor", "improvement", "task"] as const;
+	const type = issue.type && validTypes.includes(issue.type as (typeof validTypes)[number])
+		? (issue.type as (typeof validTypes)[number])
+		: undefined;
+
+	// Use title/rationale if available, fall back to symptom/hypothesis
+	const title = issue.title ?? issue.symptom;
+	const rationale = issue.rationale ?? issue.hypothesis;
+
 	return {
-		symptom: issue.symptom,
-		hypothesis: issue.hypothesis,
+		type,
+		title,
+		rationale,
+		// Keep symptom/hypothesis populated for backward compat
+		symptom: title ?? "",
+		hypothesis: rationale ?? "",
 		severity,
 		frequency: issue.frequency,
 		blast_radius: issue.blast_radius,
+		scope_impact: issue.scope_impact,
 		strategy: issue.strategy,
 	};
 }
@@ -286,25 +320,33 @@ export function buildLeadInvestigatorPrompt(workDir: string, input?: LIInput): s
 }
 
 /**
- * Convert LIOutput issues to Issue-compatible format for state storage
+ * Convert LIOutput work items to Issue-compatible format for state storage
  */
 export function convertToIssueData(issue: LIOutput["issues"][number]): {
+	type: string;
+	title?: string;
+	rationale?: string;
 	symptom: string;
 	hypothesis: string;
 	severity: Severity;
 	frequency?: string;
 	blast_radius?: string;
+	scope_impact?: string;
 	strategy?: string;
 	status: "UNVALIDATED";
 	evidence: Evidence[];
 	related_task_ids: string[];
 } {
 	return {
+		type: issue.type ?? "bug",
+		title: issue.title,
+		rationale: issue.rationale,
 		symptom: issue.symptom,
 		hypothesis: issue.hypothesis,
 		severity: issue.severity,
 		frequency: issue.frequency,
 		blast_radius: issue.blast_radius,
+		scope_impact: issue.scope_impact,
 		strategy: issue.strategy,
 		status: "UNVALIDATED",
 		evidence: [],

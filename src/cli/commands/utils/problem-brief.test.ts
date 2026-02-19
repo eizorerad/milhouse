@@ -183,11 +183,11 @@ describe("problem-brief", () => {
 			expect(section).toContain("| **Severity** | CRITICAL |");
 		});
 
-		it("should include hypothesis in table", () => {
+		it("should include rationale in table", () => {
 			const issue = createMockIssue({ hypothesis: "Test hypothesis text" });
 			const section = formatIssueSection(issue);
 
-			expect(section).toContain("| **Hypothesis** | Test hypothesis text |");
+			expect(section).toContain("| **Rationale** | Test hypothesis text |");
 		});
 
 		it("should include corrected description when present", () => {

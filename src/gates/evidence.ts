@@ -72,6 +72,12 @@ export const CLAIM_PATTERNS: Array<{
 		description: "Implementation claim requires file:line evidence",
 	},
 	{
+		pattern: /\badd(?:ed|s|ing)?\s+(?:new\s+)?(?:feature|functionality|support)/i,
+		type: "implementation",
+		requiresEvidence: true,
+		description: "Feature addition claim requires file:line evidence",
+	},
+	{
 		pattern: /\btests?\s+pass(?:ing|ed|es)?/i,
 		type: "test_pass",
 		requiresEvidence: true,

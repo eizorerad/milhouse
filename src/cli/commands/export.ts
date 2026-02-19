@@ -17,9 +17,12 @@ import {
 	type ExecutionRecord,
 	type GraphNode,
 	type Issue,
+	PLAN_FILES,
 	type RunMeta,
 	type RunState,
 	type Task,
+	getWorkItemTitle,
+	getWorkItemRationale,
 } from "../../state/types.ts";
 import {
 	formatDuration,
@@ -168,12 +171,13 @@ ${data.runState ? `> **Phase**: ${data.runState.phase}` : ""}
 
 `);
 				for (const issue of issues) {
-					parts.push(`#### ${issue.id}: ${issue.symptom}
+					parts.push(`#### ${issue.id}: ${getWorkItemTitle(issue)}
 
 | Field | Value |
 |-------|-------|
+| **Type** | ${issue.type ?? "bug"} |
 | **Severity** | ${issue.severity} |
-| **Hypothesis** | ${issue.hypothesis} |
+| **Rationale** | ${getWorkItemRationale(issue)} |
 ${issue.frequency ? `| **Frequency** | ${issue.frequency} |` : ""}
 ${issue.blast_radius ? `| **Blast Radius** | ${issue.blast_radius} |` : ""}
 ${issue.strategy ? `| **Strategy** | ${issue.strategy} |` : ""}
@@ -297,7 +301,7 @@ ${task.error ? `| **Error** | ${task.error} |` : ""}
 	}
 
 	// Include existing plans if available (using PlanStore for run-aware paths)
-	const hasProblemBrief = planFileExists(workDir, "problem_brief.md");
+	const hasProblemBrief = planFileExists(workDir, PLAN_FILES.problem_brief);
 	const hasExecutionPlan = planFileExists(workDir, "execution_plan.md");
 
 	if (hasProblemBrief || hasExecutionPlan) {

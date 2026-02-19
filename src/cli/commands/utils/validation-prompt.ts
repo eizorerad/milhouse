@@ -9,7 +9,7 @@
  */
 
 import { getConfigService } from "../../../services/config/ConfigService.ts";
-import { AGENT_ROLES, type Issue } from "../../../state/types.ts";
+import { AGENT_ROLES, type Issue, getWorkItemTitle, getWorkItemRationale } from "../../../state/types.ts";
 
 /**
  * Build the Deep Issue Validator prompt for thorough investigation
@@ -23,10 +23,13 @@ export function buildDeepIssueValidatorPrompt(
 	const parts: string[] = [];
 
 	// Role definition with agent identity
-	parts.push(`## Role: Issue Validator Agent #${agentNum} (IV-${agentNum})
+	const itemType = issue.type ?? "bug";
+	const itemTitle = getWorkItemTitle(issue);
+
+	parts.push(`## Role: Work Item Validator Agent #${agentNum} (IV-${agentNum})
 ${AGENT_ROLES.IV}
 
-You are **dedicated validator agent #${agentNum}** investigating a SINGLE issue.
+You are **dedicated validator agent #${agentNum}** investigating a SINGLE work item (type: ${itemType}).
 Your task is to perform a DEEP, THOROUGH investigation and produce a comprehensive validation report.
 
 ⚠️ **IMPORTANT**: This is a deep investigation, not a quick check. Take your time to:
@@ -34,7 +37,7 @@ Your task is to perform a DEEP, THOROUGH investigation and produce a comprehensi
 - Trace the code flow from start to end
 - Run actual tests and commands
 - Consider edge cases and alternative explanations
-- Prove or disprove the hypothesis with concrete evidence`);
+- Validate the work item with concrete evidence`);
 
 	// Add project context if available
 	const configService = getConfigService(workDir);
@@ -64,27 +67,30 @@ ${contextParts.join("\n")}`);
 		}
 	}
 
-	// Issue to validate with full context
-	parts.push(`## Issue Under Investigation
+	// Work item to validate with full context
+	const rationale = getWorkItemRationale(issue);
+	parts.push(`## Work Item Under Investigation
 
 | Field | Value |
 |-------|-------|
 | **ID** | ${issue.id} |
-| **Symptom** | ${issue.symptom} |
-| **Hypothesis** | ${issue.hypothesis} |
+| **Type** | ${itemType} |
+| **Title** | ${itemTitle} |
+| **Rationale** | ${rationale} |
 | **Claimed Severity** | ${issue.severity} |
+${issue.scope_impact ? `| **Scope Impact** | ${issue.scope_impact} |` : ""}
 ${issue.frequency ? `| **Claimed Frequency** | ${issue.frequency} |` : ""}
-${issue.blast_radius ? `| **Claimed Blast Radius** | ${issue.blast_radius} |` : ""}
+${issue.blast_radius ? `| **Blast Radius** | ${issue.blast_radius} |` : ""}
 ${issue.strategy ? `| **Suggested Strategy** | ${issue.strategy} |` : ""}
 
 ### Previous Evidence (from scan)
 ${issue.evidence.length > 0 ? issue.evidence.map((e) => `- ${e.type}: ${e.file || e.command || e.probe_id || "N/A"}`).join("\n") : "No previous evidence collected"}`);
 
-	// Deep investigation instructions
-	parts.push(`## Deep Investigation Protocol
+	// Deep investigation instructions - type-aware
+	const investigationInstructions = itemType === "bug" ? `## Deep Investigation Protocol
 
 ### Phase 1: Code Exploration
-1. Read the files mentioned in the symptom/hypothesis completely
+1. Read the files mentioned in the title/rationale completely
 2. Search for related patterns using grep/ripgrep
 3. Trace the code flow to understand the full context
 4. Identify all affected code paths
@@ -109,7 +115,37 @@ ${issue.evidence.length > 0 ? issue.evidence.map((e) => `- ${e.type}: ${e.file |
 ### Phase 5: Recommendations
 1. Propose a fix approach if confirmed
 2. Estimate complexity of the fix
-3. Suggest test strategy to prevent regression`);
+3. Suggest test strategy to prevent regression` : `## Deep Investigation Protocol
+
+### Phase 1: Code Exploration
+1. Read the files and modules relevant to this ${itemType}
+2. Search for related patterns, existing implementations, and integration points
+3. Trace the code flow to understand the full context
+4. Identify all areas that would need to change
+
+### Phase 2: Feasibility Assessment
+1. Verify the work item is feasible with the current architecture
+2. Identify prerequisites and dependencies
+3. Check for existing implementations that could be reused
+4. Assess compatibility with the current codebase
+
+### Phase 3: Impact Analysis
+1. Determine the scope and complexity of changes
+2. List all components that would be affected
+3. Assess risks and potential side effects
+4. Check for potential conflicts with existing functionality
+
+### Phase 4: Evidence Gathering
+1. Document specific code locations relevant to the work
+2. Identify existing tests and patterns to follow
+3. Note technical constraints or limitations
+
+### Phase 5: Recommendations
+1. Propose an implementation approach
+2. Estimate complexity
+3. Suggest test strategy for verification`;
+
+	parts.push(investigationInstructions);
 
 	// Output format
 	parts.push(`## Output Format
@@ -131,15 +167,15 @@ You MUST respond with a JSON object in this EXACT format:
         "file": "path/to/file.ts",
         "line_start": 42,
         "line_end": 60,
-        "relevance": "This is where the bug manifests",
+        "relevance": "Related code location",
         "code_snippet": "optional relevant code"
       }
     ]
   },
-  "root_cause_analysis": {
-    "confirmed_cause": "The actual root cause if CONFIRMED",
-    "alternative_causes": ["Other possible explanations considered"],
-    "why_not_false_positive": "Evidence that this is NOT a false positive"
+  "analysis": {
+    "confirmed_finding": "The validated finding or root cause",
+    "alternative_considerations": ["Other possible approaches or explanations considered"],
+    "validity_assessment": "Evidence supporting the validity of this work item"
   },
   "impact_assessment": {
     "severity_confirmed": true,
@@ -154,10 +190,10 @@ You MUST respond with a JSON object in this EXACT format:
     "conditions": "Under what conditions this occurs"
   },
   "recommendations": {
-    "fix_approach": "Detailed description of how to fix",
+    "implementation_approach": "Detailed description of how to implement",
     "estimated_complexity": "LOW|MEDIUM|HIGH",
     "prerequisites": ["Dependency updates needed", "etc"],
-    "test_strategy": "How to test the fix"
+    "test_strategy": "How to test and verify"
   },
   "evidence": [
     {
@@ -174,10 +210,10 @@ You MUST respond with a JSON object in this EXACT format:
 
 ## Status Definitions
 
-- **CONFIRMED**: Issue exists EXACTLY as described. You have concrete evidence.
-- **FALSE**: Issue does NOT exist. Explain why it's a false positive.
-- **PARTIAL**: Issue exists but severity/scope/frequency is different than claimed.
-- **MISDIAGNOSED**: A real problem exists but the root cause is different.
+- **CONFIRMED**: Work item is valid and actionable. You have concrete evidence.
+- **FALSE**: Work item is not valid or not needed. Explain why.
+- **PARTIAL**: Work item is valid but scope/severity/priority differs from described.
+- **MISDIAGNOSED**: Valid need exists but a different approach is recommended.
 
 ## Quality Requirements
 

@@ -535,7 +535,9 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 			const issueIds = new Set(pendingTasks.map((t) => t.issue_id).filter(Boolean) as string[]);
 			issues = Array.from(issueIds).map((id) => ({
 				id,
-				symptom: `Issue ${id} (derived from tasks)`,
+				type: "task" as const,
+			title: `Work item ${id} (derived from tasks)`,
+			symptom: `Work item ${id} (derived from tasks)`,
 				hypothesis: "Derived from task assignments",
 				evidence: [],
 				status: "CONFIRMED" as const,

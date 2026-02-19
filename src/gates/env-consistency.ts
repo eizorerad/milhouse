@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProbeResult, ProbeType } from "../probes/types.ts";
-import type { Issue } from "../state/types.ts";
+import { type Issue, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
 import { logDebug, logInfo } from "../ui/logger.ts";
 import {
 	type EnvProbeRequirement,
@@ -146,9 +146,13 @@ export const DEFAULT_ENV_CONSISTENCY_OPTIONS: EnvConsistencyOptions = {
 export interface IssueEnvAnalysis {
 	/** Issue ID */
 	issueId: string;
-	/** Issue symptom */
+	/** Work item title */
+	title: string;
+	/** Work item rationale */
+	rationale: string;
+	/** @deprecated Use title */
 	symptom: string;
-	/** Issue hypothesis */
+	/** @deprecated Use rationale */
 	hypothesis: string;
 	/** Detected environment component types */
 	detectedComponents: EnvComponentType[];
@@ -333,8 +337,8 @@ export function analyzeIssue(
 	probeResults: Map<ProbeType, ProbeResult[]>,
 	options: EnvConsistencyOptions,
 ): IssueEnvAnalysis {
-	// Combine symptom and hypothesis for analysis
-	const textToAnalyze = `${issue.symptom} ${issue.hypothesis} ${issue.corrected_description ?? ""}`;
+	// Combine title and rationale for analysis
+	const textToAnalyze = `${getWorkItemTitle(issue)} ${getWorkItemRationale(issue)} ${issue.corrected_description ?? ""}`;
 
 	// Detect environment components
 	const detectedComponents = detectEnvComponents(textToAnalyze, options.customKeywords);
@@ -362,10 +366,14 @@ export function analyzeIssue(
 		? missingProbes.length === 0
 		: requiredProbes.length === 0 || probesRun.length > 0;
 
+	const title = getWorkItemTitle(issue);
+	const rationale = getWorkItemRationale(issue);
 	return {
 		issueId: issue.id,
-		symptom: issue.symptom,
-		hypothesis: issue.hypothesis,
+		title,
+		rationale,
+		symptom: title,
+		hypothesis: rationale,
 		detectedComponents: relevantComponents,
 		requiredProbes,
 		probesRun,
@@ -517,7 +525,7 @@ export async function runEnvConsistencyGate(
 							suggestion: `Run the ${missingProbe} probe to gather evidence for this ${componentType}-related issue`,
 							metadata: {
 								issueId: issue.id,
-								issueSymptom: issue.symptom,
+								issueTitle: getWorkItemTitle(issue),
 								detectedComponents: analysis.detectedComponents,
 								missingProbe,
 								requiredProbes: analysis.requiredProbes,

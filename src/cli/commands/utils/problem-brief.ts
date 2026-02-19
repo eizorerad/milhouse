@@ -8,7 +8,7 @@
  * @module cli/commands/utils/problem-brief
  */
 
-import type { Issue } from "../../../state/types.ts";
+import { type Issue, getWorkItemTitle, getWorkItemRationale } from "../../../state/types.ts";
 
 /**
  * Generate updated Problem Brief markdown after validation
@@ -102,9 +102,9 @@ Each issue has been investigated with evidence to confirm or refute the initial 
 		parts.push("No false positives.\n");
 	} else {
 		for (const issue of falseIssues) {
-			parts.push(`### ${issue.id}: ${issue.symptom}
+			parts.push(`### ${issue.id}: ${getWorkItemTitle(issue)}
 
-**Status**: FALSE - Issue was not validated
+**Status**: FALSE - Work item was not validated
 ${issue.validated_by ? `**Validated By**: ${issue.validated_by}` : ""}
 
 ---
@@ -126,13 +126,14 @@ ${issue.validated_by ? `**Validated By**: ${issue.validated_by}` : ""}
  * Format a single issue section for the Problem Brief
  */
 export function formatIssueSection(issue: Issue): string {
-	let section = `### ${issue.id}: ${issue.symptom}
+	let section = `### ${issue.id}: ${getWorkItemTitle(issue)}
 
 | Field | Value |
 |-------|-------|
+| **Type** | ${issue.type ?? "bug"} |
 | **Status** | ${issue.status} |
 | **Severity** | ${issue.severity} |
-| **Hypothesis** | ${issue.hypothesis} |
+| **Rationale** | ${getWorkItemRationale(issue)} |
 ${issue.corrected_description ? `| **Corrected Description** | ${issue.corrected_description} |` : ""}
 ${issue.frequency ? `| **Frequency** | ${issue.frequency} |` : ""}
 ${issue.blast_radius ? `| **Blast Radius** | ${issue.blast_radius} |` : ""}

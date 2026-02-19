@@ -451,5 +451,11 @@ function getPhaseEmoji(phase: string): string {
 
 function formatDate(isoDate: string): string {
 	const date = new Date(isoDate);
-	return date.toLocaleString();
+	return date.toLocaleString("en-US", {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+	});
 }

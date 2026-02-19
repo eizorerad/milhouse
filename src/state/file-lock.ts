@@ -39,10 +39,18 @@ export async function withFileLock<T>(
 	// Ensure the file exists (proper-lockfile requires it)
 	ensureFileExists(filePath);
 
-	const release = await lock(filePath, {
-		retries: options?.retries ?? 5,
-		stale: options?.stale ?? 10000,
-	});
+	let release: (() => Promise<void>) | null = null;
+	try {
+		release = await lock(filePath, {
+			retries: options?.retries ?? 3,
+			stale: options?.stale ?? 10000,
+		});
+	} catch {
+		// If file locking fails (e.g., filesystem doesn't support it, or lock dir creation fails),
+		// fall back to executing without cross-process lock.
+		// In-memory locking in the caller still provides single-process safety.
+		return await operation();
+	}
 
 	try {
 		return await operation();

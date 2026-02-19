@@ -188,8 +188,8 @@ export function generateVerificationMarkdownReport(report: VerificationReport): 
 | Tasks Completed | ${report.tasks.completed} |
 | Tasks Failed | ${report.tasks.failed} |
 | Tasks Total | ${report.tasks.total} |
-| Input Tokens | ${report.tokens.input.toLocaleString()} |
-| Output Tokens | ${report.tokens.output.toLocaleString()} |
+| Input Tokens | ${new Intl.NumberFormat("en-US").format(report.tokens.input)} |
+| Output Tokens | ${new Intl.NumberFormat("en-US").format(report.tokens.output)} |
 
 ---
 

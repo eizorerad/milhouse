@@ -31,7 +31,7 @@ import {
 	writeIssueWbsPlanForRun,
 	createPlanMetadataHeader,
 } from "../../state/plan-store.ts";
-import { AGENT_ROLES, type DoDCriteria, type Issue } from "../../state/types.ts";
+import { AGENT_ROLES, type DoDCriteria, type Issue, getWorkItemTitle, getWorkItemRationale } from "../../state/types.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -100,58 +100,8 @@ interface ParsedWBS {
 	tasks: ParsedWBSTask[];
 }
 
-/**
- * Deep validation report structure (from validate.ts)
- */
-interface DeepValidationReport {
-	issue_id: string;
-	status: string;
-	confidence: "HIGH" | "MEDIUM" | "LOW";
-	summary: string;
-	investigation: {
-		files_examined: string[];
-		commands_run: string[];
-		patterns_found: string[];
-		related_code: Array<{
-			file: string;
-			line_start: number;
-			line_end: number;
-			relevance: string;
-			code_snippet?: string;
-		}>;
-	};
-	root_cause_analysis: {
-		confirmed_cause?: string;
-		alternative_causes?: string[];
-		why_not_false_positive?: string;
-	};
-	impact_assessment: {
-		severity_confirmed: boolean;
-		actual_severity?: string;
-		affected_components: string[];
-		user_impact?: string;
-		security_implications?: string;
-	};
-	reproduction: {
-		reproducible: boolean;
-		steps?: string[];
-		conditions?: string;
-	};
-	recommendations: {
-		fix_approach: string;
-		estimated_complexity: "LOW" | "MEDIUM" | "HIGH";
-		prerequisites?: string[];
-		test_strategy?: string;
-	};
-	evidence: Array<{
-		type: string;
-		file?: string;
-		line_start?: number;
-		line_end?: number;
-		output?: string;
-	}>;
-	corrected_description?: string;
-}
+// DeepValidationReport imported from canonical source
+import type { DeepValidationReport } from "./utils/validation-types.ts";
 
 /**
  * Get validation reports directory
@@ -239,9 +189,10 @@ Your task is to perform DEEP research and create detailed, actionable tasks.
 | Field | Value |
 |-------|-------|
 | **ID** | ${issue.id} |
+| **Type** | ${issue.type ?? "bug"} |
 | **Status** | ${issue.status} |
-| **Symptom** | ${issue.symptom} |
-| **Hypothesis** | ${issue.hypothesis} |
+| **Title** | ${getWorkItemTitle(issue)} |
+| **Rationale** | ${getWorkItemRationale(issue)} |
 | **Severity** | ${issue.severity} |
 ${issue.corrected_description ? `| **Corrected Description** | ${issue.corrected_description} |` : ""}
 ${issue.frequency ? `| **Frequency** | ${issue.frequency} |` : ""}
@@ -749,7 +700,7 @@ async function planSingleIssueDeep(
 	}
 
 	const prompt = buildDeepPlannerPrompt(issue, validationReport, workDir, agentNum, probeEvidence);
-	logDebug(`Agent #${agentNum} planning issue ${issue.id}: ${issue.symptom.slice(0, 50)}...`);
+	logDebug(`Agent #${agentNum} planning ${issue.id}: ${getWorkItemTitle(issue).slice(0, 50)}...`);
 
 	let result: AIResult;
 	try {
@@ -857,7 +808,8 @@ function generateWBSMarkdown(
 
 	parts.push(`# WBS: ${issue.id}
 
-> **Issue**: ${issue.symptom}
+> **Title**: ${getWorkItemTitle(issue)}
+> **Type**: ${issue.type ?? "bug"}
 > **Status**: ${issue.status}
 > **Severity**: ${issue.severity}
 > **Generated**: ${timestamp}
@@ -871,13 +823,14 @@ ${wbs.summary}
 
 ---
 
-## Issue Details
+## Work Item Details
 
 | Field | Value |
 |-------|-------|
 | **ID** | ${issue.id} |
-| **Symptom** | ${issue.symptom} |
-| **Hypothesis** | ${issue.hypothesis} |
+| **Type** | ${issue.type ?? "bug"} |
+| **Title** | ${getWorkItemTitle(issue)} |
+| **Rationale** | ${getWorkItemRationale(issue)} |
 ${issue.corrected_description ? `| **Corrected Description** | ${issue.corrected_description} |` : ""}
 | **Severity** | ${issue.severity} |
 ${issue.strategy ? `| **Strategy** | ${issue.strategy} |` : ""}

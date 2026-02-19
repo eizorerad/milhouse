@@ -1,6 +1,5 @@
 import pc from "picocolors";
 import type { RuntimeOptions } from "../../config/index.ts";
-import { getConfigService } from "../../services/config/ConfigService.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName, AIResult } from "../../engines/types.ts";
 import {
@@ -24,6 +23,7 @@ import {
 	updateRunPhaseInMeta,
 	updateRunStats,
 } from "../../state/runs.ts";
+import { buildLeadInvestigatorPrompt as buildLIPromptFromAgent } from "../../agents/lead-investigator.ts";
 import { AGENT_ROLES, type Issue, type Severity } from "../../state/types.ts";
 import {
 	formatDuration,
@@ -39,7 +39,7 @@ import { ProgressSpinner } from "../../ui/spinners.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
 
 /**
- * Result of scanning for issues
+ * Result of scanning for work items
  */
 interface ScanResult {
 	success: boolean;
@@ -53,141 +53,31 @@ interface ScanResult {
 }
 
 /**
- * Parsed issue from AI response
+ * Parsed work item from AI response
  */
 interface ParsedIssue {
-	symptom: string;
-	hypothesis: string;
+	type?: string;
+	title?: string;
+	rationale?: string;
+	symptom?: string;
+	hypothesis?: string;
 	severity: Severity;
 	frequency?: string;
 	blast_radius?: string;
+	scope_impact?: string;
 	strategy?: string;
 }
 
 /**
- * Build the Lead Investigator prompt
+ * Build the Lead Investigator prompt.
+ * Delegates to the agent module's prompt builder for single source of truth.
  */
 function buildLeadInvestigatorPrompt(workDir: string, scanFocus?: string): string {
-	const parts: string[] = [];
-
-	// Role definition
-	parts.push(`## Role: Lead Investigator (LI)
-${AGENT_ROLES.LI}
-
-You are scanning this repository to identify potential problems, issues, or technical debt.`);
-
-	// Add scan focus if specified
-	if (scanFocus) {
-		parts.push(`## SCAN FOCUS
-
-**IMPORTANT**: Focus your investigation specifically on: ${scanFocus}
-
-Limit your scan to issues related to this area. Do not report issues outside of this scope unless they directly impact the focused area.`);
-	}
-
-	// Add project context if available
-	const configService = getConfigService(workDir);
-	const config = configService.getConfig();
-	
-	if (config) {
-		const contextParts: string[] = [];
-		if (config.project.name) contextParts.push(`Project: ${config.project.name}`);
-		if (config.project.language) contextParts.push(`Language: ${config.project.language}`);
-		if (config.project.framework) contextParts.push(`Framework: ${config.project.framework}`);
-		if (config.project.description) contextParts.push(`Description: ${config.project.description}`);
-		
-		if (contextParts.length > 0) {
-			parts.push(`## Project Context
-${contextParts.join("\n")}`);
-		}
-	}
-
-	// Add config info if available
-	if (config) {
-		if (config.commands.test) {
-			parts.push(`Test command: ${config.commands.test}`);
-		}
-		if (config.commands.lint) {
-			parts.push(`Lint command: ${config.commands.lint}`);
-		}
-		if (config.commands.build) {
-			parts.push(`Build command: ${config.commands.build}`);
-		}
-	}
-
-	// Task instructions
-	parts.push(`## Task
-
-**IMPORTANT**: This is a THOROUGH code investigation. You must actively READ and analyze the code.
-
-Scan the repository and identify candidate problems. For each issue found, provide:
-
-1. **Symptom**: What observable behavior indicates a problem?
-2. **Hypothesis**: What is the likely root cause?
-3. **Severity**: CRITICAL | HIGH | MEDIUM | LOW
-4. **Frequency**: How often does this occur? (optional)
-5. **Blast Radius**: What is affected if this fails? (optional)
-6. **Strategy**: Suggested fix approach (optional)
-
-## Investigation Protocol
-
-You MUST actively investigate the codebase:
-1. **Read source files** - don't just scan file names, read the actual code
-2. **Trace data flow** - follow how data moves through the application
-3. **Check error handling** - look for missing try/catch, unhandled errors
-4. **Examine async code** - look for race conditions, missing awaits
-5. **Review state management** - check for proper updates and data consistency
-6. **Look at API boundaries** - network calls, database queries, external services
-7. **Check security** - authentication, authorization, input validation
-8. **Find dead code** - unused functions, unreachable branches
-
-## What to Look For (language-agnostic)
-
-- **Logic Errors**: Incorrect conditions, wrong comparisons, off-by-one errors
-- **Error Handling**: Silent failures, missing error propagation, uncaught exceptions
-- **Concurrency Issues**: Race conditions, deadlocks, missing synchronization
-- **Resource Leaks**: Unclosed connections, missing cleanup, memory leaks
-- **Security Issues**: Input validation, authentication bypass, data exposure
-- **Data Integrity**: Missing validation, inconsistent state, lost updates
-- **Architecture Issues**: Tight coupling, circular dependencies, code duplication
-- **Configuration Issues**: Hardcoded values, missing environment handling
-
-## Output Format
-
-Respond with a JSON array of issues in this exact format:
-
-\`\`\`json
-[
-	 {
-	   "symptom": "Description of the observable problem",
-	   "hypothesis": "Root cause analysis",
-	   "severity": "HIGH",
-	   "frequency": "On every page load",
-	   "blast_radius": "All user sessions",
-	   "strategy": "Implement connection pooling"
-	 }
-]
-\`\`\`
-
-## Guidelines
-
-- **Be thorough** - examine actual code, not just file names
-- Focus on real, actionable issues (bugs, technical debt, security concerns, performance problems)
-- Do NOT report style preferences or minor nitpicks
-- Each issue should be independently fixable
-- **Be specific** about file locations when possible
-- Prioritize issues that block functionality or affect users
-
-**NOTE**: An empty result \`[]\` should only be returned after thorough examination. Most real-world codebases have issues.
-
-## Important
-
-- Status of all issues will be UNVALIDATED (they need probe validation later)
-- Do NOT make claims without evidence - you must have seen the problematic code
-- **READ THE ACTUAL CODE** before reporting an issue`);
-
-	return parts.join("\n\n");
+	return buildLIPromptFromAgent(workDir, {
+		scope: scanFocus ? [scanFocus] : undefined,
+	});
 }
+
 
 /**
  * Parse issues from AI response
@@ -228,7 +118,8 @@ function parseIssuesFromResponse(response: string): ParsedIssue[] {
 }
 
 /**
- * Validate parsed issue has required fields
+ * Validate parsed work item has required fields.
+ * Accepts both new format (title/rationale) and legacy format (symptom/hypothesis).
  */
 function isValidParsedIssue(issue: unknown): issue is ParsedIssue {
 	if (typeof issue !== "object" || issue === null) {
@@ -237,11 +128,16 @@ function isValidParsedIssue(issue: unknown): issue is ParsedIssue {
 
 	const obj = issue as Record<string, unknown>;
 
-	if (typeof obj.symptom !== "string" || obj.symptom.trim() === "") {
+	// Accept new format (title/rationale) or legacy format (symptom/hypothesis)
+	const hasTitle = typeof obj.title === "string" && obj.title.trim() !== "";
+	const hasSymptom = typeof obj.symptom === "string" && obj.symptom.trim() !== "";
+	if (!hasTitle && !hasSymptom) {
 		return false;
 	}
 
-	if (typeof obj.hypothesis !== "string" || obj.hypothesis.trim() === "") {
+	const hasRationale = typeof obj.rationale === "string" && obj.rationale.trim() !== "";
+	const hasHypothesis = typeof obj.hypothesis === "string" && obj.hypothesis.trim() !== "";
+	if (!hasRationale && !hasHypothesis) {
 		return false;
 	}
 
@@ -255,42 +151,47 @@ function isValidParsedIssue(issue: unknown): issue is ParsedIssue {
 }
 
 /**
- * Generate Problem Brief markdown
+ * Generate Work Brief markdown
  */
-function generateProblemBrief(issues: Issue[], runId: string): string {
+function generateWorkBrief(issues: Issue[], runId: string): string {
 	const timestamp = new Date().toISOString();
 	const parts: string[] = [];
 
-	parts.push(`# Problem Brief v0
+	parts.push(`# Work Brief v0
 
 > **Status**: UNVALIDATED
 > **Run ID**: ${runId}
 > **Generated**: ${timestamp}
-> **Issues Found**: ${issues.length}
+> **Work Items Found**: ${issues.length}
 
 ---
 
 ## Overview
 
-This Problem Brief was generated by the Lead Investigator (LI) agent during the initial scan phase.
-All issues are currently **UNVALIDATED** and require probe validation before planning.
+This Work Brief was generated by the Lead Investigator (LI) agent during the scan phase.
+All work items are currently **UNVALIDATED** and require validation before planning.
 
 ---
 
-## Issues
+## Work Items
 `);
 
 	if (issues.length === 0) {
-		parts.push("No significant issues were identified during the scan.\n");
+		parts.push("No significant work items were identified during the scan.\n");
 	} else {
 		for (const issue of issues) {
-			parts.push(`### ${issue.id}: ${issue.symptom}
+			const title = issue.title ?? issue.symptom;
+			const rationale = issue.rationale ?? issue.hypothesis;
+			const itemType = issue.type ?? "bug";
+			parts.push(`### ${issue.id}: ${title}
 
 | Field | Value |
 |-------|-------|
+| **Type** | ${itemType} |
 | **Status** | ${issue.status} |
 | **Severity** | ${issue.severity} |
-| **Hypothesis** | ${issue.hypothesis} |
+| **Rationale** | ${rationale} |
+${issue.scope_impact ? `| **Scope Impact** | ${issue.scope_impact} |` : ""}
 ${issue.frequency ? `| **Frequency** | ${issue.frequency} |` : ""}
 ${issue.blast_radius ? `| **Blast Radius** | ${issue.blast_radius} |` : ""}
 ${issue.strategy ? `| **Strategy** | ${issue.strategy} |` : ""}
@@ -303,9 +204,9 @@ ${issue.strategy ? `| **Strategy** | ${issue.strategy} |` : ""}
 
 	parts.push(`## Next Steps
 
-1. Run \`milhouse validate\` to validate each issue with probes
-2. Issues will be marked as CONFIRMED, FALSE, PARTIAL, or MISDIAGNOSED
-3. Run \`milhouse plan\` to generate WBS for confirmed issues
+1. Run \`milhouse validate\` to validate each work item with evidence
+2. Work items will be marked as CONFIRMED, FALSE, PARTIAL, or MISDIAGNOSED
+3. Run \`milhouse plan\` to generate WBS for confirmed work items
 `);
 
 	return parts.join("\n");
@@ -314,8 +215,8 @@ ${issue.strategy ? `| **Strategy** | ${issue.strategy} |` : ""}
 /**
  * Run the scan command - Lead Investigator agent
  *
- * Creates Problem Brief v0 (UNVALIDATED) by scanning the repository
- * for potential issues and technical debt.
+ * Creates Work Brief v0 (UNVALIDATED) by analyzing the repository
+ * for work items (bugs, features, refactoring, improvements, tasks).
  *
  * IMPORTANT: Each scan creates a NEW run with isolated state.
  */
@@ -608,13 +509,24 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 	for (const parsed of parsedIssues) {
 		const timestamp = Date.now().toString(36);
 		const random = Math.random().toString(36).substring(2, 8);
+
+		// Support both new format (title/rationale) and legacy (symptom/hypothesis)
+		const title = parsed.title ?? parsed.symptom ?? "";
+		const rationale = parsed.rationale ?? parsed.hypothesis ?? "";
+		const validTypes = ["bug", "feature", "refactor", "improvement", "task"];
+		const itemType = parsed.type && validTypes.includes(parsed.type) ? parsed.type : "bug";
+
 		const issue: Issue = {
 			id: `P-${timestamp}-${random}`,
-			symptom: parsed.symptom,
-			hypothesis: parsed.hypothesis,
+			type: itemType as Issue["type"],
+			title,
+			rationale,
+			symptom: title,
+			hypothesis: rationale,
 			severity: parsed.severity,
 			frequency: parsed.frequency,
 			blast_radius: parsed.blast_radius,
+			scope_impact: parsed.scope_impact,
 			strategy: parsed.strategy,
 			status: "UNVALIDATED",
 			evidence: [],
@@ -628,10 +540,10 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 	// Save issues to the run's state directory using run-aware function
 	saveIssuesForRun(runMeta.id, savedIssues, workDir);
 
-	// Generate Problem Brief using PlanStore (run-aware)
-	const problemBriefContent = generateProblemBrief(savedIssues, runMeta.id);
-	const problemBriefPath = writeProblemBriefForRun(workDir, runMeta.id, problemBriefContent);
-	logDebug(`Problem Brief written to: ${problemBriefPath}`);
+	// Generate Work Brief using PlanStore (run-aware)
+	const workBriefContent = generateWorkBrief(savedIssues, runMeta.id);
+	const problemBriefPath = writeProblemBriefForRun(workDir, runMeta.id, workBriefContent);
+	logDebug(`Work Brief written to: ${problemBriefPath}`);
 
 	// Sync legacy plans view for backward compatibility
 	syncLegacyPlansView(workDir);
@@ -649,15 +561,15 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 	console.log("");
 	console.log("=".repeat(50));
 	logInfo("Scan Summary:");
-	console.log(`  Run:          ${pc.cyan(runMeta.id)}`);
-	console.log(`  Issues found: ${pc.cyan(String(savedIssues.length))}`);
-	console.log(`  Duration:     ${formatDuration(duration)}`);
-	console.log(`  Problem Brief: ${pc.cyan(problemBriefPath)}`);
+	console.log(`  Run:           ${pc.cyan(runMeta.id)}`);
+	console.log(`  Items found:   ${pc.cyan(String(savedIssues.length))}`);
+	console.log(`  Duration:      ${formatDuration(duration)}`);
+	console.log(`  Work Brief:    ${pc.cyan(problemBriefPath)}`);
 	console.log("=".repeat(50));
 
 	if (savedIssues.length > 0) {
 		console.log("");
-		logInfo("Issues (UNVALIDATED):");
+		logInfo("Work Items (UNVALIDATED):");
 		for (const issue of savedIssues) {
 			const severityColor =
 				issue.severity === "CRITICAL"
@@ -667,13 +579,15 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 						: issue.severity === "MEDIUM"
 							? pc.blue
 							: pc.dim;
-			console.log(`  ${pc.cyan(issue.id)} [${severityColor(issue.severity)}] ${issue.symptom}`);
+			const title = issue.title ?? issue.symptom;
+			const typeTag = issue.type ? `[${issue.type}]` : "[bug]";
+			console.log(`  ${pc.cyan(issue.id)} ${pc.dim(typeTag)} [${severityColor(issue.severity)}] ${title}`);
 		}
 		console.log("");
-		logSuccess(`Run ${pc.cyan("milhouse --validate")} to validate issues with probes`);
+		logSuccess(`Run ${pc.cyan("milhouse --validate")} to validate work items`);
 	} else {
 		console.log("");
-		logSuccess("No significant issues found in the repository");
+		logSuccess("No significant work items found in the repository");
 	}
 
 	return {

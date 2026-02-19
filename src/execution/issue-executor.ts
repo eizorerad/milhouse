@@ -271,12 +271,31 @@ export function groupTasksByIssue(tasks: StateTask[], issues: Issue[]): IssueGro
 	}
 
 	const groups: IssueGroup[] = [];
+	const now = new Date().toISOString();
 
 	for (const [issueId, issueTasks] of groupMap) {
-		const issue = issueMap.get(issueId);
+		let issue = issueMap.get(issueId);
 		if (!issue) {
-			logWarn(`Issue ${issueId} not found for ${issueTasks.length} task(s)`);
-			continue;
+			// Create a synthetic work item for tasks without a matching issue
+			// instead of silently dropping them
+			logWarn(`Issue ${issueId} not found for ${issueTasks.length} task(s) - creating synthetic work item`);
+			issue = {
+				id: issueId,
+				type: "task",
+				title: issueId === "UNASSIGNED"
+					? `Unassigned tasks (${issueTasks.length})`
+					: `Work item ${issueId} (derived)`,
+				symptom: issueId === "UNASSIGNED"
+					? `Unassigned tasks (${issueTasks.length})`
+					: `Work item ${issueId} (derived)`,
+				hypothesis: "Derived from task assignments",
+				evidence: [],
+				status: "CONFIRMED",
+				severity: "MEDIUM",
+				related_task_ids: issueTasks.map((t) => t.id),
+				created_at: now,
+				updated_at: now,
+			};
 		}
 
 		groups.push({
@@ -342,16 +361,20 @@ After each task, commit your changes before proceeding to the next.`);
 		}
 	}
 
-	// Issue summary
-	parts.push(`## Issue to Fix
+	// Work item summary
+	const itemTitle = issue.title ?? issue.symptom;
+	const itemRationale = issue.rationale ?? issue.hypothesis;
+	const itemType = issue.type ?? "bug";
+	parts.push(`## Work Item
 
 | Field | Value |
 |-------|-------|
 | **ID** | ${issue.id} |
+| **Type** | ${itemType} |
 | **Status** | ${issue.status} |
 | **Severity** | ${issue.severity} |
-| **Symptom** | ${issue.symptom} |
-| **Hypothesis** | ${issue.hypothesis} |
+| **Title** | ${itemTitle} |
+| **Rationale** | ${itemRationale} |
 ${issue.corrected_description ? `| **Corrected Description** | ${issue.corrected_description} |` : ""}
 ${issue.strategy ? `| **Strategy** | ${issue.strategy} |` : ""}`);
 
@@ -657,7 +680,7 @@ If there are no conflicts, you're done!
 interface IssueInfo {
 	/** Issue ID */
 	id: string;
-	/** Human-readable description (symptom) */
+	/** Human-readable description (title or symptom) */
 	title: string;
 }
 
@@ -1529,7 +1552,7 @@ export async function runParallelByIssue(
 					// Store issue info for human-readable commit messages
 					branchToIssueInfo.set(branchName, {
 						id: issueGroup.issueId,
-						title: issueGroup.issue.symptom,
+						title: issueGroup.issue.title ?? issueGroup.issue.symptom,
 					});
 
 				// Queue branch for merge AFTER all agents complete (do NOT merge here!)

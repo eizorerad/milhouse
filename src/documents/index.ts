@@ -29,6 +29,7 @@ import type { ExecutionPlanOptions, ExecutionPlanResult } from "./execution-plan
 import { regenerateExecutionPlan, saveExecutionPlan } from "./execution-plan.ts";
 import type { ProblemBriefOptions, ProblemBriefResult } from "./problem-brief.ts";
 import { regenerateProblemBrief, saveProblemBrief } from "./problem-brief.ts";
+import { PLAN_FILES } from "../state/types.ts";
 
 /**
  * Document types available for generation
@@ -143,8 +144,8 @@ export function generateAllDocuments(
  */
 export function getDocumentFileName(type: DocumentType): string {
 	const fileNames: Record<DocumentType, string> = {
-		"problem-brief": "problem_brief.md",
-		"execution-plan": "execution_plan.md",
+		"problem-brief": PLAN_FILES.problem_brief,
+		"execution-plan": PLAN_FILES.execution_plan,
 	};
 	return fileNames[type];
 }

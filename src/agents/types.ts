@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AIEngineName, AIResult, EngineOptions } from "../engines/types.ts";
-import type { Evidence, Issue, Task } from "../state/types.ts";
+import { AGENT_ROLES, type Evidence, type Issue, type Task } from "../state/types.ts";
 
 /**
  * Agent role types - core pipeline agents and inspector agents
@@ -28,24 +28,9 @@ export const AgentRoleSchema = z.enum([
 export type AgentRole = z.infer<typeof AgentRoleSchema>;
 
 /**
- * Agent role descriptions - human readable explanations
+ * Agent role descriptions - re-exported from state/types.ts (single source of truth)
  */
-export const AGENT_ROLE_DESCRIPTIONS: Record<AgentRole, string> = {
-	LI: "Lead Investigator - Initial scan and problem candidate identification",
-	IV: "Issue Validator - Per-problem validation with evidence",
-	PL: "Planner - WBS generation for validated issues",
-	PR: "Plan Reviewer - WBS review and refinement",
-	CDM: "Consistency & Dependency Manager - Deduplication and unified planning",
-	EX: "Executor - Story execution with minimal changes",
-	TV: "Truth Verifier Gate - Evidence validation blocker",
-	RL: "Repo Librarian - Fast context collection",
-	ETI: "Environment Topology Inspector - compose/k8s/.env",
-	DLA: "Database Layer Auditor - postgres schema/migrations",
-	CA: "Cache Auditor - redis TTL/keyspace/prefix",
-	SI: "Storage Inspector - S3/MinIO/FS/volume",
-	DVA: "Dependency Version Auditor - lockfile vs installed",
-	RR: "Repro Runner - logs and reproduction",
-};
+export const AGENT_ROLE_DESCRIPTIONS: Record<AgentRole, string> = AGENT_ROLES;
 
 /**
  * Agent categories - groups of related agents
@@ -628,13 +613,23 @@ export interface TVInput {
 
 /** Output from Lead Investigator (LI) */
 export interface LIOutput {
-	/** Identified issues */
+	/** Identified work items */
 	issues: Array<{
+		/** Work item type */
+		type?: "bug" | "feature" | "refactor" | "improvement" | "task";
+		/** Universal title (preferred) */
+		title?: string;
+		/** Universal rationale (preferred) */
+		rationale?: string;
+		/** @deprecated Use title. Observable symptom (for bugs) */
 		symptom: string;
+		/** @deprecated Use rationale. Root cause hypothesis (for bugs) */
 		hypothesis: string;
 		severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 		frequency?: string;
 		blast_radius?: string;
+		/** Scope of impact (universal) */
+		scope_impact?: string;
 		strategy?: string;
 	}>;
 }

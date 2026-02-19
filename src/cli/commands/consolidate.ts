@@ -25,7 +25,7 @@ import {
 	syncLegacyPlansView,
 	writeExecutionPlanForRun,
 } from "../../state/plan-store.ts";
-import { AGENT_ROLES, type GraphNode, type Issue, type Task } from "../../state/types.ts";
+import { AGENT_ROLES, type GraphNode, type Issue, type Task, getWorkItemTitle } from "../../state/types.ts";
 import { selectOrRequireRun } from "./utils/run-selector.ts";
 import {
 	formatDuration,
@@ -125,7 +125,7 @@ Your task is to:
 
 ${issues
 	.map(
-		(i) => `- **${i.id}** [${i.status}]: ${i.symptom}
+		(i) => `- **${i.id}** [${i.status}]: ${getWorkItemTitle(i)}
   - Severity: ${i.severity}
   - Tasks: ${i.related_task_ids.length > 0 ? i.related_task_ids.join(", ") : "None"}`,
 	)

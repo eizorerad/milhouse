@@ -1,5 +1,5 @@
 import { getConfigService } from "../services/config/index.ts";
-import type { Issue, Task } from "../state/types.ts";
+import { type Issue, type Task, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
 import { extractJsonFromResponse } from "../utils/json-extractor.ts";
 import { BaseAgent } from "./base.ts";
 import {
@@ -106,12 +106,14 @@ export class PlanReviewerAgent extends BaseAgent<PRInput, PROutput> {
 			});
 		}
 
-		// Issue section
+		// Work item section
+		const itemType = issue.type ?? "bug";
 		const issueDetails = [
 			`**ID**: ${issue.id}`,
+			`**Type**: ${itemType}`,
 			`**Status**: ${issue.status}`,
-			`**Symptom**: ${issue.symptom}`,
-			`**Hypothesis**: ${issue.hypothesis}`,
+			`**Title**: ${getWorkItemTitle(issue)}`,
+			`**Rationale**: ${getWorkItemRationale(issue)}`,
 			`**Severity**: ${issue.severity}`,
 		];
 
@@ -121,7 +123,7 @@ export class PlanReviewerAgent extends BaseAgent<PRInput, PROutput> {
 
 		sections.push({
 			type: "input",
-			header: "Issue Being Addressed",
+			header: "Work Item Being Addressed",
 			content: issueDetails.join("\n"),
 			priority: SECTION_PRIORITIES.input,
 		});
@@ -179,7 +181,7 @@ export class PlanReviewerAgent extends BaseAgent<PRInput, PROutput> {
 			header: "Review Task",
 			content: `Review the WBS plan and evaluate:
 
-1. **Completeness**: Does the plan fully address the issue?
+1. **Completeness**: Does the plan fully address the work item?
 2. **Task Quality**: Are tasks well-defined, small, and testable?
 3. **Acceptance Criteria**: Are criteria specific, measurable, and verifiable?
 4. **Dependencies**: Are dependencies correctly identified and ordered?
@@ -188,7 +190,7 @@ export class PlanReviewerAgent extends BaseAgent<PRInput, PROutput> {
 7. **Coverage**: Does each task have appropriate checks and verification?
 
 Flag any concerns that could lead to:
-- Incomplete fixes
+- Incomplete implementation
 - Regressions
 - Unclear completion criteria
 - Blocked execution due to missing dependencies`,
@@ -275,7 +277,7 @@ Flag any concerns that could lead to:
 		// Fallback simple prompt
 		const { issue, tasks } = input;
 		return `You are the Plan Reviewer (PR) agent.
-Review the WBS plan for issue ${issue.id}: ${issue.symptom}
+Review the WBS plan for work item ${issue.id}: ${getWorkItemTitle(issue)}
 Tasks: ${tasks.map((t) => t.title).join(", ")}
 Respond with JSON containing approved, issues array, and feedback.`;
 	}

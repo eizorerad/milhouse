@@ -101,7 +101,7 @@ describe("groupTasksByIssue", () => {
 		expect(groups.find((g) => g.issueId === "P-issue2")?.tasks.length).toBe(1);
 	});
 
-	it("should warn and skip tasks with missing issues", () => {
+	it("should create synthetic work item for tasks with missing issues", () => {
 		const issue1 = createMockIssue({ id: "P-issue1" });
 
 		const tasks = [
@@ -111,10 +111,15 @@ describe("groupTasksByIssue", () => {
 
 		const groups = groupTasksByIssue(tasks, [issue1]);
 
-		// Only one group should be created (for P-issue1)
-		expect(groups.length).toBe(1);
-		expect(groups[0].issueId).toBe("P-issue1");
-		expect(groups[0].tasks.length).toBe(1);
+		// Both groups should be created - missing issue gets a synthetic work item
+		expect(groups.length).toBe(2);
+		const existingGroup = groups.find((g) => g.issueId === "P-issue1");
+		const syntheticGroup = groups.find((g) => g.issueId === "P-missing");
+		expect(existingGroup).toBeDefined();
+		expect(existingGroup!.tasks.length).toBe(1);
+		expect(syntheticGroup).toBeDefined();
+		expect(syntheticGroup!.tasks.length).toBe(1);
+		expect(syntheticGroup!.issue.status).toBe("CONFIRMED");
 	});
 
 	it("should sort groups by severity (CRITICAL > HIGH > MEDIUM > LOW)", () => {
@@ -374,7 +379,7 @@ describe("Issue Executor Error Scenarios", () => {
 	});
 
 	describe("Issue Not Found Scenario", () => {
-		it("should warn when tasks reference missing issues", () => {
+		it("should create synthetic work items for tasks with missing issues", () => {
 			const existingIssue = createMockIssue({ id: "P-exists" });
 
 			const tasks = [
@@ -385,14 +390,21 @@ describe("Issue Executor Error Scenarios", () => {
 
 			const groups = groupTasksByIssue(tasks, [existingIssue]);
 
-			// Only one group should be created
-			expect(groups.length).toBe(1);
-			expect(groups[0].issueId).toBe("P-exists");
+			// All three groups should be created - missing issues get synthetic work items
+			expect(groups.length).toBe(3);
+			const existingGroup = groups.find((g) => g.issueId === "P-exists");
+			expect(existingGroup).toBeDefined();
+			expect(existingGroup!.tasks.length).toBe(1);
 
-			// The missing issue tasks should be skipped (logged as warning)
+			const missingGroup = groups.find((g) => g.issueId === "P-missing");
+			expect(missingGroup).toBeDefined();
+			expect(missingGroup!.issue.status).toBe("CONFIRMED");
+
+			const alsoMissingGroup = groups.find((g) => g.issueId === "P-also-missing");
+			expect(alsoMissingGroup).toBeDefined();
 		});
 
-		it("should handle empty issue list", () => {
+		it("should create synthetic work items when issue list is empty", () => {
 			const tasks = [
 				createMockTask({ id: "T1", issue_id: "P-1" }),
 				createMockTask({ id: "T2", issue_id: "P-2" }),
@@ -400,8 +412,9 @@ describe("Issue Executor Error Scenarios", () => {
 
 			const groups = groupTasksByIssue(tasks, []);
 
-			// No groups should be created when no issues provided
-			expect(groups.length).toBe(0);
+			// Synthetic work items created for each issue_id
+			expect(groups.length).toBe(2);
+			expect(groups.every((g) => g.issue.status === "CONFIRMED")).toBe(true);
 		});
 	});
 

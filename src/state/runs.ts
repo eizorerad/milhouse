@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { logStateError, StateParseError } from "./errors.ts";
 import { stateEvents } from "./events.ts";
+import { withFileLock } from "./file-lock.ts";
 import {
 	RUNS_FILES,
 	type RunMeta,
@@ -419,18 +420,16 @@ let runMetaLockPromise: Promise<void> | null = null;
 let runsIndexLockPromise: Promise<void> | null = null;
 
 /**
- * Update run metadata with simple locking
- * This ensures atomic read-modify-write even when called concurrently
- *
- * Note: This uses in-memory queue locking which is safe for single-process
- * concurrent operations (like p-limit based parallel execution)
+ * Update run metadata with both in-memory and file-level locking.
+ * In-memory lock serializes within this process (p-limit concurrent calls).
+ * File lock ensures cross-process safety (e.g., two terminals).
  */
 export async function updateRunMetaWithLock(
 	runId: string,
 	update: Partial<Omit<RunMeta, "id" | "created_at">>,
 	workDir = process.cwd(),
 ): Promise<RunMeta | null> {
-	// Queue this update behind any pending updates
+	// In-memory lock first — serializes within this process
 	const waitForLock = async (): Promise<void> => {
 		while (runMetaLockPromise) {
 			await runMetaLockPromise;
@@ -439,30 +438,32 @@ export async function updateRunMetaWithLock(
 
 	await waitForLock();
 
-	// Acquire lock
 	let releaseLock!: () => void;
 	runMetaLockPromise = new Promise<void>((resolve) => {
 		releaseLock = resolve;
 	});
 
 	try {
-		const meta = loadRunMeta(runId, workDir);
-		if (!meta) {
-			return null;
-		}
+		// File lock second — only needed for cross-process safety
+		const metaPath = getRunMetaPath(runId, workDir);
+		return await withFileLock(metaPath, async () => {
+			const meta = loadRunMeta(runId, workDir);
+			if (!meta) {
+				return null;
+			}
 
-		const updated = { ...meta, ...update, updated_at: new Date().toISOString() };
-		saveRunMeta(updated, workDir);
-		return updated;
+			const updated = { ...meta, ...update, updated_at: new Date().toISOString() };
+			saveRunMeta(updated, workDir);
+			return updated;
+		});
 	} finally {
-		// Release lock
 		runMetaLockPromise = null;
 		releaseLock?.();
 	}
 }
 
 /**
- * Update run phase with locking
+ * Update run phase with both in-memory and file-level locking.
  * This is the concurrent-safe version of updateRunPhaseInMeta()
  */
 export async function updateRunPhaseInMetaWithLock(
@@ -470,7 +471,6 @@ export async function updateRunPhaseInMetaWithLock(
 	phase: RunPhase,
 	workDir = process.cwd(),
 ): Promise<RunMeta | null> {
-	// Queue this update behind any pending updates
 	const waitForLock = async (): Promise<void> => {
 		while (runMetaLockPromise) {
 			await runMetaLockPromise;
@@ -479,35 +479,36 @@ export async function updateRunPhaseInMetaWithLock(
 
 	await waitForLock();
 
-	// Acquire lock
 	let releaseLock!: () => void;
 	runMetaLockPromise = new Promise<void>((resolve) => {
 		releaseLock = resolve;
 	});
 
 	try {
-		const meta = loadRunMeta(runId, workDir);
-		if (!meta) {
-			return null;
-		}
-
-		const updated = { ...meta, phase, updated_at: new Date().toISOString() };
-		saveRunMeta(updated, workDir);
-
-		// Also update in index (with its own lock)
-		await saveRunsIndexWithLock((index) => {
-			const runEntryIndex = index.runs.findIndex((r) => r.id === runId);
-			if (runEntryIndex !== -1) {
-				const updatedRuns = [...index.runs];
-				updatedRuns[runEntryIndex] = { ...updatedRuns[runEntryIndex], phase };
-				return { ...index, runs: updatedRuns };
+		const metaPath = getRunMetaPath(runId, workDir);
+		return await withFileLock(metaPath, async () => {
+			const meta = loadRunMeta(runId, workDir);
+			if (!meta) {
+				return null;
 			}
-			return index;
-		}, workDir);
 
-		return updated;
+			const updated = { ...meta, phase, updated_at: new Date().toISOString() };
+			saveRunMeta(updated, workDir);
+
+			// Also update in index (with its own lock)
+			await saveRunsIndexWithLock((index) => {
+				const runEntryIndex = index.runs.findIndex((r) => r.id === runId);
+				if (runEntryIndex !== -1) {
+					const updatedRuns = [...index.runs];
+					updatedRuns[runEntryIndex] = { ...updatedRuns[runEntryIndex], phase };
+					return { ...index, runs: updatedRuns };
+				}
+				return index;
+			}, workDir);
+
+			return updated;
+		});
 	} finally {
-		// Release lock
 		runMetaLockPromise = null;
 		releaseLock?.();
 	}
@@ -538,7 +539,6 @@ export async function saveRunsIndexWithLock(
 	updater: (index: RunsIndex) => RunsIndex,
 	workDir = process.cwd(),
 ): Promise<void> {
-	// Queue this update behind any pending updates
 	const waitForLock = async (): Promise<void> => {
 		while (runsIndexLockPromise) {
 			await runsIndexLockPromise;
@@ -547,18 +547,19 @@ export async function saveRunsIndexWithLock(
 
 	await waitForLock();
 
-	// Acquire lock
 	let releaseLock!: () => void;
 	runsIndexLockPromise = new Promise<void>((resolve) => {
 		releaseLock = resolve;
 	});
 
 	try {
-		const index = loadRunsIndex(workDir);
-		const updated = updater(index);
-		saveRunsIndex(updated, workDir);
+		const indexPath = getRunsIndexPath(workDir);
+		await withFileLock(indexPath, async () => {
+			const index = loadRunsIndex(workDir);
+			const updated = updater(index);
+			saveRunsIndex(updated, workDir);
+		});
 	} finally {
-		// Release lock
 		runsIndexLockPromise = null;
 		releaseLock?.();
 	}

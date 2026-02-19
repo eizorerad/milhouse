@@ -1,5 +1,5 @@
 import { getConfigService } from "../services/config/index.ts";
-import type { DoDCriteria, Issue } from "../state/types.ts";
+import { type DoDCriteria, type Issue, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
 import { extractJsonFromResponse } from "../utils/json-extractor.ts";
 import { BaseAgent } from "./base.ts";
 import {
@@ -38,8 +38,9 @@ interface ParsedWBS {
 /**
  * Planner Agent
  *
- * Responsible for generating Work Breakdown Structure (WBS) for validated issues.
+ * Responsible for generating Work Breakdown Structure (WBS) for validated work items.
  * Creates small, testable tasks with clear acceptance criteria and dependencies.
+ * Supports all work types: bugs, features, refactoring, improvements, tasks.
  *
  * Capabilities:
  * - Read files from the repository
@@ -47,7 +48,7 @@ interface ParsedWBS {
  * - Cannot write files or create branches/commits/PRs
  *
  * Output:
- * - Issue ID being planned
+ * - Work item ID being planned
  * - Summary of the plan
  * - List of tasks with title, description, files, dependencies, checks, acceptance criteria
  */
@@ -64,10 +65,11 @@ export class PlannerAgent extends BaseAgent<PLInput, PLOutput> {
 		const issue = input.issue;
 
 		// Role section
+		const itemType = issue.type ?? "bug";
 		sections.push(
 			createRoleSection(
 				"PL",
-				"You are creating a Work Breakdown Structure (WBS) for a validated issue. Your task is to break down the fix into small, testable tasks with clear acceptance criteria.",
+				`You are creating a Work Breakdown Structure (WBS) for a validated work item (type: ${itemType}). Your task is to break down the work into small, testable tasks with clear acceptance criteria.`,
 			),
 		);
 
@@ -106,12 +108,13 @@ export class PlannerAgent extends BaseAgent<PLInput, PLOutput> {
 			});
 		}
 
-		// Issue section
+		// Work item section
 		const issueDetails = [
 			`**ID**: ${issue.id}`,
+			`**Type**: ${itemType}`,
 			`**Status**: ${issue.status}`,
-			`**Symptom**: ${issue.symptom}`,
-			`**Hypothesis**: ${issue.hypothesis}`,
+			`**Title**: ${getWorkItemTitle(issue)}`,
+			`**Rationale**: ${getWorkItemRationale(issue)}`,
 		];
 
 		if (issue.corrected_description) {
@@ -120,6 +123,9 @@ export class PlannerAgent extends BaseAgent<PLInput, PLOutput> {
 
 		issueDetails.push(`**Severity**: ${issue.severity}`);
 
+		if (issue.scope_impact) {
+			issueDetails.push(`**Scope Impact**: ${issue.scope_impact}`);
+		}
 		if (issue.frequency) {
 			issueDetails.push(`**Frequency**: ${issue.frequency}`);
 		}
@@ -132,7 +138,7 @@ export class PlannerAgent extends BaseAgent<PLInput, PLOutput> {
 
 		sections.push({
 			type: "input",
-			header: "Issue to Plan",
+			header: "Work Item to Plan",
 			content: issueDetails.join("\n"),
 			priority: SECTION_PRIORITIES.input,
 		});
@@ -169,16 +175,16 @@ export class PlannerAgent extends BaseAgent<PLInput, PLOutput> {
 			});
 		}
 
-		// Add related issues context if provided
+		// Add related work items context if provided
 		if (input.relatedIssues && input.relatedIssues.length > 0) {
 			const relatedList = input.relatedIssues
-				.map((ri) => `- **${ri.id}**: ${ri.symptom} (${ri.status})`)
+				.map((ri) => `- **${ri.id}**: ${getWorkItemTitle(ri)} (${ri.status})`)
 				.join("\n");
 
 			sections.push({
 				type: "context",
-				header: "Related Issues",
-				content: `Consider these related issues when planning:\n\n${relatedList}`,
+				header: "Related Work Items",
+				content: `Consider these related work items when planning:\n\n${relatedList}`,
 				priority: SECTION_PRIORITIES.context + 2,
 			});
 		}
@@ -187,7 +193,7 @@ export class PlannerAgent extends BaseAgent<PLInput, PLOutput> {
 		sections.push({
 			type: "task",
 			header: "Task",
-			content: `Create a Work Breakdown Structure (WBS) to fix this issue. Each task should be:
+			content: `Create a Work Breakdown Structure (WBS) to implement this work item. Each task should be:
 
 1. **Small and focused**: Ideally completable in one commit
 2. **Testable**: With clear acceptance criteria that can be verified
@@ -210,7 +216,7 @@ Consider:
 \`\`\`json
 {
   "issue_id": "${issue.id}",
-  "summary": "Brief summary of the fix approach",
+  "summary": "Brief summary of the implementation approach",
   "tasks": [
     {
       "title": "Short task title",
@@ -233,8 +239,8 @@ Consider:
 \`\`\`
 
 **Field Descriptions:**
-- **issue_id**: The ID of the issue being planned
-- **summary**: Brief overview of the fix strategy
+- **issue_id**: The ID of the work item being planned
+- **summary**: Brief overview of the implementation strategy
 - **tasks**: Array of tasks in execution order
   - **title**: Short descriptive title (required)
   - **description**: Detailed explanation of what to do
@@ -262,7 +268,7 @@ Consider:
 - **Rollback**: How to undo if something goes wrong
 
 **Important:**
-- Do NOT create tasks that are too broad (e.g., "fix everything")
+- Do NOT create tasks that are too broad (e.g., "implement everything")
 - Do NOT create tasks without acceptance criteria
 - Each task should result in a working, testable state
 - Consider test-first approach where appropriate
@@ -290,8 +296,8 @@ Consider:
 		// Fallback simple prompt
 		const issue = input.issue;
 		return `You are the Planner (PL) agent.
-Create a Work Breakdown Structure for issue ${issue.id}: ${issue.symptom}
-Hypothesis: ${issue.hypothesis}
+Create a Work Breakdown Structure for work item ${issue.id}: ${getWorkItemTitle(issue)}
+Rationale: ${getWorkItemRationale(issue)}
 Respond with JSON containing issue_id, summary, and tasks array.`;
 	}
 
