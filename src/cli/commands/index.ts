@@ -34,7 +34,10 @@ export { showConfig, addRule } from "./config.ts";
 export { runTask } from "./task.ts";
 
 // Run commands
-export { runPipelineMode, runLoop } from "./run.ts";
+export { runPipelineMode, runPipelineV2, runLoop } from "./run.ts";
+
+// Report command
+export { runReport } from "./report.ts";
 
 // Runs management
 export { runsCommand } from "./runs.ts";

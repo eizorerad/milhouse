@@ -1,23 +1,26 @@
 /**
- * @fileoverview Milhouse Scan Command
+ * Scan command -- thin wrapper around PhaseRunner
  *
- * Handles the --scan command to scan the repository for issues using
- * the Lead Investigator (LI) agent. Creates a new run with Problem Brief v0.
+ * Replaces monolithic scan.ts (~800 lines) with a ~10-line wrapper.
  *
  * @module cli/commands/pipeline/scan
- *
- * @since 4.3.0
- *
- * @example
- * ```bash
- * # Scan the repository
- * milhouse --scan
- *
- * # Scan with focus area
- * milhouse --scan --scope "frontend"
- * ```
  */
 
-// Re-export from the original scan command
-// The original command already uses Milhouse branding
+import type { RuntimeOptions } from "../../runtime-options.ts";
+import { loadResolvedConfig } from "../../../runner/config-loader.ts";
+import { runPhase } from "../../../runner/phase-runner.ts";
+import { scanPhaseConfig } from "../../../runner/phases/scan.ts";
+
+export async function runScanPipeline(options: RuntimeOptions): Promise<void> {
+	const workDir = process.cwd();
+	const config = loadResolvedConfig(workDir, options);
+	await runPhase(scanPhaseConfig, {
+		workDir,
+		config,
+		scope: options.scanFocus,
+		runId: options.runId,
+	});
+}
+
+// Backward-compat: re-export the old function name
 export { runScan } from "../scan.ts";

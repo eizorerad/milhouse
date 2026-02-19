@@ -28,6 +28,11 @@ import {
 import { notifyAllComplete } from "../../ui/notify.ts";
 import { buildActiveSettings } from "../../ui/settings.ts";
 
+// New runner-based imports
+import { loadResolvedConfig } from "../../runner/config-loader.ts";
+import { runPipeline as runPipelineV2Impl } from "../../pipeline/orchestrator.ts";
+import type { PipelineResult as PipelineResultV2 } from "../../pipeline/orchestrator.ts";
+
 /**
  * Options for the new pipeline-based run
  */
@@ -130,6 +135,55 @@ export async function runPipelineMode(
 	}
 
 	if (!result.success) {
+		process.exit(1);
+	}
+
+	return result;
+}
+
+/**
+ * Options for the new runner-based pipeline
+ */
+export interface PipelineRunOptionsV2 {
+	/** Start from this phase */
+	startPhase?: string;
+	/** Stop after this phase */
+	endPhase?: string;
+	/** Resume from where it left off */
+	resume?: boolean;
+	/** Force run even if phases already completed */
+	force?: boolean;
+}
+
+/**
+ * Run the full Milhouse pipeline using the new PhaseRunner-based orchestrator.
+ *
+ * This replaces runPipelineMode with the unified runner:
+ * 1. loadResolvedConfig() merges defaults + config.yml + CLI flags
+ * 2. runPipeline() loops over phases using PhaseRunner
+ */
+export async function runPipelineV2(
+	options: RuntimeOptions,
+	pipelineOptions: PipelineRunOptionsV2 = {},
+): Promise<PipelineResultV2> {
+	const workDir = process.cwd();
+	setVerbose(options.verbose);
+
+	const config = loadResolvedConfig(workDir, options);
+
+	const result = await runPipelineV2Impl({
+		workDir,
+		config,
+		scope: options.scanFocus,
+		runId: options.runId,
+		startPhase: pipelineOptions.startPhase,
+		endPhase: pipelineOptions.endPhase,
+		resume: pipelineOptions.resume,
+		force: pipelineOptions.force,
+	});
+
+	if (!result.success) {
+		logError(`Pipeline failed${result.stoppedAt ? ` at phase "${result.stoppedAt}"` : ""}: ${result.error ?? "unknown error"}`);
 		process.exit(1);
 	}
 

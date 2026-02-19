@@ -1,22 +1,27 @@
 /**
- * @fileoverview Milhouse Verify Command
+ * Verify command -- thin wrapper around PhaseRunner
  *
- * Handles the --verify command to run verification gates and check
- * for regressions using the Truth Verifier (TV) agent.
+ * Replaces monolithic verify.ts (~1200+ lines) with a ~10-line wrapper.
  *
  * @module cli/commands/pipeline/verify
- *
- * @since 4.3.0
- *
- * @example
- * ```bash
- * # Run verification
- * milhouse --verify
- * ```
  */
 
-// Re-export from the original verify command
-// The original command already uses Milhouse branding
+import type { RuntimeOptions } from "../../runtime-options.ts";
+import { loadResolvedConfig } from "../../../runner/config-loader.ts";
+import { runPhase } from "../../../runner/phase-runner.ts";
+import { verifyPhaseConfig } from "../../../runner/phases/verify.ts";
+
+export async function runVerifyPipeline(options: RuntimeOptions): Promise<void> {
+	const workDir = process.cwd();
+	const config = loadResolvedConfig(workDir, options);
+	await runPhase(verifyPhaseConfig, {
+		workDir,
+		config,
+		runId: options.runId,
+	});
+}
+
+// Backward-compat: re-export the old functions
 export {
 	runVerify,
 	buildVerifierPrompt,

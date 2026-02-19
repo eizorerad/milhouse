@@ -1,5 +1,5 @@
 /**
- * @fileoverview Milhouse Pipeline Commands Module
+ * Milhouse Pipeline Commands Module
  *
  * Barrel export for pipeline CLI commands (scan, validate, plan, consolidate, exec, verify).
  * These commands handle the Milhouse pipeline phases.
@@ -13,23 +13,35 @@
  * 6. verify - Truth Verifier runs gates and checks
  *
  * @module cli/commands/pipeline
- *
- * @since 4.3.0
  */
 
 // Types
 export * from "./types.ts";
 
-// Re-export scan command with Milhouse branding
+// ============================================================================
+// NEW: Thin wrappers that use PhaseRunner (preferred for new code)
+// ============================================================================
+export { runScanPipeline } from "./scan.ts";
+export { runValidatePipeline } from "./validate.ts";
+export { runPlanPipeline } from "./plan.ts";
+export { runConsolidatePipeline } from "./consolidate.ts";
+export { runVerifyPipeline } from "./verify.ts";
+
+// ============================================================================
+// LEGACY: Re-exports from monolithic command files (backward compatibility)
+// These will be removed in T10 when old commands are deleted.
+// ============================================================================
+
+// Re-export scan command
 export { runScan } from "../scan.ts";
 
-// Re-export validate command with Milhouse branding
+// Re-export validate command
 export { runValidate } from "../validate.ts";
 
-// Re-export plan command with Milhouse branding
+// Re-export plan command
 export { runPlan } from "../plan.ts";
 
-// Re-export consolidate command with Milhouse branding
+// Re-export consolidate command
 export {
 	runConsolidate,
 	topologicalSort,
@@ -37,10 +49,10 @@ export {
 	assignParallelGroups,
 } from "../consolidate.ts";
 
-// Re-export exec command with Milhouse branding
+// Re-export exec command (exec stays as-is, not runner-based)
 export { runExec, buildExecutorPrompt, getReadyTasksForRun, type ExecResult } from "../exec.ts";
 
-// Re-export verify command with Milhouse branding
+// Re-export verify command
 export {
 	runVerify,
 	buildVerifierPrompt,

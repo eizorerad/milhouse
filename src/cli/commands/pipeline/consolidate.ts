@@ -1,22 +1,27 @@
 /**
- * @fileoverview Milhouse Consolidate Command
+ * Consolidate command -- thin wrapper around PhaseRunner
  *
- * Handles the --consolidate command to merge WBS plans into a unified
- * Execution Plan using the Consistency & Dependency Manager (CDM) agent.
+ * Replaces monolithic consolidate.ts (~1500+ lines) with a ~10-line wrapper.
  *
  * @module cli/commands/pipeline/consolidate
- *
- * @since 4.3.0
- *
- * @example
- * ```bash
- * # Consolidate all WBS plans
- * milhouse --consolidate
- * ```
  */
 
-// Re-export from the original consolidate command
-// The original command already uses Milhouse branding
+import type { RuntimeOptions } from "../../runtime-options.ts";
+import { loadResolvedConfig } from "../../../runner/config-loader.ts";
+import { runPhase } from "../../../runner/phase-runner.ts";
+import { consolidatePhaseConfig } from "../../../runner/phases/consolidate.ts";
+
+export async function runConsolidatePipeline(options: RuntimeOptions): Promise<void> {
+	const workDir = process.cwd();
+	const config = loadResolvedConfig(workDir, options);
+	await runPhase(consolidatePhaseConfig, {
+		workDir,
+		config,
+		runId: options.runId,
+	});
+}
+
+// Backward-compat: re-export the old functions
 export {
 	runConsolidate,
 	topologicalSort,

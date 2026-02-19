@@ -1,23 +1,25 @@
 /**
- * @fileoverview Milhouse Validate Command
+ * Validate command -- thin wrapper around PhaseRunner
  *
- * Handles the --validate command to validate issues using Issue Validator (IV) agents.
- * Updates issue status to CONFIRMED, FALSE, PARTIAL, or MISDIAGNOSED.
+ * Replaces monolithic validate.ts (~1000+ lines) with a ~10-line wrapper.
  *
  * @module cli/commands/pipeline/validate
- *
- * @since 4.3.0
- *
- * @example
- * ```bash
- * # Validate all unvalidated issues
- * milhouse --validate
- *
- * # Validate specific issues
- * milhouse --validate --issues P-xxx,P-yyy
- * ```
  */
 
-// Re-export from the original validate command
-// The original command already uses Milhouse branding
+import type { RuntimeOptions } from "../../runtime-options.ts";
+import { loadResolvedConfig } from "../../../runner/config-loader.ts";
+import { runPhase } from "../../../runner/phase-runner.ts";
+import { validatePhaseConfig } from "../../../runner/phases/validate.ts";
+
+export async function runValidatePipeline(options: RuntimeOptions): Promise<void> {
+	const workDir = process.cwd();
+	const config = loadResolvedConfig(workDir, options);
+	await runPhase(validatePhaseConfig, {
+		workDir,
+		config,
+		runId: options.runId,
+	});
+}
+
+// Backward-compat: re-export the old function name
 export { runValidate } from "../validate.ts";

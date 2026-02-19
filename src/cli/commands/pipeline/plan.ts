@@ -1,23 +1,25 @@
 /**
- * @fileoverview Milhouse Plan Command
+ * Plan command -- thin wrapper around PhaseRunner
  *
- * Handles the --plan command to generate Work Breakdown Structures (WBS)
- * for validated issues using Planner (PL) agents.
+ * Replaces monolithic plan.ts (~1000+ lines) with a ~10-line wrapper.
  *
  * @module cli/commands/pipeline/plan
- *
- * @since 4.3.0
- *
- * @example
- * ```bash
- * # Plan all confirmed issues
- * milhouse --plan
- *
- * # Plan only high severity issues
- * milhouse --plan --min-severity HIGH
- * ```
  */
 
-// Re-export from the original plan command
-// The original command already uses Milhouse branding
+import type { RuntimeOptions } from "../../runtime-options.ts";
+import { loadResolvedConfig } from "../../../runner/config-loader.ts";
+import { runPhase } from "../../../runner/phase-runner.ts";
+import { planPhaseConfig } from "../../../runner/phases/plan.ts";
+
+export async function runPlanPipeline(options: RuntimeOptions): Promise<void> {
+	const workDir = process.cwd();
+	const config = loadResolvedConfig(workDir, options);
+	await runPhase(planPhaseConfig, {
+		workDir,
+		config,
+		runId: options.runId,
+	});
+}
+
+// Backward-compat: re-export the old function name
 export { runPlan } from "../plan.ts";
