@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { RuntimeOptions } from "../cli/runtime-options.ts";
+import { logInfo } from "../ui/logger.ts";
 import type { CostConfig, ReportConfig, ResolvedConfig } from "./types.ts";
 
 /** Default cost configuration */
@@ -274,6 +275,8 @@ export function loadResolvedConfig(
 	if (yaml) {
 		const yamlConfig = mapYamlToResolved(yaml);
 		config = deepMerge(config, yamlConfig);
+	} else {
+		logInfo("No .milhouse/config.yaml found, using defaults. Run \"milhouse --init\" to configure.");
 	}
 
 	// CLI flags override everything

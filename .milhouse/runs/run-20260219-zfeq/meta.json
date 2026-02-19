@@ -1,0 +1,11 @@
+{
+  "id": "run-20260219-zfeq",
+  "created_at": "2026-02-19T19:18:21.878Z",
+  "updated_at": "2026-02-19T19:23:20.145Z",
+  "phase": "validate",
+  "issues_found": 11,
+  "issues_validated": 0,
+  "tasks_total": 0,
+  "tasks_completed": 0,
+  "tasks_failed": 0
+}

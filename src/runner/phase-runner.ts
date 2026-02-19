@@ -6,8 +6,9 @@
  */
 
 import pLimit from "p-limit";
+import { DEFAULT_AGENT_CONFIGS, type AgentRole } from "../agents/types.ts";
 import { createEngine } from "../engines/index.ts";
-import type { PipelinePhase } from "../schemas/engine.schema.ts";
+import type { AgentRole as EngineAgentRole, PipelinePhase } from "../schemas/engine.schema.ts";
 import { acquireRunLock } from "../state/run-lock.ts";
 import {
 	createRun,
@@ -16,6 +17,7 @@ import {
 } from "../state/runs.ts";
 import type { RunPhase } from "../state/types.ts";
 import { logInfo, logWarn } from "../ui/logger.ts";
+import { ProgressSpinner, DynamicAgentSpinner } from "../ui/spinners.ts";
 import {
 	addPhaseCost,
 	BudgetExceededError,
@@ -34,6 +36,16 @@ import type {
 	ResolvedConfig,
 } from "./types.ts";
 import { resolvePhaseModel } from "./types.ts";
+
+/** Map internal abbreviated roles to engine's full role names */
+const ROLE_TO_ENGINE: Partial<Record<AgentRole, EngineAgentRole>> = {
+	LI: "lead-investigator",
+	IV: "validator",
+	PL: "planner",
+	CDM: "consolidator",
+	EX: "executor",
+	TV: "verifier",
+};
 
 /** Options for running a phase */
 export interface RunPhaseOptions {
@@ -205,7 +217,84 @@ export async function runPhase<TItem, TResult>(
 }
 
 /**
- * Execute items in parallel using p-limit pool
+ * Get human-readable label for a phase+role (e.g. "Scanning repository")
+ */
+function getPhaseLabel(phaseConfig: PhaseConfig<unknown, unknown>): string {
+	const agentName = DEFAULT_AGENT_CONFIGS[phaseConfig.role as AgentRole]?.name ?? phaseConfig.role;
+	const labels: Record<string, string> = {
+		scan: "Scanning repository",
+		validate: "Validating issues",
+		plan: "Planning tasks",
+		consolidate: "Consolidating plans",
+		verify: "Verifying results",
+	};
+	return labels[phaseConfig.name] ?? `${agentName} working`;
+}
+
+/**
+ * Execute a single item against the engine with streaming progress
+ */
+async function executeItem<TItem, TResult>(
+	phaseConfig: PhaseConfig<TItem, TResult>,
+	item: TItem,
+	ctx: PhaseContext,
+	model: string,
+	onProgress?: (step: string | import("../engines/base.ts").DetailedStep) => void,
+): Promise<PhaseItemResult<TResult>> {
+	// beforeItem hook
+	let processedItem = item;
+	if (phaseConfig.beforeItem) {
+		processedItem = await phaseConfig.beforeItem(item, ctx);
+	}
+
+	const prompt = phaseConfig.buildPrompt(processedItem, ctx);
+	const engineOpts = {
+		jsonSchema: phaseConfig.jsonSchema,
+		modelOverride: model,
+		runId: ctx.runId,
+		agentRole: ROLE_TO_ENGINE[phaseConfig.role as AgentRole],
+		pipelinePhase: phaseConfig.name as PipelinePhase,
+	};
+
+	try {
+		// Prefer streaming for real-time progress
+		const aiResult = ctx.engine.executeStreaming
+			? await ctx.engine.executeStreaming(prompt, ctx.workDir, (step) => onProgress?.(step), engineOpts)
+			: await ctx.engine.execute(prompt, ctx.workDir, engineOpts);
+
+		if (!aiResult.success) {
+			return {
+				item: processedItem,
+				result: undefined as unknown as TResult,
+				success: false,
+				error: aiResult.error ?? "AI execution failed",
+				inputTokens: aiResult.inputTokens,
+				outputTokens: aiResult.outputTokens,
+			};
+		}
+
+		const result = phaseConfig.parseResponse(aiResult.response, processedItem, ctx);
+		return {
+			item: processedItem,
+			result,
+			success: true,
+			inputTokens: aiResult.inputTokens,
+			outputTokens: aiResult.outputTokens,
+		};
+	} catch (error) {
+		return {
+			item: processedItem,
+			result: undefined as unknown as TResult,
+			success: false,
+			error: error instanceof Error ? error.message : String(error),
+			inputTokens: 0,
+			outputTokens: 0,
+		};
+	}
+}
+
+/**
+ * Execute items in parallel using p-limit pool with live TUI progress
  */
 async function executePool<TItem, TResult>(
 	phaseConfig: PhaseConfig<TItem, TResult>,
@@ -217,70 +306,75 @@ async function executePool<TItem, TResult>(
 ): Promise<PhaseItemResult<TResult>[]> {
 	const maxParallel = config.workers ?? phaseConfig.defaultParallel;
 	const limit = pLimit(maxParallel);
+	const isSingle = items.length === 1;
+	const roleName = phaseConfig.role as AgentRole;
 
-	const tasks = items.map(item =>
+	// Single-agent mode: one ProgressSpinner with step tracking
+	if (isSingle) {
+		const spinner = new ProgressSpinner(getPhaseLabel(phaseConfig), [roleName]);
+
+		try {
+			checkBudget(runCost, config.cost);
+		} catch (e) {
+			if (e instanceof BudgetExceededError) { spinner.error("Budget exceeded"); throw e; }
+		}
+
+		const result = await executeItem(phaseConfig, items[0], ctx, model, (step) => spinner.updateStep(step));
+		const tokenInfo = `${formatTokens(result.inputTokens)} in / ${formatTokens(result.outputTokens)} out`;
+
+		if (result.success) {
+			spinner.success(`${getPhaseLabel(phaseConfig)} complete (${tokenInfo})`);
+		} else {
+			spinner.error(`${getPhaseLabel(phaseConfig)} failed: ${result.error}`);
+		}
+
+		return [result];
+	}
+
+	// Multi-item mode: DynamicAgentSpinner with slot tracking
+	const spinner = new DynamicAgentSpinner(maxParallel, items.length, getPhaseLabel(phaseConfig));
+
+	const tasks = items.map((item, idx) =>
 		limit(async () => {
-			// Budget check before each item
 			try {
 				checkBudget(runCost, config.cost);
 			} catch (e) {
-				if (e instanceof BudgetExceededError) throw e;
+				if (e instanceof BudgetExceededError) { spinner.error("Budget exceeded"); throw e; }
 			}
 
-			// beforeItem hook
-			let processedItem = item;
-			if (phaseConfig.beforeItem) {
-				processedItem = await phaseConfig.beforeItem(item, ctx);
-			}
+			const itemId = getItemId(item, idx);
+			const slot = spinner.acquireSlot(itemId);
 
-			// Build prompt
-			const prompt = phaseConfig.buildPrompt(processedItem, ctx);
+			const result = await executeItem(phaseConfig, item, ctx, model, (step) => {
+				const label = typeof step === "string" ? step : (step.shortDetail ?? step.category);
+				spinner.updateSlot(slot, label);
+			});
 
-			// Execute
-			try {
-				const aiResult = await ctx.engine.execute(prompt, ctx.workDir, {
-					jsonSchema: phaseConfig.jsonSchema,
-					modelOverride: model,
-					runId: ctx.runId,
-					agentRole: phaseConfig.role as unknown as import("../schemas/engine.schema.ts").AgentRole,
-					pipelinePhase: phaseConfig.name as PipelinePhase,
-				});
-
-				if (!aiResult.success) {
-					return {
-						item: processedItem,
-						result: undefined as unknown as TResult,
-						success: false,
-						error: aiResult.error ?? "AI execution failed",
-						inputTokens: aiResult.inputTokens,
-						outputTokens: aiResult.outputTokens,
-					} satisfies PhaseItemResult<TResult>;
-				}
-
-				// Parse response
-				const result = phaseConfig.parseResponse(aiResult.response, processedItem, ctx);
-
-				return {
-					item: processedItem,
-					result,
-					success: true,
-					inputTokens: aiResult.inputTokens,
-					outputTokens: aiResult.outputTokens,
-				} satisfies PhaseItemResult<TResult>;
-			} catch (error) {
-				return {
-					item: processedItem,
-					result: undefined as unknown as TResult,
-					success: false,
-					error: error instanceof Error ? error.message : String(error),
-					inputTokens: 0,
-					outputTokens: 0,
-				} satisfies PhaseItemResult<TResult>;
-			}
+			spinner.releaseSlot(slot, result.success);
+			return result;
 		})
 	);
 
-	return Promise.all(tasks);
+	try {
+		const results = await Promise.all(tasks);
+		const succeeded = results.filter(r => r.success).length;
+		spinner.success(`${getPhaseLabel(phaseConfig)} complete (${succeeded}/${results.length} succeeded)`);
+		return results;
+	} catch (error) {
+		spinner.error(`${getPhaseLabel(phaseConfig)} failed`);
+		throw error;
+	}
+}
+
+/** Extract a short identifier from an item for spinner display */
+function getItemId(item: unknown, index: number): string {
+	if (item && typeof item === "object") {
+		const obj = item as Record<string, unknown>;
+		if (typeof obj.id === "string") return obj.id.slice(0, 12);
+		if (typeof obj.title === "string") return obj.title.slice(0, 16);
+		if (typeof obj.symptom === "string") return obj.symptom.slice(0, 16);
+	}
+	return `#${index + 1}`;
 }
 
 /**
@@ -309,6 +403,13 @@ function displayDefaultSummary<TResult>(
 	console.log(`  Duration:  ${minutes}m ${seconds}s`);
 	console.log(`  Tokens:    ${formatTokens(totalInput)} in / ${formatTokens(totalOutput)} out`);
 	console.log(`  Cost:      ${formatCost(cost)}`);
+
+	// Show errors for failed items
+	const failedItems = results.filter(r => !r.success && r.error);
+	for (const item of failedItems) {
+		console.log(`  Error:     ${item.error}`);
+	}
+
 	console.log("══════════════════════════════════════════");
 	console.log("");
 }
