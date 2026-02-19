@@ -1,0 +1,380 @@
+/**
+ * Unit tests for verify.ts
+ *
+ * Tests the verification gates and helper functions.
+ */
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+	buildVerifierPrompt,
+	GATES,
+	runAllGates,
+	runDiffHygieneGate,
+	runDoDGate,
+	runEnvConsistencyGate,
+	runEvidenceGate,
+	runPlaceholderGate,
+	type VerificationIssue,
+} from "./verify.ts";
+import type { Task } from "../../state/types.ts";
+
+describe("verify.ts gate functions", () => {
+	const testWorkDir = join(process.cwd(), ".test-workdir-verify");
+	const runId = "run-test";
+
+	beforeEach(() => {
+		if (!existsSync(testWorkDir)) {
+			mkdirSync(testWorkDir, { recursive: true });
+		}
+		const milhouseDir = join(testWorkDir, ".milhouse");
+		// Create both legacy and run-scoped state dirs since verify mixes both:
+		// - tasks are loaded per run (run-scoped)
+		// - executions currently resolve via getStatePathForCurrentRun (legacy unless a run is active)
+		mkdirSync(join(milhouseDir, "state"), { recursive: true });
+		mkdirSync(join(milhouseDir, "runs", runId, "state"), { recursive: true });
+	});
+
+	afterEach(() => {
+		if (existsSync(testWorkDir)) {
+			rmSync(testWorkDir, { recursive: true, force: true });
+		}
+	});
+
+	describe("GATES constant", () => {
+		test("should define all required gates", () => {
+			expect(GATES).toHaveProperty("evidence");
+			expect(GATES).toHaveProperty("diffHygiene");
+			expect(GATES).toHaveProperty("placeholder");
+			expect(GATES).toHaveProperty("envConsistency");
+			expect(GATES).toHaveProperty("dod");
+		});
+
+		test("should have descriptive gate names", () => {
+			expect(GATES.evidence).toContain("Evidence");
+			expect(GATES.diffHygiene).toContain("Diff");
+			expect(GATES.placeholder).toContain("Placeholder");
+			expect(GATES.envConsistency).toContain("Environment");
+			expect(GATES.dod).toContain("Definition of Done");
+		});
+	});
+
+	describe("runPlaceholderGate", () => {
+		test("should pass when no state directory exists", () => {
+			const emptyDir = join(testWorkDir, "empty-project");
+			mkdirSync(emptyDir, { recursive: true });
+			// runPlaceholderGate is run-aware and expects a runId+workDir.
+			// This test only needs to assert that it passes when the state dir is missing.
+			const result = runPlaceholderGate(runId, emptyDir);
+
+			expect(result.passed).toBe(true);
+			expect(result.gate).toBe("placeholder");
+			// Message may vary depending on whether run-scoped state is found.
+			expect(result.passed).toBe(true);
+		});
+
+		test("should pass when tasks have no code files", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(
+				tasksPath,
+				JSON.stringify([
+					{
+						id: "task-1",
+						title: "Test task",
+						files: ["README.md"],
+						status: "done",
+						acceptance: [],
+						depends_on: [],
+						checks: [],
+						parallel_group: 0,
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString(),
+					},
+				]),
+			);
+
+			const result = runPlaceholderGate(runId, testWorkDir);
+
+			expect(result.passed).toBe(true);
+			expect(result.gate).toBe("placeholder");
+		});
+
+		test("should have timestamp in result", () => {
+			const result = runPlaceholderGate(runId, testWorkDir);
+
+			expect(result.timestamp).toBeDefined();
+			expect(() => new Date(result.timestamp)).not.toThrow();
+		});
+	});
+
+	describe("runDiffHygieneGate", () => {
+		test("should pass when no silent refactors detected", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(
+				tasksPath,
+				JSON.stringify([
+					{
+						id: "task-1",
+						title: "Test task",
+						files: ["src/index.ts"],
+						status: "done",
+						acceptance: [],
+						depends_on: [],
+						checks: [],
+						parallel_group: 0,
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString(),
+					},
+				]),
+			);
+
+			const executionsPath = join(testWorkDir, ".milhouse", "state", "executions.json");
+			writeFileSync(executionsPath, JSON.stringify([]));
+
+			const result = runDiffHygieneGate(runId, testWorkDir);
+
+			expect(result.passed).toBe(true);
+			expect(result.gate).toBe("diffHygiene");
+		});
+
+		test("should return gate type as diffHygiene", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(tasksPath, JSON.stringify([]));
+
+			const executionsPath = join(testWorkDir, ".milhouse", "state", "executions.json");
+			writeFileSync(executionsPath, JSON.stringify([]));
+
+			const result = runDiffHygieneGate(runId, testWorkDir);
+
+			expect(result.gate).toBe("diffHygiene");
+		});
+	});
+
+	describe("runEvidenceGate", () => {
+		test("should pass when all acceptance criteria are verified", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(
+				tasksPath,
+				JSON.stringify([
+					{
+						id: "task-1",
+						title: "Test task",
+						files: [],
+						status: "done",
+						acceptance: [
+							{
+								description: "Test criterion",
+								verified: true,
+							},
+						],
+						depends_on: [],
+						checks: [],
+						parallel_group: 0,
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString(),
+					},
+				]),
+			);
+
+			const result = runEvidenceGate(runId, testWorkDir);
+
+			expect(result.passed).toBe(true);
+			expect(result.gate).toBe("evidence");
+		});
+
+		test("should fail when acceptance criteria are unverified", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(
+				tasksPath,
+				JSON.stringify([
+					{
+						id: "task-1",
+						title: "Test task",
+						files: [],
+						status: "done",
+						acceptance: [
+							{
+								description: "Unverified criterion",
+								verified: false,
+							},
+						],
+						depends_on: [],
+						checks: [],
+						parallel_group: 0,
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString(),
+					},
+				]),
+			);
+
+			const result = runEvidenceGate(runId, testWorkDir);
+
+			expect(result.passed).toBe(false);
+			expect(result.message).toContain("unverified");
+		});
+	});
+
+	describe("runEnvConsistencyGate", () => {
+		test("should pass when no probes directory exists", () => {
+			const result = runEnvConsistencyGate(runId, testWorkDir);
+
+			expect(result.passed).toBe(true);
+			expect(result.gate).toBe("envConsistency");
+		});
+
+		test("should pass when probes directory exists with probe data", () => {
+			const probesDir = join(testWorkDir, ".milhouse", "runs", runId, "probes");
+			mkdirSync(join(probesDir, "deps"), { recursive: true });
+			mkdirSync(join(probesDir, "compose"), { recursive: true });
+
+			const result = runEnvConsistencyGate(runId, testWorkDir);
+
+			expect(result.passed).toBe(true);
+		});
+	});
+
+	describe("runDoDGate", () => {
+		test("should pass when no acceptance criteria defined", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(
+				tasksPath,
+				JSON.stringify([
+					{
+						id: "task-1",
+						title: "Test task",
+						files: [],
+						status: "done",
+						acceptance: [],
+						depends_on: [],
+						checks: [],
+						parallel_group: 0,
+						created_at: new Date().toISOString(),
+						updated_at: new Date().toISOString(),
+					},
+				]),
+			);
+
+			const result = runDoDGate(runId, testWorkDir);
+
+			expect(result.passed).toBe(true);
+			expect(result.gate).toBe("dod");
+		});
+
+		test("should return gate type as dod", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(tasksPath, JSON.stringify([]));
+
+			const result = runDoDGate(runId, testWorkDir);
+
+			expect(result.gate).toBe("dod");
+		});
+	});
+
+	describe("runAllGates", () => {
+		test("should run all five gates", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(tasksPath, JSON.stringify([]));
+
+			const executionsPath = join(testWorkDir, ".milhouse", "state", "executions.json");
+			writeFileSync(executionsPath, JSON.stringify([]));
+
+			const results = runAllGates(runId, testWorkDir);
+
+			expect(results.length).toBe(5);
+		});
+
+		test("should include all gate types", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(tasksPath, JSON.stringify([]));
+
+			const executionsPath = join(testWorkDir, ".milhouse", "state", "executions.json");
+			writeFileSync(executionsPath, JSON.stringify([]));
+
+			const results = runAllGates(runId, testWorkDir);
+			const gateTypes = results.map((r) => r.gate);
+
+			expect(gateTypes).toContain("placeholder");
+			expect(gateTypes).toContain("diffHygiene");
+			expect(gateTypes).toContain("dod");
+			expect(gateTypes).toContain("evidence");
+			expect(gateTypes).toContain("envConsistency");
+		});
+
+		test("should run DoD gate before Evidence gate", () => {
+			const tasksPath = join(testWorkDir, ".milhouse", "runs", runId, "state", "tasks.json");
+			writeFileSync(tasksPath, JSON.stringify([]));
+
+			const executionsPath = join(testWorkDir, ".milhouse", "state", "executions.json");
+			writeFileSync(executionsPath, JSON.stringify([]));
+
+			const results = runAllGates(runId, testWorkDir);
+			const dodIndex = results.findIndex((r) => r.gate === "dod");
+			const evidenceIndex = results.findIndex((r) => r.gate === "evidence");
+
+			expect(dodIndex).toBeLessThan(evidenceIndex);
+		});
+	});
+
+	describe("buildVerifierPrompt", () => {
+		test("should include role information", () => {
+			const tasks: Task[] = [];
+			const issues: VerificationIssue[] = [];
+
+			const prompt = buildVerifierPrompt(tasks, issues, testWorkDir);
+
+			expect(prompt).toContain("Truth Verifier");
+			expect(prompt).toContain("TV");
+		});
+
+		test("should include execution summary", () => {
+			const tasks: Task[] = [
+				{
+					id: "task-1",
+					title: "Test task",
+					files: [],
+					status: "done",
+					acceptance: [],
+					depends_on: [],
+					checks: [],
+					parallel_group: 0,
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString(),
+				},
+			];
+			const issues: VerificationIssue[] = [];
+
+			const prompt = buildVerifierPrompt(tasks, issues, testWorkDir);
+
+			expect(prompt).toContain("Execution Summary");
+			expect(prompt).toContain("Completed Tasks");
+		});
+
+		test("should include issues when present", () => {
+			const tasks: Task[] = [];
+			const issues: VerificationIssue[] = [
+				{
+					gate: "placeholder",
+					severity: "ERROR",
+					message: "Test issue",
+				},
+			];
+
+			const prompt = buildVerifierPrompt(tasks, issues, testWorkDir);
+
+			expect(prompt).toContain("Pre-check Issues Found");
+			expect(prompt).toContain("Test issue");
+		});
+
+		test("should include output format instructions", () => {
+			const tasks: Task[] = [];
+			const issues: VerificationIssue[] = [];
+
+			const prompt = buildVerifierPrompt(tasks, issues, testWorkDir);
+
+			expect(prompt).toContain("Output Format");
+			expect(prompt).toContain("overall_pass");
+			expect(prompt).toContain("json");
+		});
+	});
+});
