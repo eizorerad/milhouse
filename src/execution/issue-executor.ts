@@ -23,19 +23,7 @@ import pLimit from "p-limit";
 import { MILHOUSE_DIR } from "../domain/config/directories.ts";
 import { getConfigService } from "../services/config/index.ts";
 import type { AIEngine } from "../engines/types.ts";
-import {
-	OpencodeServerExecutor,
-	PortManager,
-	displayAttachInstructions,
-	displayTmuxCompletionSummary,
-	displayTmuxModeHeader,
-	updateAgentStatus,
-	clearAgentStatuses,
-	getMessageOptionsForPhase,
-	type ServerInfo,
-	type AgentStatus,
-} from "../engines/opencode/index.ts";
-import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../engines/tmux/index.ts";
+// ServerInfo is now used only within execution/tmux module
 import {
 	getMilhouseDir,
 	getCurrentPlansDir,
@@ -46,23 +34,31 @@ import {
 import { AGENT_ROLES, type Issue, type Task as StateTask } from "../state/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { DynamicAgentSpinner } from "../ui/spinners.ts";
-import { branchExists, deleteLocalBranch } from "../vcs/services/branch-service.ts";
 import {
-	type RebaseResult,
-	abortMerge,
-	abortRebase,
 	checkMergeReadiness,
-	mergeAgentBranch,
-	rebaseBranch,
 	stashChanges,
 	popStash,
 } from "../vcs/services/merge-service.ts";
 import { cleanupWorktree, createWorktree } from "../vcs/services/worktree-service.ts";
-import { createMergeConflictInfo, resolveConflictsWithEngine } from "./runtime/conflict-resolution.ts";
 import { executeWithRetry, isRetryableError } from "./runtime/retry.ts";
 import { DEFAULT_RETRY_CONFIG, type MilhouseRetryConfig } from "./runtime/types.ts";
 import type { ExecutionResult } from "./steps/types.ts";
 import { analyzeIssueTaskCompletion } from "./utils/task-commit-matcher.ts";
+// Extracted shared modules (T6)
+import {
+	type TmuxServerInfo,
+	initTmuxMode,
+	showTmuxHeader,
+	showCompletionSummary,
+	executeIssueTmuxMode,
+	cleanupTmuxResources,
+	registerSignalHandlers,
+	removeSignalHandlers,
+} from "./tmux/index.ts";
+import {
+	type IssueInfo,
+	mergeCompletedBranches,
+} from "./merge/index.ts";
 
 // ============================================================================
 // Types
@@ -225,27 +221,8 @@ export interface IssueBasedExecutionOptions {
 	};
 }
 
-// ============================================================================
-// Internal Types
-// ============================================================================
-
-/**
- * Result of a single branch merge attempt
- */
-interface BranchMergeResult {
-	branch: string;
-	success: boolean;
-	error?: string;
-}
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/**
- * Maximum number of retry attempts for merge conflicts
- */
-const MAX_MERGE_RETRIES = 3;
+// Internal BranchMergeResult and IssueInfo types are now in execution/merge
+// MAX_MERGE_RETRIES is now in execution/merge/rebase-merge.ts
 
 // ============================================================================
 // Utility Functions
@@ -674,500 +651,10 @@ If there are no conflicts, you're done!
 `);
 }
 
-/**
- * Info about an issue for creating human-readable commit messages
- */
-interface IssueInfo {
-	/** Issue ID */
-	id: string;
-	/** Human-readable description (title or symptom) */
-	title: string;
-}
+// IssueInfo and mergeCompletedBranches are now in execution/merge/rebase-merge.ts
 
-/**
- * Merge completed branches back to base using rebase-then-merge strategy
- *
- * This function:
- * 1. Processes branches SEQUENTIALLY to prevent race conditions
- * 2. First tries to rebase each branch onto the latest target
- * 3. If rebase has conflicts, uses AI to resolve them
- * 4. Then performs a fast-forward merge
- * 5. Retries up to MAX_MERGE_RETRIES times on failure
- *
- * IMPORTANT: Sequential processing is critical because:
- * - Each successful merge changes the target branch
- * - Subsequent branches must rebase onto the NEW target state
- * - Parallel merges would cause conflicts and race conditions
- *
- * @param branches - List of branches to merge
- * @param targetBranch - Target branch to merge into
- * @param engine - AI engine for conflict resolution
- * @param workDir - Working directory
- * @param branchToIssueInfo - Map of branch name to issue info for commit messages
- * @param modelOverride - Optional model override
- * @returns Array of results for each branch
- */
-async function mergeCompletedBranches(
-	branches: string[],
-	targetBranch: string,
-	engine: AIEngine,
-	workDir: string,
-	branchToIssueInfo: Map<string, IssueInfo>,
-	modelOverride?: string,
-): Promise<BranchMergeResult[]> {
-	const results: BranchMergeResult[] = [];
-
-	if (branches.length === 0) return results;
-
-	logInfo(
-		`Merging ${branches.length} branch(es) into ${targetBranch} using rebase-then-merge strategy`,
-	);
-	logInfo(`Branches will be merged SEQUENTIALLY to avoid conflicts`);
-
-	// Process branches ONE BY ONE - this is intentional!
-	// Each merge changes the target branch, so subsequent branches must rebase onto the new state
-	for (let branchIndex = 0; branchIndex < branches.length; branchIndex++) {
-		const branch = branches[branchIndex];
-		let success = false;
-		let lastError: string | undefined;
-
-		logInfo(`\n[Branch ${branchIndex + 1}/${branches.length}] Processing ${branch}...`);
-
-		// First check if branch exists (it might have been deleted during cleanup)
-		const existsResult = await branchExists(branch, workDir);
-		if (!existsResult.ok || !existsResult.value) {
-			logWarn(`Branch ${branch} does not exist (may have been cleaned up), skipping`);
-			results.push({
-				branch,
-				success: false,
-				error: "Branch does not exist",
-			});
-			continue;
-		}
-
-		// Retry loop for this branch
-		for (let attempt = 1; attempt <= MAX_MERGE_RETRIES; attempt++) {
-			logInfo(`  [Attempt ${attempt}/${MAX_MERGE_RETRIES}]`);
-
-			// Step 1: Ensure we're on the target branch before rebase
-			// This is important because rebase will checkout the source branch
-			logDebug(`  Checking out target branch ${targetBranch} before rebase...`);
-
-			// Step 2: Try to rebase the branch onto the latest target
-			const rebaseResultVcs = await rebaseBranch(branch, targetBranch, workDir);
-
-			// Handle VcsResult - extract the RebaseResult or create error result
-			let rebaseResult: RebaseResult & { error?: string; stderr?: string; errorCode?: string };
-			if (!rebaseResultVcs.ok) {
-				// Detailed error handling based on error code
-				const errorCode = rebaseResultVcs.error.code;
-				const errorMessage = rebaseResultVcs.error.message;
-				const stderr = rebaseResultVcs.error.context?.stderr as string | undefined;
-
-				rebaseResult = {
-					success: false,
-					hasConflicts: false,
-					conflictedFiles: [],
-					error: errorMessage,
-					stderr,
-					errorCode,
-				};
-
-				// Log specific error types for debugging
-				if (errorCode === "DIRTY_WORKTREE") {
-					logError(`  ✗ Cannot rebase: worktree has uncommitted changes`);
-					logInfo(`    Suggestion: Commit or stash changes before merge`);
-				} else if (errorCode === "BRANCH_LOCKED") {
-					logError(`  ✗ Cannot rebase: branch is checked out in another worktree`);
-					logInfo(`    Suggestion: Remove the worktree first with 'git worktree remove'`);
-				} else if (errorCode === "BRANCH_NOT_FOUND") {
-					logError(`  ✗ Cannot rebase: branch ${branch} not found`);
-				} else {
-					logError(`  ✗ Rebase failed: ${errorMessage}`);
-				}
-			} else {
-				rebaseResult = rebaseResultVcs.value;
-			}
-
-			if (rebaseResult.success) {
-				// Rebase succeeded cleanly, now do the fast-forward merge
-				logDebug(`  ✓ Rebase succeeded, performing merge...`);
-	
-					// Create human-readable commit message from issue info
-					const issueInfo = branchToIssueInfo.get(branch);
-					const commitMessage = issueInfo
-						? issueInfo.title
-						: undefined;
-	
-					const mergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
-						message: commitMessage,
-					});
-
-				if (mergeResultVcs.ok && mergeResultVcs.value.success) {
-					logSuccess(`  ✓ Successfully merged ${branch}`);
-					await deleteLocalBranch(branch, workDir, true);
-					success = true;
-					break;
-				}
-
-				lastError = !mergeResultVcs.ok
-					? mergeResultVcs.error.message
-					: "Merge failed after successful rebase";
-				logWarn(`  ✗ Merge failed after rebase: ${lastError}`);
-				
-				// Abort any in-progress merge before retry
-				await abortMerge(workDir);
-				continue;
-			}
-
-			// Rebase has conflicts
-				if (rebaseResult.hasConflicts && rebaseResult.conflictedFiles) {
-					logWarn(
-						`  ⚠ Rebase conflict (${rebaseResult.conflictedFiles.length} files): ${rebaseResult.conflictedFiles.join(", ")}`,
-					);
-					logInfo(`  Attempting AI resolution...`);
-	
-					// Use AI to resolve rebase conflicts
-					const conflicts = createMergeConflictInfo(rebaseResult.conflictedFiles, branch, targetBranch);
-					const resolutionResult = await resolveConflictsWithEngine(engine, conflicts, workDir, modelOverride);
-					const resolved = resolutionResult.success;
-	
-					// Get issue info for commit message
-					const issueInfoForConflict = branchToIssueInfo.get(branch);
-	
-					if (resolved) {
-						// AI resolved conflicts, now complete the merge
-						logDebug(`  ✓ AI resolved conflicts`);
-	
-						const mergeResultVcs2 = await mergeAgentBranch(branch, targetBranch, workDir, {
-							message: issueInfoForConflict?.title,
-						});
-
-					if (mergeResultVcs2.ok && mergeResultVcs2.value.success) {
-						logSuccess(`  ✓ Successfully merged ${branch} after AI conflict resolution`);
-						await deleteLocalBranch(branch, workDir, true);
-						success = true;
-						break;
-					}
-
-					// Merge still failed, abort and retry
-					lastError = !mergeResultVcs2.ok
-						? mergeResultVcs2.error.message
-						: "Merge failed after conflict resolution";
-					logWarn(`  ✗ Merge failed after AI resolution: ${lastError}`);
-					await abortMerge(workDir);
-					continue;
-				}
-
-				// AI couldn't resolve conflicts
-				lastError = `AI failed to resolve rebase conflicts (${rebaseResult.conflictedFiles.join(", ")})`;
-				logWarn(`  ✗ ${lastError}`);
-				await abortRebase(workDir);
-
-				// Try falling back to direct merge with AI resolution
-				if (attempt < MAX_MERGE_RETRIES) {
-					logInfo(`  Attempting direct merge as fallback...`);
-
-					const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
-						message: issueInfoForConflict?.title,
-					});
-
-					if (directMergeResultVcs.ok && directMergeResultVcs.value.success) {
-						logSuccess(`  ✓ Direct merge succeeded`);
-						await deleteLocalBranch(branch, workDir, true);
-						success = true;
-						break;
-					}
-
-					if (
-						directMergeResultVcs.ok &&
-						directMergeResultVcs.value.hasConflicts &&
-						directMergeResultVcs.value.conflictedFiles
-					) {
-						logWarn(`  ⚠ Direct merge has conflicts, attempting AI resolution...`);
-	
-							const directConflicts = createMergeConflictInfo(directMergeResultVcs.value.conflictedFiles, branch, targetBranch);
-							const directResolutionResult = await resolveConflictsWithEngine(engine, directConflicts, workDir, modelOverride);
-	
-							if (directResolutionResult.success) {
-							logSuccess(`  ✓ Direct merge with AI resolution succeeded`);
-							await deleteLocalBranch(branch, workDir, true);
-							success = true;
-							break;
-						}
-
-						await abortMerge(workDir);
-					}
-				}
-
-				continue;
-			}
-
-			// Some other rebase error (not conflict)
-			lastError = rebaseResult.error || "Unknown rebase error";
-			logError(`  ✗ Rebase error: ${lastError}`);
-			
-			// Log detailed debug info
-			if (rebaseResult.stderr) {
-				logDebug(`  Git stderr: ${rebaseResult.stderr}`);
-			}
-			if (rebaseResult.errorCode) {
-				logDebug(`  Error code: ${rebaseResult.errorCode}`);
-			}
-			
-			await abortRebase(workDir);
-			
-			// For non-conflict errors, try direct merge as fallback
-			if (attempt < MAX_MERGE_RETRIES) {
-				logInfo(`  Attempting direct merge as fallback for non-conflict error...`);
-				
-				const issueInfoForDirect = branchToIssueInfo.get(branch);
-				const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
-					message: issueInfoForDirect?.title,
-				});
-				
-				if (directMergeResultVcs.ok && directMergeResultVcs.value.success) {
-					logSuccess(`  ✓ Direct merge succeeded (bypassed rebase)`);
-					await deleteLocalBranch(branch, workDir, true);
-					success = true;
-					break;
-				}
-				
-				if (directMergeResultVcs.ok && directMergeResultVcs.value.hasConflicts) {
-					logWarn(`  ⚠ Direct merge has conflicts`);
-					// Will retry with rebase on next attempt
-					await abortMerge(workDir);
-				}
-			}
-		}
-
-		results.push({
-			branch,
-			success,
-			error: success ? undefined : lastError,
-		});
-
-		if (!success) {
-			logError(`  ✗ Failed to merge ${branch} after ${MAX_MERGE_RETRIES} attempts`);
-			logWarn(`  Branch preserved for manual inspection`);
-			logInfo(`  Manual merge: git checkout ${targetBranch} && git merge --no-ff ${branch}`);
-		}
-	}
-
-	// Summary
-	logInfo(`\n${"─".repeat(60)}`);
-	const succeeded = results.filter((r) => r.success).length;
-	const failed = results.filter((r) => !r.success).length;
-
-	if (failed > 0) {
-		logWarn(`Merge summary: ${succeeded}/${branches.length} succeeded, ${failed} failed`);
-		logInfo(`\nFailed branches:`);
-		for (const result of results.filter((r) => !r.success)) {
-			logError(`  - ${result.branch}: ${result.error}`);
-		}
-	} else {
-		logSuccess(`All ${succeeded} branch(es) merged successfully`);
-	}
-
-	return results;
-}
-
-// ============================================================================
-// Tmux Mode Types
-// ============================================================================
-
-/**
- * Information about a running OpenCode server for tmux mode
- */
-interface TmuxServerInfo {
-	/** Issue ID */
-	issueId: string;
-	/** Server port */
-	port: number;
-	/** Server URL */
-	url: string;
-	/** Tmux session name */
-	tmuxSession: string;
-	/** Attach command */
-	attachCommand: string;
-	/** OpenCode server executor */
-	executor: OpencodeServerExecutor;
-}
-
-// ============================================================================
-// Tmux Mode Functions
-// ============================================================================
-
-/**
- * Convert TmuxServerInfo to ServerInfo for UI display
- */
-function toServerInfo(server: TmuxServerInfo, status: ServerInfo["status"] = "running"): ServerInfo {
-	return {
-		issueId: server.issueId,
-		port: server.port,
-		sessionName: server.tmuxSession,
-		status,
-		url: server.url,
-	};
-}
-
-/**
- * Display tmux mode instructions with server URLs and attach commands
- * Uses the new UI components from engines/opencode/ui
- */
-function displayTmuxModeInstructions(servers: TmuxServerInfo[]): void {
-	const serverInfos: ServerInfo[] = servers.map((s) => toServerInfo(s, "running"));
-	displayAttachInstructions(serverInfos);
-}
-
-/**
- * Execute an issue using tmux mode with OpenCode server
- *
- * This function:
- * 1. Starts an OpenCode server for the issue
- * 2. Creates a tmux session with `opencode attach` command
- * 3. Sends the prompt via the Server API
- * 4. Waits for completion
- * 5. Returns the result
- */
-async function executeIssueTmuxMode(
-	issueGroup: IssueGroup,
-	worktreeDir: string,
-	prompt: string,
-	tmuxManager: TmuxSessionManager,
-	options: {
-		showAttachCommand?: boolean;
-		modelOverride?: string;
-	},
-): Promise<{
-	success: boolean;
-	inputTokens: number;
-	outputTokens: number;
-	serverInfo: TmuxServerInfo;
-	error?: string;
-}> {
-	const executor = new OpencodeServerExecutor({
-		autoInstall: true,
-		verbose: false,
-	});
-
-	let serverInfo: TmuxServerInfo | null = null;
-
-	try {
-		// Start the OpenCode server
-		const port = await executor.startServer(worktreeDir);
-		const url = `http://localhost:${port}`;
-
-		// Create the session FIRST via the API so we have the session ID
-		// This allows us to pass the session ID to the attach command
-		const session = await executor.createSession({
-			title: `Milhouse: ${issueGroup.issueId}`,
-		});
-
-		// Create tmux session with opencode attach, including the session ID
-		// The -s flag tells opencode attach to navigate directly to this session
-		const sessionName = tmuxManager.buildSessionName(issueGroup.issueId);
-		const attachCmd = `opencode attach ${url} -s ${session.id}`;
-
-		// Kill any existing session with the same name before creating a new one
-		// This handles retry scenarios where old sessions still exist
-		await tmuxManager.killSessionIfExists(issueGroup.issueId);
-
-		const tmuxResult = await tmuxManager.createSession({
-			name: issueGroup.issueId,
-			command: attachCmd,
-			workDir: worktreeDir,
-		});
-
-		if (!tmuxResult.success) {
-			logWarn(`Failed to create tmux session: ${tmuxResult.error}`);
-		}
-
-		serverInfo = {
-			issueId: issueGroup.issueId,
-			port,
-			url,
-			tmuxSession: sessionName,
-			attachCommand: tmuxManager.getAttachCommand(sessionName),
-			executor,
-		};
-
-		// Show attach instructions if requested
-		if (options.showAttachCommand) {
-			logInfo(`  Issue ${issueGroup.issueId}: ${url}`);
-			logInfo(`    Attach: opencode attach ${url} -s ${session.id}`);
-			logInfo(`    Tmux:   ${serverInfo.attachCommand}`);
-		}
-
-		// Send the prompt and wait for completion
-		// Use execution phase options with full tool access (EXECUTION_TOOLS)
-		// and autonomy system prompt to prevent questions/hangs
-		const response = await executor.sendMessage(
-			session.id,
-			prompt,
-			getMessageOptionsForPhase("exec", options.modelOverride)
-		);
-
-		// Calculate tokens from response
-		const inputTokens = response.info.inputTokens ?? 0;
-		const outputTokens = response.info.outputTokens ?? 0;
-
-		return {
-			success: true,
-			inputTokens,
-			outputTokens,
-			serverInfo,
-		};
-	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		return {
-			success: false,
-			inputTokens: 0,
-			outputTokens: 0,
-			serverInfo: serverInfo ?? {
-				issueId: issueGroup.issueId,
-				port: 0,
-				url: "",
-				tmuxSession: "",
-				attachCommand: "",
-				executor,
-			},
-			error: errorMessage,
-		};
-	}
-}
-
-/**
- * Cleanup tmux mode resources (servers and sessions)
- */
-async function cleanupTmuxResources(
-	servers: TmuxServerInfo[],
-	tmuxManager: TmuxSessionManager,
-	killSessions = false,
-): Promise<void> {
-	for (const server of servers) {
-		try {
-			// Stop the OpenCode server
-			await server.executor.stopServer();
-			logDebug(`Stopped OpenCode server for ${server.issueId}`);
-		} catch (error) {
-			logWarn(`Failed to stop server for ${server.issueId}: ${error}`);
-		}
-
-		if (killSessions) {
-			try {
-				// Kill the tmux session
-				await tmuxManager.killSession(server.issueId);
-				logDebug(`Killed tmux session for ${server.issueId}`);
-			} catch (error) {
-				logWarn(`Failed to kill tmux session for ${server.issueId}: ${error}`);
-			}
-		}
-	}
-
-	// Release all ports
-	PortManager.releaseAllPorts();
-}
+// TmuxServerInfo, toServerInfo, displayTmuxModeInstructions,
+// executeIssueTmuxMode, and cleanupTmuxResources are now in execution/tmux/tmux-executor.ts
 
 // ============================================================================
 // Main Execution Function
@@ -1202,56 +689,26 @@ export async function runParallelByIssue(
 	}
 
 	// ============================================================================
-	// TMUX MODE CHECK: Validate tmux mode requirements
+	// TMUX MODE CHECK: Validate tmux mode requirements (via shared module)
 	// ============================================================================
-	let tmuxManager: TmuxSessionManager | null = null;
+	let tmuxManager: Awaited<ReturnType<typeof initTmuxMode>>["manager"] = null;
 	const tmuxServers: TmuxServerInfo[] = [];
 
 	if (options.tmuxMode) {
-		// Try to ensure tmux is installed (with auto-install if possible)
-		const tmuxResult = await ensureTmuxInstalled({ autoInstall: true, verbose: true });
-		
-		if (!tmuxResult.installed) {
-			// Installation failed or not possible (e.g., Windows)
-			logWarn("tmux is not available and could not be installed automatically.");
-			if (tmuxResult.error) {
-				logInfo(tmuxResult.error);
-			}
-			logInfo("Falling back to standard execution.");
-			logInfo("");
-			logInfo(getInstallationInstructions());
+		const tmuxInit = await initTmuxMode({
+			sessionPrefix: options.tmuxConfig?.sessionPrefix,
+		});
+		if (!tmuxInit.available) {
 			options.tmuxMode = false;
 		} else {
-			// tmux is available (either was already installed or just installed)
-			if (tmuxResult.installedNow) {
-				logSuccess(`tmux ${tmuxResult.version ?? "unknown"} was installed successfully via ${tmuxResult.method}`);
-			} else {
-				logDebug(`tmux ${tmuxResult.version ?? "unknown"} is already installed`);
-			}
-			
-			// Initialize tmux manager
-			tmuxManager = new TmuxSessionManager({
-				sessionPrefix: options.tmuxConfig?.sessionPrefix ?? "milhouse",
-				verbose: false,
-			});
-			logInfo("Tmux mode enabled - OpenCode servers will be started with TUI attachment");
+			tmuxManager = tmuxInit.manager;
 		}
 	}
 
-	// Setup graceful shutdown handler for tmux mode
-	const cleanupHandler = async () => {
-		if (tmuxServers.length > 0 && tmuxManager) {
-			logInfo("\nCleaning up tmux resources...");
-			await cleanupTmuxResources(tmuxServers, tmuxManager, true);
-		}
-	};
-
-	// Register signal handlers for graceful shutdown (removed in finally)
-	const onSigInt = async () => { await cleanupHandler(); process.exit(130); };
-	const onSigTerm = async () => { await cleanupHandler(); process.exit(143); };
-	if (options.tmuxMode) {
-		process.on("SIGINT", onSigInt);
-		process.on("SIGTERM", onSigTerm);
+	// Register signal handlers for graceful shutdown (via shared module)
+	let signalHandlers: ReturnType<typeof registerSignalHandlers> | null = null;
+	if (options.tmuxMode && tmuxManager) {
+		signalHandlers = registerSignalHandlers(tmuxServers, tmuxManager);
 	}
 
 	const limit = pLimit(maxConcurrent);
@@ -1288,14 +745,9 @@ export async function runParallelByIssue(
 
 	// ============================================================================
 	// TMUX MODE: Display attach instructions header before execution starts
-	// This shows users how to attach to the tmux sessions that will be created
 	// ============================================================================
 	if (options.tmuxMode && tmuxManager) {
-		// Display the tmux mode header with placeholder instructions
-		// Individual server info will be shown as each server starts
-		displayTmuxModeHeader();
-		logInfo("  Servers will be started for each issue. Attach commands will be shown below.");
-		console.log("");
+		showTmuxHeader();
 	}
 
 	// Execute each issue in parallel (up to maxConcurrent)
@@ -1644,14 +1096,14 @@ export async function runParallelByIssue(
 		logInfo(`${branchesToMerge.length} branch(es) queued for merge into ${baseBranch}`);
 		logInfo(`${"=".repeat(60)}\n`);
 
-		const mergeResults = await mergeCompletedBranches(
-			branchesToMerge,
-			baseBranch,
+		const mergeResults = await mergeCompletedBranches({
+			branches: branchesToMerge,
+			targetBranch: baseBranch,
 			engine,
 			workDir,
 			branchToIssueInfo,
 			modelOverride,
-		);
+		});
 
 		logDebug(`mergeCompletedBranches returned ${mergeResults.length} results`);
 
@@ -1730,28 +1182,23 @@ export async function runParallelByIssue(
 	}
 
 	// ============================================================================
-	// TMUX CLEANUP: Stop servers and optionally kill sessions
+	// TMUX CLEANUP: Stop servers and optionally kill sessions (via shared module)
 	// ============================================================================
 	if (options.tmuxMode && tmuxManager && tmuxServers.length > 0) {
-		// Update server statuses based on results
-		const serverInfos: ServerInfo[] = tmuxServers.map((server) => {
+		showCompletionSummary(tmuxServers, (server) => {
 			const result = results.find((r) => r.issueId === server.issueId);
-			const status: ServerInfo["status"] = result?.success ? "completed" : "error";
-			return toServerInfo(server, status);
+			return result?.success ? "completed" : "error";
 		});
 
-		// Display completion summary using the new UI component
-		displayTmuxCompletionSummary(serverInfos);
-
 		logInfo("Cleaning up tmux resources...");
-		// Don't kill sessions by default so users can still attach and inspect
 		await cleanupTmuxResources(tmuxServers, tmuxManager, false);
 		logInfo("OpenCode servers stopped. Tmux sessions preserved for inspection.");
 	}
 
 	// Remove signal handlers to prevent leaks across invocations
-	process.off("SIGINT", onSigInt);
-	process.off("SIGTERM", onSigTerm);
+	if (signalHandlers) {
+		removeSignalHandlers(signalHandlers);
+	}
 
 	return {
 		tasksCompleted: totalCompleted,
