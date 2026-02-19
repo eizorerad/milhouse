@@ -5,6 +5,15 @@
 Complete rewrite of the pipeline execution layer into a single configurable runner.
 Lives in `milhouse-020/` as a parallel project. TUI/CLI interface preserved from current version.
 
+### Design principles
+
+1. **One runner, many configs** — no duplicated execution logic
+2. **Config-first** — `.milhouse/config.yml` drives everything, CLI flags override
+3. **Machine-readable** — other AI agents will call milhouse; outputs must be parseable
+4. **Stateless runs** — no global `current_run` pointer, explicit `runId` everywhere
+5. **Cost-aware** — every run tracks token usage and dollar cost
+6. **Transparent** — structured reports for both humans and machines
+
 ### What changes
 - 5 phase command files (5100 lines) → 1 PhaseRunner + 5 configs (~1500 lines)
 - `current_run` global pointer removed — fully stateless run management
@@ -13,12 +22,23 @@ Lives in `milhouse-020/` as a parallel project. TUI/CLI interface preserved from
 - `--json-schema` automatic for all phases
 - Atomic writes + run-level locks for concurrent safety
 - One tmux implementation instead of 5 copies
+- Per-project config with per-phase model selection
+- Cost tracking with configurable pricing
+- Structured run reports (JSON + optional markdown)
 
 ### What stays
-- TUI: spinners, progress bars, color theme, CLI args — copied as-is
+- TUI: spinners, progress bars, color theme — copied as-is
+- CLI args: same interface, same flags
 - Exec phase: stays specialized (writes code, manages worktrees)
 - State file format: `.milhouse/runs/<runId>/` structure unchanged
 - All engine plugins: claude, gemini, opencode, etc.
+- Tmux mode for OpenCode
+
+### What's NOT in 0.2.0
+- No web dashboard (CLI only — by design)
+- No human-in-the-loop interactive mode
+- No incremental scans (doesn't work for AI analysis)
+- No learning from errors (validation step covers this)
 
 ---
 
@@ -28,9 +48,16 @@ Lives in `milhouse-020/` as a parallel project. TUI/CLI interface preserved from
 milhouse-020/
 ├── src/
 │   ├── index.ts                      # Entry point (from current)
+│   │
+│   ├── config/
+│   │   ├── loader.ts                 # NEW: Load + merge config.yml + CLI flags
+│   │   ├── schema.ts                 # NEW: Zod schema for config.yml
+│   │   └── defaults.ts              # NEW: Default values
+│   │
 │   ├── runner/
 │   │   ├── phase-runner.ts           # NEW: Single runner for all phases (~300 lines)
 │   │   ├── types.ts                  # NEW: PhaseConfig interface (~50 lines)
+│   │   ├── cost.ts                   # NEW: Cost calculator (~50 lines)
 │   │   └── phases/
 │   │       ├── scan.ts               # NEW: Scan config (~80 lines)
 │   │       ├── validate.ts           # NEW: Validate config (~100 lines)
@@ -41,6 +68,11 @@ milhouse-020/
 │   ├── pipeline/
 │   │   ├── orchestrator.ts           # Simplified pipeline (replaces pipeline.ts)
 │   │   └── run-manager.ts            # Stateless run management (no current_run)
+│   │
+│   ├── report/
+│   │   ├── generator.ts              # NEW: Run report generator
+│   │   ├── json-report.ts            # NEW: Machine-readable JSON report
+│   │   └── markdown-report.ts        # NEW: Optional human-readable markdown
 │   │
 │   ├── state/                        # FROM CURRENT (cleaned up)
 │   │   ├── types.ts                  # Schemas (minus AuditEntry, minus current_run)
@@ -56,12 +88,12 @@ milhouse-020/
 │   │
 │   ├── agents/                       # SIMPLIFIED
 │   │   ├── prompts/                  # Only prompt builders (no BaseAgent classes)
-│   │   │   ├── scan.ts               # buildLeadInvestigatorPrompt()
-│   │   │   ├── validate.ts           # buildDeepIssueValidatorPrompt()
-│   │   │   ├── plan.ts               # buildDeepPlannerPrompt()
-│   │   │   ├── consolidate.ts        # buildConsolidatorPrompt()
-│   │   │   ├── verify.ts             # buildVerifierPrompt()
-│   │   │   └── executor.ts           # buildExecutorPrompt()
+│   │   │   ├── scan.ts
+│   │   │   ├── validate.ts
+│   │   │   ├── plan.ts
+│   │   │   ├── consolidate.ts
+│   │   │   ├── verify.ts
+│   │   │   └── executor.ts
 │   │   └── schemas/                  # JSON schemas for --json-schema
 │   │       ├── scan.ts
 │   │       ├── validate.ts
@@ -70,12 +102,12 @@ milhouse-020/
 │   │       └── verify.ts
 │   │
 │   ├── execution/                    # Exec phase (specialized, not in runner)
-│   │   ├── exec-command.ts           # CLI entry for exec
-│   │   ├── issue-executor.ts         # FROM CURRENT (cleaned: extract merge + tmux)
+│   │   ├── exec-command.ts
+│   │   ├── issue-executor.ts         # Cleaned: extract merge + tmux
 │   │   ├── merge/
-│   │   │   └── rebase-merge.ts       # Extracted merge strategy
+│   │   │   └── rebase-merge.ts
 │   │   └── tmux/
-│   │       └── tmux-executor.ts      # Extracted tmux mode (shared with runner)
+│   │       └── tmux-executor.ts      # Shared with runner
 │   │
 │   ├── engines/                      # FROM CURRENT (as-is)
 │   ├── gates/                        # FROM CURRENT (as-is)
@@ -92,14 +124,276 @@ milhouse-020/
 │       │   ├── consolidate.ts        # ~30 lines
 │       │   ├── exec.ts               # Specialized (delegates to execution/)
 │       │   ├── verify.ts             # ~30 lines
-│       │   └── runs.ts              # FROM CURRENT (run listing/management)
-│       └── types.ts                  # FROM CURRENT
+│       │   ├── runs.ts               # Run listing/management
+│       │   └── report.ts             # NEW: `milhouse report` command
+│       └── types.ts
 │
 ├── tests/
 ├── package.json
 ├── tsconfig.json
 └── biome.json
 ```
+
+---
+
+## Feature 1: Project Config (`.milhouse/config.yml`)
+
+### Schema
+
+```yaml
+# .milhouse/config.yml
+version: "0.2"
+
+# Default engine and model
+engine: claude
+model: opus
+
+# Per-phase model overrides (cost optimization)
+phases:
+  scan:
+    model: sonnet        # Cheaper for code reading
+  validate:
+    model: sonnet
+  plan:
+    model: opus          # Needs deep thinking
+  exec:
+    model: sonnet        # Code writing
+  verify:
+    model: haiku         # Fast checks
+
+# Parallelism
+workers: 5
+
+# Execution
+exec:
+  auto_commit: true
+  create_pr: true
+  isolate: true          # Worktree per task
+  skip_merge: false
+
+# Cost tracking
+cost:
+  input_per_million: 5       # $/1M input tokens
+  output_per_million: 25     # $/1M output tokens
+  budget_limit: 50           # $ max per run (0 = unlimited)
+
+# Report
+report:
+  enabled: true
+  format: json               # json | markdown | both
+  auto_generate: true        # Generate after pipeline completes
+
+# Skip options
+skip_tests: false
+skip_lint: false
+skip_probes: false
+```
+
+### Precedence: CLI flags > config.yml > defaults
+
+```typescript
+// config/loader.ts
+
+interface ResolvedConfig {
+  engine: string;
+  model: string;
+  phases: Record<PipelinePhase, { model?: string }>;
+  workers: number;
+  cost: { inputPerMillion: number; outputPerMillion: number; budgetLimit: number };
+  report: { enabled: boolean; format: "json" | "markdown" | "both"; autoGenerate: boolean };
+  // ...
+}
+
+function loadConfig(workDir: string, cliOptions: RuntimeOptions): ResolvedConfig {
+  // 1. Start with defaults
+  const config = { ...DEFAULTS };
+
+  // 2. Merge config.yml (if exists)
+  const configPath = join(workDir, ".milhouse", "config.yml");
+  if (existsSync(configPath)) {
+    const yaml = parseYaml(readFileSync(configPath, "utf-8"));
+    deepMerge(config, yaml);
+  }
+
+  // 3. CLI flags override everything
+  if (cliOptions.aiEngine) config.engine = cliOptions.aiEngine;
+  if (cliOptions.modelOverride) config.model = cliOptions.modelOverride;
+  if (cliOptions.maxParallel) config.workers = cliOptions.maxParallel;
+  // etc.
+
+  return config;
+}
+```
+
+**Conflict resolution rule: CLI always wins.** Config.yml is baseline, flags are overrides. Simple, no ambiguity.
+
+---
+
+## Feature 2: Cost Tracking
+
+### Calculator
+
+```typescript
+// runner/cost.ts
+
+interface CostConfig {
+  inputPerMillion: number;    // $/1M input tokens
+  outputPerMillion: number;   // $/1M output tokens
+  budgetLimit: number;        // $ max per run (0 = unlimited)
+}
+
+interface RunCost {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputCost: number;          // $
+  outputCost: number;         // $
+  totalCost: number;          // $
+  byPhase: Record<string, { inputTokens: number; outputTokens: number; cost: number }>;
+}
+
+function calculateCost(tokens: { input: number; output: number }, config: CostConfig): number {
+  return (tokens.input / 1_000_000) * config.inputPerMillion
+       + (tokens.output / 1_000_000) * config.outputPerMillion;
+}
+```
+
+### Budget enforcement
+
+PhaseRunner checks budget before each agent call:
+
+```typescript
+// Inside PhaseRunner.executePool()
+const spent = this.runCost.totalCost;
+const limit = context.config.cost.budgetLimit;
+if (limit > 0 && spent >= limit) {
+  throw new BudgetExceededError(`Run budget $${limit} exceeded (spent: $${spent.toFixed(2)})`);
+}
+```
+
+### Display in summary
+
+```
+══════════════════════════════════════════
+Scan Summary:
+  Items found:   12
+  Duration:      9m 29s
+  Tokens:        6,254 in / 19,217 out
+  Cost:          $0.51                     ← NEW
+══════════════════════════════════════════
+```
+
+### Display in pipeline summary
+
+```
+Pipeline Summary:
+  Status:           SUCCESS
+  Phases completed: 6/6
+  Total duration:   32m 15s
+  Total tokens:     45,000 in / 120,000 out
+  Total cost:       $3.23                   ← NEW
+  Budget remaining: $46.77 / $50.00         ← NEW
+
+  Phase breakdown:
+    scan       $0.51  (6K in / 19K out)
+    validate   $2.10  (27K in / 82K out)
+    plan       $0.35  (8K in / 12K out)
+    consolidate $0.05 (2K in / 1K out)
+    exec       $0.18  (1K in / 5K out)
+    verify     $0.04  (1K in / 1K out)
+```
+
+---
+
+## Feature 3: Per-Phase Model Selection
+
+PhaseRunner reads model from resolved config:
+
+```typescript
+// Inside PhaseRunner
+const phaseModel = context.config.phases[config.name]?.model
+  ?? context.config.model;  // Fallback to global
+
+const aiResult = await context.engine.execute(prompt, context.workDir, {
+  jsonSchema: config.jsonSchema,
+  modelOverride: phaseModel,
+});
+```
+
+This allows cost optimization:
+- **scan/validate** (reads code): Sonnet ($3/$15 per 1M) — saves ~60% vs Opus
+- **plan** (strategic thinking): Opus ($5/$25 per 1M) — needs quality
+- **exec** (writes code): Sonnet — code gen is good on Sonnet
+- **verify** (quick check): Haiku ($0.25/$1.25 per 1M) — saves ~95% vs Opus
+
+---
+
+## Feature 4: Structured Run Report
+
+### Command
+
+```bash
+milhouse report                    # Report for latest run
+milhouse report --run-id <id>      # Report for specific run
+milhouse report --format json      # Machine-readable (default)
+milhouse report --format markdown  # Human-readable
+milhouse report --format both      # Both files
+milhouse --run --no-report         # Disable auto-report
+```
+
+### JSON Report (machine-readable)
+
+For other AI agents consuming milhouse output:
+
+```json
+{
+  "version": "0.2.0",
+  "run_id": "run-20260219-find-dlnx",
+  "scope": "find and fix bugs",
+  "status": "completed",
+  "duration_ms": 1935000,
+  "cost": {
+    "total": 3.23,
+    "currency": "USD",
+    "by_phase": {
+      "scan": { "input_tokens": 6254, "output_tokens": 19217, "cost": 0.51 },
+      "validate": { "input_tokens": 27111, "output_tokens": 81605, "cost": 2.10 }
+    }
+  },
+  "results": {
+    "items_found": 12,
+    "items_confirmed": 11,
+    "items_false": 0,
+    "items_partial": 1,
+    "tasks_created": 34,
+    "tasks_completed": 30,
+    "tasks_failed": 4,
+    "verification_passed": true
+  },
+  "items": [
+    {
+      "id": "P-xxx",
+      "type": "bug",
+      "title": "Evidence merge race condition",
+      "severity": "HIGH",
+      "status": "CONFIRMED",
+      "tasks": ["T-1", "T-2"],
+      "pr_url": "https://github.com/org/repo/pull/45"
+    }
+  ],
+  "errors": []
+}
+```
+
+This format is designed for:
+- Other AI agents parsing milhouse output
+- CI/CD pipelines checking results
+- Dashboards aggregating across repos
+- Cost tracking systems
+
+### Markdown Report (optional, human-readable)
+
+Generated only when `--format markdown` or `--format both`. Can be disabled with `--no-report`.
 
 ---
 
@@ -121,11 +415,11 @@ interface PhaseConfig<TItem = unknown, TResult = unknown> {
   /** How to run: one agent for all items, or one agent per item */
   mode: "per-item" | "single-agent";
 
-  /** Default parallel agents (overridden by --workers) */
+  /** Default parallel agents (overridden by config.workers or --workers) */
   defaultParallel: number;
 
   /** Load work items for this phase */
-  loadItems(runId: string, workDir: string, options: RuntimeOptions): TItem[];
+  loadItems(runId: string, workDir: string, config: ResolvedConfig): TItem[];
 
   /** Build the prompt for one item (per-item) or all items (single-agent) */
   buildPrompt(item: TItem, context: PhaseContext): string;
@@ -139,29 +433,17 @@ interface PhaseConfig<TItem = unknown, TResult = unknown> {
   /** Determine next pipeline phase based on results */
   nextPhase(results: PhaseResult<TResult>[]): PipelinePhase | "completed" | "failed";
 
-  /** Optional: format summary for terminal output */
+  /** Format summary for terminal output */
   formatSummary?(results: PhaseResult<TResult>[], context: PhaseContext): void;
 
-  // --- Lifecycle hooks (optional) ---
-
-  /** Before phase starts (e.g., scan creates run, verify runs gates) */
+  // --- Lifecycle hooks ---
   beforeRun?(context: PhaseContext): Promise<void>;
-
-  /** After phase completes */
   afterRun?(results: PhaseResult<TResult>[], context: PhaseContext): Promise<void>;
-
-  /** Before each item is processed (e.g., validate runs probes) */
   beforeItem?(item: TItem, context: PhaseContext): Promise<TItem>;
 
-  // --- Retry support (optional, used by validate) ---
-
-  /** Whether failed items can be retried */
+  // --- Retry (validate only) ---
   isRetryable?: boolean;
-
-  /** Max retry rounds */
   maxRetryRounds?: number;
-
-  /** Filter items for next retry round */
   retryFilter?(items: TItem[], results: PhaseResult<TResult>[]): TItem[];
 }
 
@@ -169,358 +451,128 @@ interface PhaseContext {
   runId: string;
   workDir: string;
   engine: AIEngine;
-  options: RuntimeOptions;
-  /** Phase-specific storage (e.g., gate results for verify) */
+  config: ResolvedConfig;
+  cost: RunCost;               // Accumulated cost tracker
   store: Record<string, unknown>;
 }
-
-interface PhaseResult<T> {
-  itemId: string;
-  result: T;
-  success: boolean;
-  inputTokens: number;
-  outputTokens: number;
-  durationMs: number;
-  error?: string;
-}
 ```
 
-### Runner Implementation
+### Runner (~300 lines)
 
-```typescript
-// runner/phase-runner.ts (~300 lines)
+Single class. All phases go through the same code path:
 
-class PhaseRunner {
-  async run<TItem, TResult>(
-    config: PhaseConfig<TItem, TResult>,
-    options: RuntimeOptions,
-  ): Promise<PipelinePhaseResult> {
-
-    // 1. Resolve run (select existing or let beforeRun create one)
-    const context = await this.createContext(config, options);
-
-    // 2. Acquire run lock (prevents concurrent execution of same phase)
-    const lock = await acquireRunLock(context.runId, config.name, context.workDir);
-
-    try {
-      // 3. Update phase in meta
-      await updateRunPhaseInMetaWithLock(context.runId, config.name, context.workDir);
-
-      // 4. beforeRun hook
-      await config.beforeRun?.(context);
-
-      // 5. Load items
-      const items = config.loadItems(context.runId, context.workDir, context.options);
-      if (items.length === 0) {
-        return this.emptyResult(config.name);
-      }
-
-      // 6. Execute with unified pool strategy
-      let results: PhaseResult<TResult>[];
-      if (config.mode === "single-agent") {
-        results = [await this.executeSingle(config, items[0], context)];
-      } else {
-        results = await this.executePool(config, items, context);
-      }
-
-      // 7. Retry loop (validate only)
-      if (config.isRetryable && config.retryFilter) {
-        for (let round = 1; round < (config.maxRetryRounds ?? 1); round++) {
-          const retryItems = config.retryFilter(items, results);
-          if (retryItems.length === 0) break;
-          const retryResults = await this.executePool(config, retryItems, context);
-          results = this.mergeResults(results, retryResults);
-        }
-      }
-
-      // 8. Save results
-      config.saveResults(results, context);
-
-      // 9. afterRun hook
-      await config.afterRun?.(results, context);
-
-      // 10. Summary
-      config.formatSummary?.(results, context);
-
-      // 11. Phase transition
-      const next = config.nextPhase(results);
-      await updateRunPhaseInMetaWithLock(context.runId, next, context.workDir);
-
-      return this.buildResult(config.name, results);
-    } finally {
-      lock.release();
-    }
-  }
-
-  private async executePool<TItem, TResult>(
-    config: PhaseConfig<TItem, TResult>,
-    items: TItem[],
-    context: PhaseContext,
-  ): Promise<PhaseResult<TResult>[]> {
-    const max = Math.min(
-      context.options.maxParallel || config.defaultParallel,
-      items.length,
-    );
-    const limit = pLimit(max);
-
-    return Promise.all(
-      items.map(item => limit(async () => {
-        const start = Date.now();
-        // beforeItem hook (e.g., run probes)
-        const processed = await config.beforeItem?.(item, context) ?? item;
-        // Build prompt
-        const prompt = config.buildPrompt(processed, context);
-        // Execute with json-schema
-        const aiResult = await context.engine.execute(prompt, context.workDir, {
-          jsonSchema: config.jsonSchema,
-          modelOverride: context.options.modelOverride,
-        });
-        // Parse
-        const parsed = config.parseResponse(aiResult.response, processed);
-        return {
-          itemId: (processed as any).id ?? "unknown",
-          result: parsed,
-          success: aiResult.success,
-          inputTokens: aiResult.inputTokens,
-          outputTokens: aiResult.outputTokens,
-          durationMs: Date.now() - start,
-        };
-      })),
-    );
-  }
-}
-```
+1. Resolve run (select or create)
+2. Acquire run lock
+3. Load config (config.yml + CLI flags merged)
+4. Resolve model for this phase
+5. `beforeRun` hook
+6. Load items
+7. Execute with pool strategy (pLimit)
+8. Retry loop (if configured)
+9. Save results
+10. `afterRun` hook
+11. Calculate cost
+12. Display summary
+13. Phase transition
+14. Release lock
 
 ---
 
-## Stateless Run Management (from remove-current-run.md)
+## Stateless Run Management
 
-### What changes
+### Remove `current_run`
 
-1. **Remove `current_run`** from `RunsIndexSchema` — no global mutable pointer
-2. **Remove** all functions: `getCurrentRunId()`, `getCurrentRun()`, `setCurrentRun()`, `requireActiveRun()`, `updateCurrentRunPhase()`, `updateCurrentRunStats()`
-3. **Remove** implicit-path functions from `issues.ts`, `tasks.ts`, `graph.ts`, `executions.ts`
-4. **Keep only** `ForRun` API everywhere: `loadIssuesForRun(runId, ...)`, `saveTasksForRun(runId, ...)`, etc.
+From `remove-current-run.md`:
+- Remove `current_run` from `RunsIndexSchema`
+- Delete `getCurrentRunId()`, `getCurrentRun()`, `setCurrentRun()`, `requireActiveRun()`
+- Delete all deprecated implicit-path functions
+- Keep only `ForRun` API
 
-### Run selection
+### Smart run selection
 
 ```typescript
 // pipeline/run-manager.ts
 
-/** Smart run selection — replaces getCurrentRun() */
 async function selectRun(options: {
-  runId?: string;          // --run-id explicit
+  runId?: string;
   workDir: string;
-  requirePhase?: PipelinePhase[];  // Filter by phase
+  requirePhase?: PipelinePhase[];
 }): Promise<string> {
-  // 1. Explicit --run-id → use it
   if (options.runId) return resolveRunId(options.runId, options.workDir);
 
-  // 2. Find runs matching phase filter
   const runs = loadRunsIndex(options.workDir).runs;
   const matching = options.requirePhase
     ? runs.filter(r => options.requirePhase.includes(r.phase))
     : runs;
 
-  // 3. One match → use it
   if (matching.length === 1) return matching[0].id;
-
-  // 4. Multiple → prompt user
   if (matching.length > 1) return promptUserToSelectRun(matching);
-
-  // 5. None → error
-  throw new Error("No matching runs found. Start with: milhouse --scan");
+  throw new Error("No matching runs. Start with: milhouse --scan");
 }
 ```
 
-### Run-level lock
+### Run-level locks + atomic writes
 
 ```typescript
-// state/run-lock.ts (~40 lines)
+// state/run-lock.ts
+acquireRunLock(runId, phase, workDir) → { release() }
 
-async function acquireRunLock(runId: string, phase: string, workDir: string) {
-  const lockPath = join(getRunDir(runId, workDir), `${phase}.lock`);
-  // Check if locked by another process (PID alive check)
-  // Write lock file with { pid, startedAt }
-  // Return { release() } that deletes lock file
-}
-```
-
-### Atomic writes
-
-All state write functions use write-to-tmp + rename pattern:
-```typescript
-function saveJsonAtomic(path: string, data: unknown): void {
-  const tmp = `${path}.tmp.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2));
-  renameSync(tmp, path);
-}
+// state/utils.ts
+saveJsonAtomic(path, data)  // write to .tmp, then rename
 ```
 
 ---
 
-## Phase Configs (detailed)
-
-### Scan (~80 lines)
-
-```typescript
-export const scanConfig: PhaseConfig<ScanItem, ParsedIssue[]> = {
-  name: "scan",
-  role: "LI",
-  jsonSchema: SCAN_JSON_SCHEMA,
-  mode: "single-agent",
-  defaultParallel: 1,
-
-  async beforeRun(context) {
-    // Scan is unique: creates the run
-    const run = createRun({ scope: context.options.scanFocus, workDir: context.workDir });
-    context.runId = run.id;
-    context.store.runMeta = run;
-  },
-
-  loadItems(runId, workDir, options) {
-    return [{ id: "scan", scope: options.scanFocus }];
-  },
-
-  buildPrompt(item, context) {
-    return buildLeadInvestigatorPrompt(context.workDir, {
-      scope: item.scope ? [item.scope] : undefined,
-    });
-  },
-
-  parseResponse(response) {
-    return parseIssuesFromResponse(response);
-  },
-
-  saveResults(results, context) {
-    const issues = buildIssueObjects(results[0].result);
-    saveIssuesForRun(context.runId, issues, context.workDir);
-    const brief = generateWorkBrief(issues, context.runId);
-    writeProblemBriefForRun(context.workDir, context.runId, brief);
-    updateRunStatsWithLock(context.runId, { issues_found: issues.length }, context.workDir);
-  },
-
-  nextPhase(results) {
-    return (results[0]?.result?.length ?? 0) > 0 ? "validate" : "completed";
-  },
-};
-```
-
-### Validate (~100 lines)
-
-Key difference: retry loop + probes in beforeItem.
-
-```typescript
-export const validateConfig: PhaseConfig<Issue, ValidationReport> = {
-  name: "validate",
-  role: "IV",
-  jsonSchema: VALIDATE_JSON_SCHEMA,
-  mode: "per-item",
-  defaultParallel: 5,
-  isRetryable: true,
-  maxRetryRounds: 3,
-
-  loadItems(runId, workDir, options) {
-    const issues = loadIssuesForRun(runId, workDir);
-    return filterIssues(issues, { status: ["UNVALIDATED"], ...buildFilterOptions(options) });
-  },
-
-  async beforeItem(issue, context) {
-    // Run probes before validation
-    const probeEvidence = await runProbesForIssue(issue, context.workDir);
-    return { ...issue, _probeEvidence: probeEvidence };
-  },
-
-  buildPrompt(issue, context) {
-    return buildDeepIssueValidatorPrompt(issue, context.workDir, 0, issue._probeEvidence);
-  },
-
-  parseResponse(response) {
-    return parseDeepValidationFromResponse(response);
-  },
-
-  saveResults(results, context) {
-    for (const entry of results) {
-      updateIssueForRun(context.runId, entry.itemId, {
-        status: entry.result.status,
-        evidence: entry.result.evidence,
-        validated_by: "IV",
-      }, context.workDir);
-    }
-  },
-
-  retryFilter(items, results) {
-    const validated = new Set(results.filter(r => r.result?.status !== "UNVALIDATED").map(r => r.itemId));
-    return items.filter(i => !validated.has(i.id));
-  },
-
-  nextPhase(results) {
-    const confirmed = results.filter(r => ["CONFIRMED", "PARTIAL"].includes(r.result?.status));
-    return confirmed.length > 0 ? "plan" : "completed";
-  },
-};
-```
-
-### Plan (~100 lines)
-
-Key difference: creates tasks + writes WBS files.
-
-### Consolidate (~80 lines)
-
-Key difference: `mode: "single-agent"` — one call with all tasks.
-
-### Verify (~100 lines)
-
-Key difference: runs quality gates in `beforeRun` before AI verification.
-
----
-
-## Pipeline Orchestrator (simplified)
+## Pipeline Orchestrator
 
 ```typescript
 // pipeline/orchestrator.ts
 
-const PHASE_CONFIGS: Record<PipelinePhase, PhaseConfig | "exec"> = {
+const PHASE_CONFIGS = {
   scan: scanConfig,
   validate: validateConfig,
   plan: planConfig,
   consolidate: consolidateConfig,
-  exec: "exec",           // Specialized, not via runner
   verify: verifyConfig,
 };
 
-const PHASE_ORDER: PipelinePhase[] = [
-  "scan", "validate", "plan", "consolidate", "exec", "verify"
-];
-
 async function runPipeline(options: RuntimeOptions): Promise<PipelineResult> {
+  const config = loadConfig(process.cwd(), options);
   const runner = new PhaseRunner();
+  const cost = createRunCost();
   let runId: string | undefined;
 
-  const startPhase = options.startPhase ?? "scan";
-  const endPhase = options.endPhase ?? "verify";
-  const phases = PHASE_ORDER.slice(
-    PHASE_ORDER.indexOf(startPhase),
-    PHASE_ORDER.indexOf(endPhase) + 1,
-  );
+  const phases = resolvePhaseRange(options.startPhase, options.endPhase);
 
   for (const phase of phases) {
-    const config = PHASE_CONFIGS[phase];
+    // Budget check
+    if (config.cost.budgetLimit > 0 && cost.totalCost >= config.cost.budgetLimit) {
+      logWarn(`Budget limit $${config.cost.budgetLimit} reached. Stopping.`);
+      break;
+    }
 
     let result: PipelinePhaseResult;
-    if (config === "exec") {
-      result = await runExec({ ...options, runId });
+    if (phase === "exec") {
+      result = await runExec({ ...options, runId, config });
     } else {
-      result = await runner.run(config, { ...options, runId });
+      result = await runner.run(PHASE_CONFIGS[phase], { ...options, runId, config });
     }
 
-    // Capture runId from scan phase
-    if (phase === "scan" && result.data?.runId) {
-      runId = result.data.runId;
-    }
+    cost.addPhase(phase, result.inputTokens, result.outputTokens);
 
-    if (!result.success && options.failFast) break;
+    if (phase === "scan") runId = result.data?.runId;
+    if (!result.success && config.failFast) break;
   }
+
+  // Auto-generate report
+  if (config.report.autoGenerate && runId) {
+    generateReport(runId, cost, config);
+  }
+
+  // Print cost summary
+  displayCostSummary(cost, config);
+
+  return { runId, cost, phases };
 }
 ```
 
@@ -530,69 +582,66 @@ async function runPipeline(options: RuntimeOptions): Promise<PipelineResult> {
 
 ### Step 0: Setup milhouse-020/ project
 - Copy package.json, tsconfig.json, biome.json
-- Copy src/engines/, src/gates/, src/probes/, src/vcs/, src/ui/, src/cli/args.ts
+- Copy src/engines/, src/gates/, src/probes/, src/vcs/, src/ui/
 - Copy src/state/ (will be cleaned in step 1)
-- `pnpm install`
-- Verify `npx tsc --noEmit` passes
+- `pnpm install` + verify `npx tsc --noEmit`
 
-### Step 1: Clean state layer (remove-current-run.md)
-- Remove `current_run` from RunsIndexSchema
-- Delete all `getCurrentRun`/`setCurrentRun` functions
-- Delete deprecated implicit-path functions
-- Add missing `ForRun` variants (graph, executions, probes)
-- Add `run-lock.ts` for per-run execution locks
-- Add atomic write helper (`saveJsonAtomic`)
-- Add `run-manager.ts` with `selectRun()`
-- Test: state module compiles and passes tests
+### Step 1: Clean state layer (remove-current-run)
+- Remove `current_run` from schema
+- Delete deprecated functions
+- Add ForRun variants for graph, executions, probes
+- Add run-lock.ts, atomic writes
+- Add run-manager.ts with selectRun()
 
-### Step 2: Create PhaseRunner
-- Create `runner/types.ts` with PhaseConfig interface
-- Create `runner/phase-runner.ts` with PhaseRunner class
-- Pool parallelism, retry loop, lifecycle hooks
-- json-schema automatic for all phases
-- Test: runner compiles (no phases yet)
+### Step 2: Config system
+- Create config/schema.ts with Zod schema
+- Create config/loader.ts with merge logic (config.yml + CLI)
+- Create config/defaults.ts
 
-### Step 3: Migrate Scan
-- Create `runner/phases/scan.ts`
-- Move prompt builder to `agents/prompts/scan.ts`
-- Move JSON schema to `agents/schemas/scan.ts`
-- Create thin CLI wrapper `cli/commands/scan.ts` (~30 lines)
+### Step 3: Cost tracking
+- Create runner/cost.ts
+- Wire into PhaseRunner
+- Add cost display to summary
+
+### Step 4: PhaseRunner
+- Create runner/types.ts
+- Create runner/phase-runner.ts
+- Pool parallelism, retry loop, lifecycle hooks, json-schema, cost tracking
+
+### Step 5: Migrate Scan
+- Create runner/phases/scan.ts
+- Create agents/prompts/scan.ts + agents/schemas/scan.ts
 - Test: `milhouse --scan` works
 
-### Step 4: Migrate Validate
-- Create `runner/phases/validate.ts`
-- Port retry logic, probe integration
+### Step 6: Migrate Validate
+- Create runner/phases/validate.ts
+- Port retry + probes
 - Test: `milhouse --validate` works
 
-### Step 5: Migrate Plan
-- Create `runner/phases/plan.ts`
-- Switch from batch to pool (performance improvement)
+### Step 7: Migrate Plan
+- Create runner/phases/plan.ts
+- Pool instead of batch
 - Test: `milhouse --plan` works
 
-### Step 6: Migrate Consolidate
-- Create `runner/phases/consolidate.ts`
-- Single-agent mode
-- Test: `milhouse --consolidate` works
+### Step 8: Migrate Consolidate + Verify
+- Create runner/phases/consolidate.ts
+- Create runner/phases/verify.ts
+- Test: both work
 
-### Step 7: Migrate Verify
-- Create `runner/phases/verify.ts`
-- Gate pre-checks in beforeRun hook
-- Test: `milhouse --verify` works
+### Step 9: Exec cleanup
+- Extract merge strategy → execution/merge/
+- Extract tmux → execution/tmux/ (shared)
+- Clean issue-executor.ts
 
-### Step 8: Exec cleanup (not in runner)
-- Extract merge strategy from issue-executor.ts → `execution/merge/`
-- Extract tmux mode → `execution/tmux/` (shared with runner)
-- Clean up issue-executor.ts (~1740 → ~1000 lines)
-
-### Step 9: Pipeline orchestrator
-- Create `pipeline/orchestrator.ts`
-- Replace old pipeline.ts switch-case with config registry
-- Wire resume mode to `selectRun()`
+### Step 10: Pipeline orchestrator + Report
+- Create pipeline/orchestrator.ts (replaces old pipeline.ts)
+- Create report/ module
+- Wire `milhouse report` command
 - Test: `milhouse --run` end-to-end
 
-### Step 10: Delete dead code
-- Remove old cli/commands/ files (replaced by thin wrappers)
-- Remove BaseAgent classes (replaced by prompt builders)
+### Step 11: Delete dead code
+- Remove old cli/commands/ (replaced by thin wrappers)
+- Remove BaseAgent classes
 - Remove agent capabilities system
 - Remove document factory
 - Final line count audit
@@ -604,12 +653,44 @@ async function runPipeline(options: RuntimeOptions): Promise<PipelineResult> {
 | Module | Current | After | Change |
 |--------|---------|-------|--------|
 | cli/commands/ (5 phases) | 5100 | 150 (thin wrappers) | **-4950** |
-| runner/ (new) | 0 | 760 | +760 |
+| runner/ (new) | 0 | 860 | +860 |
+| config/ (new) | 0 | 200 | +200 |
+| report/ (new) | 0 | 250 | +250 |
 | agents/ (prompts only) | 4777 | 1200 | **-3577** |
 | state/ (ForRun only) | 3500 | 2800 | -700 |
 | pipeline/ | 700 | 200 | -500 |
 | execution/ (exec only) | 1740 | 1200 | -540 |
-| **Total estimate** | **~15800** | **~6300** | **-9500 (-60%)** |
+| **Total** | **~15800** | **~6860** | **-8940 (-57%)** |
+
+---
+
+## Machine-to-Machine Design
+
+Milhouse is designed to be called by other AI agents. Key properties:
+
+### Structured exit codes
+```
+0 — pipeline completed successfully
+1 — pipeline failed (phase error)
+2 — budget exceeded
+3 — no items found (scan found nothing)
+4 — config error
+```
+
+### JSON output mode
+```bash
+milhouse --run --scope "fix bugs" --output json
+```
+Outputs only the JSON report to stdout. No spinners, no colors, no progress. Other machines parse this directly.
+
+### Config as contract
+An orchestrating AI agent writes `.milhouse/config.yml`, runs `milhouse --run`, reads the JSON report. The config is the contract between the caller and milhouse.
+
+### Idempotent resume
+```bash
+milhouse --resume --run-id <id>
+```
+Safe to retry. Run locks prevent double execution. State is always consistent.
 
 ---
 
@@ -617,17 +698,19 @@ async function runPipeline(options: RuntimeOptions): Promise<PipelineResult> {
 
 | Risk | Mitigation |
 |------|-----------|
-| Breaking CLI interface | Keep same args.ts, same command names, same output format |
-| State file incompatibility | Same `.milhouse/runs/` structure, just remove `current_run` field |
-| Exec phase regression | Exec stays specialized, only extracted merge/tmux |
-| Parallel execution regression | Unified pool strategy with pLimit — battle-tested in validate |
-| Engine compatibility | Engine layer copied as-is, no changes |
-| Tmux mode regression | Extracted into shared module, used by both runner and exec |
+| Breaking CLI interface | Same args.ts, same command names, same flags |
+| State file incompatibility | Same `.milhouse/runs/` structure, just remove `current_run` |
+| Exec phase regression | Exec stays specialized, only extract merge/tmux |
+| Config conflicts | Simple rule: CLI flags always override config.yml |
+| Budget false stops | Budget is per-run, not per-phase; warn at 80% |
+| JSON report schema changes | Version field in report allows backward compat |
 
-## Verification at each step
+## Verification
 
+After each step:
 1. `npx tsc --noEmit` — zero errors
 2. `bun test` — no new failures
 3. `milhouse --scan --scope "test" --verbose` — works
-4. `milhouse --run --scope "test" --force` — full pipeline completes
-5. Two terminals running scan simultaneously — no conflicts
+4. `milhouse --run --scope "test" --force` — full pipeline
+5. Two terminals scanning simultaneously — no conflicts
+6. `milhouse report --format json` — valid JSON output
