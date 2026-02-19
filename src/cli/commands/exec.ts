@@ -390,7 +390,24 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 	const allTasks = loadTasksForRun(runId, workDir);
 	// Include both "pending" and "merge_error" tasks
 	// merge_error tasks need to be re-executed because their merge failed
-	const pendingTasks = allTasks.filter((t) => t.status === "pending" || t.status === "merge_error");
+	let pendingTasks = allTasks.filter((t) => t.status === "pending" || t.status === "merge_error");
+
+	// Apply severity filtering to all execution modes (not just issue-based).
+	// Filter tasks by their issue_id: only keep tasks whose parent issue passes the severity filter.
+	const hasSeverityFilter = !!(options.minSeverity || options.severityFilter?.length);
+	if (hasSeverityFilter && pendingTasks.some((t) => t.issue_id)) {
+		const allIssues = loadIssuesForRun(runId, workDir);
+		const filterOptions = buildFilterOptionsFromRuntime(options);
+		const allowedIssues = filterIssues(allIssues, filterOptions);
+		const allowedIssueIds = new Set(allowedIssues.map((i) => i.id));
+
+		const before = pendingTasks.length;
+		pendingTasks = pendingTasks.filter((t) => !t.issue_id || allowedIssueIds.has(t.issue_id));
+		const filtered = before - pendingTasks.length;
+		if (filtered > 0) {
+			logInfo(`Severity filter excluded ${filtered} task(s) from execution`);
+		}
+	}
 
 	if (pendingTasks.length === 0) {
 		logWarn("No pending or merge_error tasks found.");
@@ -435,6 +452,12 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 	logInfo(`Starting execution with ${engine.name} (engine: ${options.aiEngine})`);
 	logInfo(`Role: ${AGENT_ROLES.EX}`);
 	logInfo(`Pending tasks: ${pendingTasks.length}`);
+	if (options.minSeverity) {
+		logInfo(`Minimum severity: ${options.minSeverity}`);
+	}
+	if (options.severityFilter?.length) {
+		logInfo(`Severity filter: ${options.severityFilter.join(", ")}`);
+	}
 	console.log("");
 
 	// Create progress spinner
@@ -552,20 +575,6 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		// Build filter options from CLI arguments
 		const filterOptions = buildFilterOptionsFromRuntime(options, ["CONFIRMED", "PARTIAL"]);
 		const validIssues = filterIssues(issues, filterOptions);
-
-		// Log active filters
-		if (options.issueIds?.length) {
-			logInfo(`Filtering to specific issues: ${options.issueIds.join(", ")}`);
-		}
-		if (options.excludeIssueIds?.length) {
-			logInfo(`Excluding issues: ${options.excludeIssueIds.join(", ")}`);
-		}
-		if (options.minSeverity) {
-			logInfo(`Minimum severity: ${options.minSeverity}`);
-		}
-		if (options.severityFilter?.length) {
-			logInfo(`Severity filter: ${options.severityFilter.join(", ")}`);
-		}
 
 		if (validIssues.length === 0) {
 			logWarn("No validated issues found. Run 'milhouse validate' first.");

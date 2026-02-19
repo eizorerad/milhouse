@@ -185,19 +185,30 @@ export function parseStatusPorcelain(output: string): StatusEntry[] {
 			entries.push({
 				index,
 				worktree,
-				path: renameMatch[2],
-				origPath: renameMatch[1],
+				path: unquoteGitPath(renameMatch[2]),
+				origPath: unquoteGitPath(renameMatch[1]),
 			});
 		} else {
 			entries.push({
 				index,
 				worktree,
-				path: pathPart,
+				path: unquoteGitPath(pathPart),
 			});
 		}
 	}
 
 	return entries;
+}
+
+/**
+ * Strip git's C-style quoting from paths.
+ * Git quotes paths with special characters: "path with spaces/file.ts"
+ */
+function unquoteGitPath(p: string): string {
+	if (p.length >= 2 && p[0] === '"' && p[p.length - 1] === '"') {
+		return p.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+	}
+	return p;
 }
 
 /**

@@ -217,22 +217,20 @@ describe("verify.ts gate functions", () => {
 
 	describe("runEnvConsistencyGate", () => {
 		test("should pass when no probes directory exists", () => {
-			const result = runEnvConsistencyGate(testWorkDir);
+			const result = runEnvConsistencyGate(runId, testWorkDir);
 
 			expect(result.passed).toBe(true);
 			expect(result.gate).toBe("envConsistency");
-			expect(result.message).toBe("No probes directory found");
 		});
 
-		test("should report probe types when probes directory exists", () => {
-			const probesDir = join(testWorkDir, ".milhouse", "probes");
+		test("should pass when probes directory exists with probe data", () => {
+			const probesDir = join(testWorkDir, ".milhouse", "runs", runId, "probes");
 			mkdirSync(join(probesDir, "deps"), { recursive: true });
 			mkdirSync(join(probesDir, "compose"), { recursive: true });
 
-			const result = runEnvConsistencyGate(testWorkDir);
+			const result = runEnvConsistencyGate(runId, testWorkDir);
 
 			expect(result.passed).toBe(true);
-			expect(result.message).toContain("probe type");
 		});
 	});
 

@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import * as path from "node:path";
+import { getStatePathForCurrentRun } from "../state/paths.ts";
 import { loadTasksFromPath } from "../state/tasks.ts";
 import type { DoDCriteria, Task } from "../state/types.ts";
 import {
@@ -24,8 +25,8 @@ export interface DoDGateOptions {
 	commandTimeout: number;
 	/** Whether to actually execute check commands */
 	executeChecks: boolean;
-	/** Path to tasks.json file (relative to workDir or absolute) */
-	tasksPath: string;
+	/** Path to tasks.json file (relative to workDir or absolute). Resolved via current run if omitted. */
+	tasksPath?: string;
 	/** Whether to fail on first check failure or continue checking all */
 	failFast: boolean;
 	/** Maximum number of checks to run (0 = unlimited) */
@@ -39,7 +40,7 @@ export const DEFAULT_DOD_OPTIONS: DoDGateOptions = {
 	requireVerifiableChecks: true,
 	commandTimeout: 60000,
 	executeChecks: true,
-	tasksPath: ".milhouse/state/tasks.json",
+	tasksPath: undefined,
 	failFast: false,
 	maxChecks: 0,
 };
@@ -79,8 +80,12 @@ export function generateGateId(): string {
  * Load tasks from tasks.json file
  * Wrapper around loadTasksFromPath to handle relative paths
  */
-export function loadTasks(workDir: string, tasksPath: string): Task[] {
-	const fullPath = path.isAbsolute(tasksPath) ? tasksPath : path.join(workDir, tasksPath);
+export function loadTasks(workDir: string, tasksPath?: string): Task[] {
+	const fullPath = tasksPath && path.isAbsolute(tasksPath)
+		? tasksPath
+		: tasksPath
+			? path.join(workDir, tasksPath)
+			: getStatePathForCurrentRun("tasks", workDir);
 	return loadTasksFromPath(fullPath);
 }
 

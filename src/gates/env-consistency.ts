@@ -1,8 +1,16 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ProbeResult, ProbeType } from "../probes/types.ts";
+import { getCurrentRunId, getRunDir } from "../state/paths.ts";
 import { type Issue, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
 import { logDebug, logInfo } from "../ui/logger.ts";
+
+/** Resolve a path relative to the current run dir, falling back to .milhouse/ */
+function resolveRunAwarePath(workDir: string, ...segments: string[]): string {
+	const runId = getCurrentRunId(workDir);
+	const base = runId ? getRunDir(runId, workDir) : path.join(workDir, ".milhouse");
+	return path.join(base, ...segments);
+}
 import {
 	type EnvProbeRequirement,
 	type GateConfig,
@@ -123,10 +131,10 @@ export interface EnvConsistencyOptions {
 	requireAllProbes: boolean;
 	/** Custom keyword mappings for component detection */
 	customKeywords: Partial<Record<EnvComponentType, string[]>>;
-	/** Path to issues.json file (relative to workDir or absolute) */
-	issuesPath: string;
-	/** Path to probes directory (relative to workDir or absolute) */
-	probesPath: string;
+	/** Path to issues.json file (relative to workDir or absolute). Resolved via current run if omitted. */
+	issuesPath?: string;
+	/** Path to probes directory (relative to workDir or absolute). Resolved via current run if omitted. */
+	probesPath?: string;
 }
 
 /**
@@ -136,8 +144,8 @@ export const DEFAULT_ENV_CONSISTENCY_OPTIONS: EnvConsistencyOptions = {
 	requireProbesFor: ["database", "cache", "storage"],
 	requireAllProbes: false,
 	customKeywords: {},
-	issuesPath: ".milhouse/state/issues.json",
-	probesPath: ".milhouse/probes",
+	issuesPath: undefined,
+	probesPath: undefined,
 };
 
 /**
@@ -225,8 +233,10 @@ export function getRequiredProbes(
 /**
  * Load issues from issues.json file
  */
-export function loadIssues(workDir: string, issuesPath: string): Issue[] {
-	const fullPath = path.isAbsolute(issuesPath) ? issuesPath : path.join(workDir, issuesPath);
+export function loadIssues(workDir: string, issuesPath?: string): Issue[] {
+	const fullPath = issuesPath
+		? (path.isAbsolute(issuesPath) ? issuesPath : path.join(workDir, issuesPath))
+		: resolveRunAwarePath(workDir, "state", "issues.json");
 
 	if (!fs.existsSync(fullPath)) {
 		return [];
@@ -254,9 +264,11 @@ export function loadIssues(workDir: string, issuesPath: string): Issue[] {
  */
 export function getProbeResults(
 	workDir: string,
-	probesPath: string,
+	probesPath?: string,
 ): Map<ProbeType, ProbeResult[]> {
-	const fullPath = path.isAbsolute(probesPath) ? probesPath : path.join(workDir, probesPath);
+	const fullPath = probesPath
+		? (path.isAbsolute(probesPath) ? probesPath : path.join(workDir, probesPath))
+		: resolveRunAwarePath(workDir, "probes");
 	const results = new Map<ProbeType, ProbeResult[]>();
 
 	logDebug(`env-consistency: Looking for probe results in ${fullPath}`);

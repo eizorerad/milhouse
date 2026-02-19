@@ -7,6 +7,7 @@
  * @module vcs/services/merge-service
  */
 
+import { join } from "node:path";
 import { bus } from "../../events/bus.ts";
 import { parseStatusPorcelain, runGitCommand } from "../backends/git-cli.ts";
 import { makeIntegrationBranchName } from "../policies/naming.ts";
@@ -598,24 +599,20 @@ export class MergeService implements IMergeService {
 
 		const wasStashed = stashResult.value.stashed;
 
-		try {
-			// Perform the operation
-			const result = await operation();
+		const autoStashResult: AutoStashResult<T> = {
+			result: undefined as unknown as T,
+			wasStashed,
+			stashRestored: false,
+		};
 
-			return ok({
-				result,
-				wasStashed,
-				stashRestored: false, // Will be set below
-			});
+		try {
+			autoStashResult.result = await operation();
+			return ok(autoStashResult);
 		} finally {
 			// Restore stash if we created one
 			if (wasStashed) {
 				const popResult = await this.popStash(workDir);
-				// We don't fail the whole operation if pop fails - just log warning
-				if (!popResult.ok || !popResult.value) {
-					// Note: Cannot emit event here - not in MilhouseEvents
-					// The caller should handle this case if needed
-				}
+				autoStashResult.stashRestored = !!(popResult.ok && popResult.value);
 			}
 		}
 	}
@@ -633,7 +630,7 @@ export class MergeService implements IMergeService {
 
 		// Generate unique ID for merge worktree
 		const mergeId = `merge-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-		const mergeWorktreePath = `${workDir}/.milhouse/runs/${runId}/merge-worktrees/${mergeId}`;
+		const mergeWorktreePath = join(workDir, ".milhouse", "runs", runId, "merge-worktrees", mergeId);
 
 		// Ensure directory exists
 		await runGitCommand(["worktree", "prune"], workDir);

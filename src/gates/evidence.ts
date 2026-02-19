@@ -308,13 +308,24 @@ export function analyzeFileForClaims(filePath: string, content: string): Evidenc
 	const requirements: EvidenceRequirement[] = [];
 
 	for (const claim of claims) {
-		// Find evidence near the claim (within context)
+		// Filter evidence relevant to this claim type
 		const claimEvidence = evidence.filter((e) => {
-			// For file evidence, check if it's related to the claim
-			if (e.type === "file" && e.file) {
-				return true; // Accept any file evidence for now
+			switch (claim.type) {
+				case "bug_fix":
+				case "implementation":
+				case "refactor":
+				case "removal":
+				case "security":
+				case "dependency":
+				case "configuration":
+					return e.type === "file" && e.file;
+				case "test_pass":
+					return e.type === "command" && e.command;
+				case "performance":
+					return (e.type === "command" && e.command) || (e.type === "probe" && e.probe_id);
+				default:
+					return true;
 			}
-			return true;
 		});
 
 		claim.evidence = claimEvidence;

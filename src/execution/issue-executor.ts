@@ -1246,16 +1246,12 @@ export async function runParallelByIssue(
 		}
 	};
 
-	// Register signal handlers for graceful shutdown
+	// Register signal handlers for graceful shutdown (removed in finally)
+	const onSigInt = async () => { await cleanupHandler(); process.exit(130); };
+	const onSigTerm = async () => { await cleanupHandler(); process.exit(143); };
 	if (options.tmuxMode) {
-		process.on("SIGINT", async () => {
-			await cleanupHandler();
-			process.exit(130);
-		});
-		process.on("SIGTERM", async () => {
-			await cleanupHandler();
-			process.exit(143);
-		});
+		process.on("SIGINT", onSigInt);
+		process.on("SIGTERM", onSigTerm);
 	}
 
 	const limit = pLimit(maxConcurrent);
@@ -1313,6 +1309,7 @@ export async function runParallelByIssue(
 			let issueInputTokens = 0;
 			let issueOutputTokens = 0;
 			let slotNum = 0;
+			let analysisComplete = false;
 
 			try {
 				// Acquire a slot
@@ -1448,6 +1445,7 @@ export async function runParallelByIssue(
 				// Use analysis results instead of atomic success/failure
 				completedTasks.push(...taskAnalysis.completedTaskIds);
 				failedTasks.push(...taskAnalysis.failedTaskIds);
+				analysisComplete = true;
 
 				logDebug(
 					`Issue ${issueGroup.issueId} task analysis: ${taskAnalysis.completedTaskIds.length} completed, ${taskAnalysis.failedTaskIds.length} failed`,
@@ -1459,10 +1457,11 @@ export async function runParallelByIssue(
 			} catch (_error) {
 				// Even on exception, try to analyze partial completion
 				// Some tasks may have been committed before the error occurred
-				logDebug(
-					`Issue ${issueGroup.issueId} execution threw exception, attempting partial completion analysis`,
-				);
-				if (worktreeDir) {
+				// Skip if analysis already ran successfully in the try block
+				if (!analysisComplete && worktreeDir) {
+					logDebug(
+						`Issue ${issueGroup.issueId} execution threw exception, attempting partial completion analysis`,
+					);
 					try {
 						const taskAnalysis = await analyzeIssueTaskCompletion(
 							{ issueId: issueGroup.issueId, tasks: issueGroup.tasks },
@@ -1483,7 +1482,7 @@ export async function runParallelByIssue(
 							failedTasks.push(task.id);
 						}
 					}
-				} else {
+				} else if (!analysisComplete) {
 					// No worktree available, mark all tasks as failed
 					logDebug(
 						`Issue ${issueGroup.issueId} no worktree available, marking all tasks as failed`,
@@ -1749,6 +1748,10 @@ export async function runParallelByIssue(
 		await cleanupTmuxResources(tmuxServers, tmuxManager, false);
 		logInfo("OpenCode servers stopped. Tmux sessions preserved for inspection.");
 	}
+
+	// Remove signal handlers to prevent leaks across invocations
+	process.off("SIGINT", onSigInt);
+	process.off("SIGTERM", onSigTerm);
 
 	return {
 		tasksCompleted: totalCompleted,

@@ -1,11 +1,12 @@
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import pc from "picocolors";
 import type { RuntimeOptions } from "../../config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName, AIResult } from "../../engines/types.ts";
 import { validateCheckCommand } from "../../gates/dod.ts";
+import * as envGate from "../../gates/env-consistency.ts";
 import { getConfigService } from "../../services/config/ConfigService.ts";
 import { loadExecutions } from "../../state/executions.ts";
 import { getMilhouseDir, initializeDir, updateProgress } from "../../state/manager.ts";
@@ -504,32 +505,33 @@ export function runDoDGate(
 
 /**
  * Run the environment consistency gate
+ *
+ * Checks that issues referencing infrastructure components (DB, cache, storage)
+ * have had the appropriate probes run.
  */
-export function runEnvConsistencyGate(workDir: string): GateResult {
-	const milDir = getMilhouseDir(workDir);
-	const probesDir = join(milDir, "probes");
+export function runEnvConsistencyGate(runId: string, workDir: string): GateResult {
+	const runDir = getRunDir(runId, workDir);
+	const issuesPath = join(runDir, "state", "issues.json");
+	const probesPath = join(runDir, "probes");
 
-	if (!existsSync(probesDir)) {
-		return {
-			gate: "envConsistency",
-			passed: true,
-			message: "No probes directory found",
-			evidence: [],
-			timestamp: new Date().toISOString(),
-		};
+	const issues = envGate.loadIssues(workDir, issuesPath);
+	const probeResults = envGate.getProbeResults(workDir, probesPath);
+	const gateOptions = envGate.DEFAULT_ENV_CONSISTENCY_OPTIONS;
+
+	let unsatisfied = 0;
+	for (const issue of issues) {
+		const analysis = envGate.analyzeIssue(issue, probeResults, gateOptions);
+		if (!analysis.satisfied && analysis.missingProbes.length > 0) {
+			unsatisfied++;
+		}
 	}
-
-	const probeTypes = existsSync(probesDir)
-		? readdirSync(probesDir).filter((f) => {
-				const path = join(probesDir, f);
-				return existsSync(path) && statSync(path).isDirectory();
-			})
-		: [];
 
 	return {
 		gate: "envConsistency",
-		passed: true,
-		message: `${probeTypes.length} probe type(s) available`,
+		passed: unsatisfied === 0,
+		message: unsatisfied === 0
+			? `Checked ${issues.length} issue(s) — all probe requirements satisfied`
+			: `${unsatisfied} issue(s) missing required probe data`,
 		evidence: [],
 		timestamp: new Date().toISOString(),
 	};
@@ -548,7 +550,7 @@ export function runAllGates(runId: string, workDir: string): GateResult[] {
 		runDiffHygieneGate(runId, workDir),
 		runDoDGate(runId, workDir), // Must run BEFORE Evidence gate (executes check_commands)
 		runEvidenceGate(runId, workDir), // Checks verified status (set by DoD gate)
-		runEnvConsistencyGate(workDir),
+		runEnvConsistencyGate(runId, workDir),
 	];
 }
 
@@ -689,7 +691,7 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 		runDiffHygieneGate(runId, workDir),
 		runDoDGate(runId, workDir, { unsafeDoDChecks: options.unsafeDoDChecks }),
 		runEvidenceGate(runId, workDir),
-		runEnvConsistencyGate(workDir),
+		runEnvConsistencyGate(runId, workDir),
 	];
 
 	const gatesPassed = gateResults.filter((g) => g.passed).length;

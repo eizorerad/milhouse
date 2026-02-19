@@ -14,7 +14,7 @@ import {
 } from "../../engines/opencode/index.ts";
 import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../../engines/tmux/index.ts";
 import { saveGraph } from "../../state/graph.ts";
-import { loadIssuesForRun } from "../../state/issues.ts";
+import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import { initializeDir } from "../../state/manager.ts";
 import {
 	updateRunPhaseInMeta,
@@ -606,8 +606,31 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 	const { runId, runMeta } = runSelection;
 	let currentRun = runMeta;
 
-	// Load tasks for the selected run
+	// Load tasks and issues for the selected run
 	let tasks = loadTasksForRun(runId, workDir);
+	let issues = loadIssuesForRun(runId, workDir);
+
+	// Apply severity/issue filtering if specified
+	const hasSeverityFilter = !!(options.minSeverity || options.severityFilter?.length || options.issueIds?.length || options.excludeIssueIds?.length);
+	if (hasSeverityFilter) {
+		const filterOptions = buildFilterOptionsFromRuntime(options, ["CONFIRMED", "PARTIAL"]);
+		issues = filterIssues(issues, filterOptions);
+		const allowedIssueIds = new Set(issues.map((i) => i.id));
+
+		const beforeCount = tasks.length;
+		tasks = tasks.filter((t: Task) => !t.issue_id || allowedIssueIds.has(t.issue_id));
+		const filtered = beforeCount - tasks.length;
+		if (filtered > 0) {
+			logInfo(`Severity filter excluded ${filtered} task(s) from consolidation`);
+		}
+		if (options.minSeverity) {
+			logInfo(`Minimum severity: ${options.minSeverity}`);
+		}
+		if (options.severityFilter?.length) {
+			logInfo(`Severity filter: ${options.severityFilter.join(", ")}`);
+		}
+	}
+
 	const pendingTasks = tasks.filter((t: Task) => t.status === "pending");
 
 	if (pendingTasks.length === 0) {
@@ -624,9 +647,6 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 			executionPlanPath: "",
 		};
 	}
-
-	// Load issues for the selected run
-	const issues = loadIssuesForRun(runId, workDir);
 
 	// Update phase to consolidate using run-aware function
 	currentRun = updateRunPhaseInMeta(runId, "consolidate", workDir) ?? currentRun;
