@@ -17,6 +17,7 @@ import { consolidatePhaseConfig } from "../runner/phases/consolidate.ts";
 import { verifyPhaseConfig } from "../runner/phases/verify.ts";
 import { loadRunMeta, loadRunsIndex } from "../state/runs.ts";
 import { logError, logInfo, logWarn } from "../ui/logger.ts";
+import { autoGenerateReport } from "../report/generator.ts";
 
 /** All phase configs indexed by name */
 const PHASE_CONFIGS: Record<string, PhaseConfig> = {
@@ -107,6 +108,7 @@ function failResult(
  */
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
 	const { workDir, config } = options;
+	const startTime = Date.now();
 	const cost = createRunCost();
 	const phasesCompleted: string[] = [];
 	let runId = options.runId;
@@ -163,6 +165,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 				return failResult(runId, cost, phasesCompleted, phase, msg);
 			}
 		}
+	}
+
+	// Auto-generate report before displaying summary
+	const pipelineDuration = Date.now() - startTime;
+	if (runId) {
+		autoGenerateReport(runId, cost, pipelineDuration, config, workDir);
 	}
 
 	displaySummary(cost, config, phasesCompleted, phases);
