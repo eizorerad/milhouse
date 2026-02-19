@@ -45,12 +45,6 @@ import {
 	countValidationReportsByStatus,
 } from "./validation-index.ts";
 import {
-	appendAuditEntry,
-	getAuditLog,
-	createAuditEntry,
-	AUDIT_ACTIONS,
-} from "./audit.ts";
-import {
 	saveStateSnapshot,
 	listSnapshots,
 	loadSnapshot,
@@ -402,50 +396,6 @@ describe("Integration Tests", () => {
 				stateEvents.emitIssueStatusChanged("ISSUE-1", "CONFIRMED", "UNVALIDATED");
 				stateEvents.emitValidationReportCreated(run.id, "report-1", "ISSUE-1", "CONFIRMED");
 			}).not.toThrow();
-		});
-	});
-
-	describe("Audit Trail Integration", () => {
-		test("should record audit entries during state changes", () => {
-			const run = createRun({ scope: "audit test", workDir: testDir });
-
-			// Record various audit entries
-			appendAuditEntry(
-				run.id,
-				createAuditEntry(AUDIT_ACTIONS.RUN_CREATED, "run", run.id, {
-					after: { scope: "audit test" },
-				}),
-				testDir
-			);
-
-			appendAuditEntry(
-				run.id,
-				createAuditEntry(AUDIT_ACTIONS.RUN_PHASE_CHANGED, "run", run.id, {
-					before: { phase: "scan" },
-					after: { phase: "validate" },
-				}),
-				testDir
-			);
-
-			appendAuditEntry(
-				run.id,
-				createAuditEntry(AUDIT_ACTIONS.TASK_STATUS_CHANGED, "task", "TASK-1", {
-					before: { status: "pending" },
-					after: { status: "done" },
-				}),
-				testDir
-			);
-
-			// Verify audit log
-			const auditLog = getAuditLog(run.id, {}, testDir);
-			expect(auditLog.length).toBe(3);
-
-			// Verify filtering
-			const runEntries = getAuditLog(run.id, { entityType: "run" }, testDir);
-			expect(runEntries.length).toBe(2);
-
-			const taskEntries = getAuditLog(run.id, { entityType: "task" }, testDir);
-			expect(taskEntries.length).toBe(1);
 		});
 	});
 

@@ -265,30 +265,6 @@ export {
 } from "./history.ts";
 export type { StateType, SnapshotMeta, Snapshot, HistoryConfig } from "./history.ts";
 
-// Audit module - Audit trail for state changes
-export {
-	getAuditLogPath,
-	appendAuditEntry,
-	createAuditEntry,
-	getAuditLog,
-	getEntityAuditLog,
-	getLatestAuditEntry,
-	countAuditEntries,
-	auditRunCreated,
-	auditRunPhaseChanged,
-	auditTaskStatusChanged,
-	auditIssueStatusChanged,
-	auditIssueValidated,
-	auditExecutionStarted,
-	auditExecutionCompleted,
-	auditExecutionFailed,
-	auditValidationReportCreated,
-	auditStateSnapshotCreated,
-	auditStateRollback,
-	getAuditStats,
-	AUDIT_ACTIONS,
-} from "./audit.ts";
-export type { AuditLogFilters } from "./audit.ts";
 
 // Validation Index module - Track validation reports
 export {
