@@ -32,6 +32,7 @@ import {
 	createPlanMetadataHeader,
 } from "../../state/plan-store.ts";
 import { AGENT_ROLES, type DoDCriteria, type Issue, getWorkItemTitle, getWorkItemRationale } from "../../state/types.ts";
+import { PLAN_JSON_SCHEMA } from "./utils/phase-schemas.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -719,12 +720,13 @@ async function planSingleIssueDeep(
 						onProgress?.(`Agent #${agentNum}: Researching`);
 					}
 				},
-				{ modelOverride: options.modelOverride },
+				{ modelOverride: options.modelOverride, jsonSchema: PLAN_JSON_SCHEMA },
 			);
 		} else {
 			onProgress?.(`Agent #${agentNum}: Executing deep planning`);
 			result = await engine.execute(prompt, workDir, {
 				modelOverride: options.modelOverride,
+				jsonSchema: PLAN_JSON_SCHEMA,
 			});
 		}
 	} catch (error) {

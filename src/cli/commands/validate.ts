@@ -13,6 +13,7 @@ import {
 import { TmuxSessionManager, ensureTmuxInstalled, getInstallationInstructions } from "../../engines/tmux/index.ts";
 import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import { getWorkItemTitle } from "../../state/types.ts";
+import { VALIDATE_JSON_SCHEMA } from "./utils/phase-schemas.ts";
 import {
 	syncLegacyPlansView,
 	writeProblemBriefForRun,
@@ -280,12 +281,13 @@ async function validateSingleIssueDeep(
 						onProgress?.(`Agent #${agentNum}: Investigating`);
 					}
 				},
-				{ modelOverride: options.modelOverride },
+				{ modelOverride: options.modelOverride, jsonSchema: VALIDATE_JSON_SCHEMA },
 			);
 		} else {
 			onProgress?.(`Agent #${agentNum}: Executing deep validation`);
 			result = await engine.execute(prompt, workDir, {
 				modelOverride: options.modelOverride,
+				jsonSchema: VALIDATE_JSON_SCHEMA,
 			});
 		}
 	} catch (error) {

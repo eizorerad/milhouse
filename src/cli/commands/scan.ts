@@ -37,6 +37,7 @@ import {
 } from "../../ui/logger.ts";
 import { ProgressSpinner } from "../../ui/spinners.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import { SCAN_JSON_SCHEMA } from "./utils/phase-schemas.ts";
 
 /**
  * Result of scanning for work items
@@ -444,32 +445,9 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 			PortManager.releaseAllPorts();
 		} else {
 			// STANDARD MODE: Use engine.execute directly
-			// JSON Schema forces Claude to return structured output after agent workflow
-			const scanJsonSchema = {
-				type: "object",
-				properties: {
-					items: {
-						type: "array",
-						items: {
-							type: "object",
-							properties: {
-								type: { type: "string", enum: ["bug", "feature", "refactor", "improvement", "task"] },
-								title: { type: "string" },
-								rationale: { type: "string" },
-								severity: { type: "string", enum: ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
-								scope_impact: { type: "string" },
-								strategy: { type: "string" },
-							},
-							required: ["type", "title", "rationale", "severity"],
-						},
-					},
-				},
-				required: ["items"],
-			};
-
 			const engineOptions = {
 				modelOverride: options.modelOverride,
-				jsonSchema: scanJsonSchema,
+				jsonSchema: SCAN_JSON_SCHEMA,
 			};
 
 			if (engine.executeStreaming) {

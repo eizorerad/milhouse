@@ -26,6 +26,7 @@ import {
 	writeExecutionPlanForRun,
 } from "../../state/plan-store.ts";
 import { AGENT_ROLES, type GraphNode, type Issue, type Task, getWorkItemTitle } from "../../state/types.ts";
+import { CONSOLIDATE_JSON_SCHEMA } from "./utils/phase-schemas.ts";
 import { selectOrRequireRun } from "./utils/run-selector.ts";
 import {
 	formatDuration,
@@ -859,12 +860,13 @@ export async function runConsolidate(options: RuntimeOptions): Promise<Consolida
 					(step) => {
 						spinner.updateStep(`CDM: ${step || "Analyzing"}`);
 					},
-					{ modelOverride: options.modelOverride },
+					{ modelOverride: options.modelOverride, jsonSchema: CONSOLIDATE_JSON_SCHEMA },
 				);
 			} else {
 				spinner.updateStep("CDM: Executing");
 				result = await engine.execute(prompt, workDir, {
 					modelOverride: options.modelOverride,
+					jsonSchema: CONSOLIDATE_JSON_SCHEMA,
 				});
 			}
 		} catch (error) {

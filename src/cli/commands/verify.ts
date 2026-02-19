@@ -13,6 +13,7 @@ import { getMilhouseDir, initializeDir, updateProgress } from "../../state/manag
 import { getRunDir, updateRunPhaseInMeta } from "../../state/runs.ts";
 import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
 import { AGENT_ROLES, type Evidence, type GateResult, type Task } from "../../state/types.ts";
+import { VERIFY_JSON_SCHEMA } from "./utils/phase-schemas.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -743,11 +744,12 @@ export async function runVerify(options: RuntimeOptions): Promise<VerifyResult> 
 						spinner.updateStep(step);
 					}
 				},
-				{ modelOverride: options.modelOverride },
+				{ modelOverride: options.modelOverride, jsonSchema: VERIFY_JSON_SCHEMA },
 			);
 		} else {
 			result = await engine.execute(prompt, workDir, {
 				modelOverride: options.modelOverride,
+				jsonSchema: VERIFY_JSON_SCHEMA,
 			});
 		}
 
