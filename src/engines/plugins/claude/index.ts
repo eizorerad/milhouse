@@ -162,7 +162,7 @@ export class ClaudePlugin implements IEnginePlugin {
 			args.push("--max-budget-usd", String(request.metadata.maxBudgetUsd));
 		}
 
-		// Add the prompt using -p flag (print mode for SDK usage)
+		// Add the prompt using -p flag (print mode for non-interactive usage)
 		args.push("-p", request.prompt);
 
 		// Note: Working directory is handled by the executor via Bun.spawn's cwd option

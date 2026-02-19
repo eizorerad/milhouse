@@ -142,11 +142,21 @@ export class EngineExecutor implements IEngineExecutor {
 		);
 
 		// Spawn the process
-		// On Windows, we need to use cmd.exe /c to run .cmd/.bat files
+		// On Windows, avoid cmd.exe /c when possible — it corrupts multiline
+		// arguments (newlines, quotes). Most engines are native .exe files that
+		// can be spawned directly. Only fall back to cmd.exe for .cmd/.bat shims.
 		const isWindows = process.platform === "win32";
-		const spawnArgs = isWindows
-			? ["cmd.exe", "/c", plugin.config.command, ...args]
-			: [plugin.config.command, ...args];
+		let spawnArgs: string[];
+
+		if (isWindows) {
+			const command = plugin.config.command;
+			const needsCmdShell = command.endsWith(".cmd") || command.endsWith(".bat");
+			spawnArgs = needsCmdShell
+				? ["cmd.exe", "/c", command, ...args]
+				: [command, ...args];
+		} else {
+			spawnArgs = [plugin.config.command, ...args];
+		}
 
 		const proc = Bun.spawn(spawnArgs, {
 			cwd: request.workDir,
