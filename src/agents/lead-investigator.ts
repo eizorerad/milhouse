@@ -169,6 +169,34 @@ If no significant work items are found, return an empty array: \`[]\``,
 			priority: SECTION_PRIORITIES.guidelines,
 		});
 
+		// Critical: force JSON output as the very last instruction
+		// Claude in agent mode tends to write prose summaries instead of JSON.
+		// This section has the highest priority (appears last) to reinforce the format.
+		sections.push({
+			type: "output",
+			header: "CRITICAL: Response Format Requirement",
+			content: `Your FINAL response MUST be a JSON array wrapped in a \`\`\`json code block.
+Do NOT respond with a text summary. Do NOT respond with markdown prose.
+After you finish investigating, output ONLY a \`\`\`json code block containing the array of work items.
+
+Example of CORRECT final response:
+
+\`\`\`json
+[
+  {"type": "bug", "title": "...", "rationale": "...", "severity": "HIGH", "scope_impact": "...", "strategy": "..."}
+]
+\`\`\`
+
+If you found no issues, respond with:
+
+\`\`\`json
+[]
+\`\`\`
+
+Do NOT include any text before or after the JSON code block in your final response.`,
+			priority: 100, // Higher than any other section
+		});
+
 		return sections;
 	}
 

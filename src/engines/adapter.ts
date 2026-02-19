@@ -281,6 +281,8 @@ export class PluginAdapter implements AIEngine {
 			workDir,
 			// Pass modelOverride directly to ExecutionRequest (now supported in schema)
 			modelOverride: options?.modelOverride,
+			// JSON Schema for structured output validation
+			jsonSchema: options?.jsonSchema,
 			// Pass Milhouse-specific context fields
 			runId: options?.runId,
 			agentRole: options?.agentRole,
@@ -339,6 +341,8 @@ export class PluginAdapter implements AIEngine {
 			streamOutput: true,
 			// Pass modelOverride directly to ExecutionRequest (now supported in schema)
 			modelOverride: options?.modelOverride,
+			// JSON Schema for structured output validation
+			jsonSchema: options?.jsonSchema,
 			// Pass Milhouse-specific context fields
 			runId: options?.runId,
 			agentRole: options?.agentRole,

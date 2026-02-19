@@ -33,6 +33,9 @@ export interface EngineOptions {
 	/** Override the default model */
 	modelOverride?: string;
 
+	/** JSON Schema to validate structured output (Claude --json-schema flag) */
+	jsonSchema?: Record<string, unknown>;
+
 	// ========================================================================
 	// Milhouse-Specific Options
 	// ========================================================================

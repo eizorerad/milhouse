@@ -431,8 +431,8 @@ export function createRoleSection(role: AgentRole, additionalContext?: string): 
 
 	return {
 		type: "role",
-		header: "Role",
-		content,
+		header: `Role: ${config.name} (${role})`,
+		content: additionalContext ? `${description}\n\n${additionalContext}` : description,
 		priority: SECTION_PRIORITIES.role,
 	};
 }

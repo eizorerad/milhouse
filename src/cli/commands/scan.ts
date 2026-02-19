@@ -84,14 +84,38 @@ function buildLeadInvestigatorPrompt(workDir: string, scanFocus?: string): strin
  */
 function parseIssuesFromResponse(response: string): ParsedIssue[] {
 	// Extract JSON from response using robust multi-strategy extraction
-	const jsonStr = extractJsonFromResponse(response);
+	logDebug(`Raw response length: ${response.length} chars`);
+	logDebug(`Raw response first 500 chars: ${response.slice(0, 500)}`);
+	logDebug(`Raw response last 500 chars: ${response.slice(-500)}`);
+	let jsonStr = extractJsonFromResponse(response);
+
+	// If no JSON found in the final response, Claude may have returned prose.
+	// Try to find JSON in any part of the response by being more aggressive.
+	if (!jsonStr) {
+		logDebug("No JSON in final response, trying aggressive extraction...");
+
+		// Try to find any [...] array in the response
+		const arrayMatch = response.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+		if (arrayMatch) {
+			logDebug(`Found potential JSON array (${arrayMatch[0].length} chars)`);
+			jsonStr = arrayMatch[0];
+		}
+	}
+
 	if (!jsonStr) {
 		logDebug("Failed to extract JSON from scan response");
+		logDebug(`Full response for debugging:\n${response.slice(0, 2000)}`);
 		return [];
 	}
 
 	try {
 		const parsed = JSON.parse(jsonStr);
+
+		// Handle --json-schema wrapper: {"items": [...]}
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && Array.isArray(parsed.items)) {
+			logDebug(`Extracted ${parsed.items.length} items from JSON schema wrapper`);
+			return parsed.items.filter(isValidParsedIssue);
+		}
 
 		if (!Array.isArray(parsed)) {
 			logWarn("AI response is not an array, wrapping in array");
@@ -420,25 +444,50 @@ export async function runScan(options: RuntimeOptions): Promise<ScanResult> {
 			PortManager.releaseAllPorts();
 		} else {
 			// STANDARD MODE: Use engine.execute directly
+			// JSON Schema forces Claude to return structured output after agent workflow
+			const scanJsonSchema = {
+				type: "object",
+				properties: {
+					items: {
+						type: "array",
+						items: {
+							type: "object",
+							properties: {
+								type: { type: "string", enum: ["bug", "feature", "refactor", "improvement", "task"] },
+								title: { type: "string" },
+								rationale: { type: "string" },
+								severity: { type: "string", enum: ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
+								scope_impact: { type: "string" },
+								strategy: { type: "string" },
+							},
+							required: ["type", "title", "rationale", "severity"],
+						},
+					},
+				},
+				required: ["items"],
+			};
+
+			const engineOptions = {
+				modelOverride: options.modelOverride,
+				jsonSchema: scanJsonSchema,
+			};
+
 			if (engine.executeStreaming) {
 				result = await engine.executeStreaming(
 					prompt,
 					workDir,
 					(step) => {
-						// Handle both DetailedStep and string (legacy fallback)
 						if (step) {
 							spinner.updateStep(step);
 						} else {
 							spinner.updateStep("Analyzing");
 						}
 					},
-					{ modelOverride: options.modelOverride },
+					engineOptions,
 				);
 			} else {
 				spinner.updateStep("Executing");
-				result = await engine.execute(prompt, workDir, {
-					modelOverride: options.modelOverride,
-				});
+				result = await engine.execute(prompt, workDir, engineOptions);
 			}
 		}
 	} catch (error) {
