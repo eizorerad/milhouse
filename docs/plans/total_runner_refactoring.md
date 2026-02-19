@@ -26,6 +26,18 @@ Lives in `milhouse-020/` as a parallel project. TUI/CLI interface preserved from
 - Cost tracking with configurable pricing
 - Structured run reports (JSON + optional markdown)
 
+### Architecture decision: Pool over Batch
+
+**Decision: All phases use pool (p-limit) parallelism. Batch is removed.**
+
+Current milhouse has two strategies:
+- validate uses pool (agents grab next item as soon as they finish)
+- plan uses batch (wait for all N agents to finish, then next N)
+
+Batch wastes time — if one agent takes 5 min and others take 1 min, two agents sit idle for 4 min. Pool has zero idle time. With 12 items and 3 agents, pool saves ~40% wall time.
+
+PhaseRunner implements only pool via `pLimit(maxParallel)`. No batch mode, no strategy selection, no configuration for this. One strategy, everywhere.
+
 ### What stays
 - TUI: spinners, progress bars, color theme — copied as-is
 - CLI args: same interface, same flags
