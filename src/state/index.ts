@@ -299,7 +299,6 @@ export {
 	MILHOUSE_DIR,
 	getMilhouseDir,
 	getStatePath,
-	getProbesDir,
 	getPlansDir,
 	isInitialized,
 	initializeDir,

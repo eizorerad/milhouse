@@ -55,13 +55,6 @@ export function getStatePath(file: keyof typeof STATE_FILES, workDir = process.c
 }
 
 /**
- * Get path to probes directory for a specific type
- */
-export function getProbesDir(probeType: string, workDir = process.cwd()): string {
-	return join(getMilhouseDir(workDir), "probes", probeType);
-}
-
-/**
  * Get path to plans directory
  */
 export function getPlansDir(workDir = process.cwd()): string {

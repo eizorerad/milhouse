@@ -515,14 +515,6 @@ export function isPipelineAgent(role: AgentRole): boolean {
 }
 
 /**
- * Check if a role is an inspector agent
- * @deprecated No inspector agents remain after probe system removal
- */
-export function isInspectorAgent(_role: AgentRole): boolean {
-	return false;
-}
-
-/**
  * Check if a role is read-only (non-pipeline agents are read-only, EX is the only pipeline writer)
  */
 export function isReadOnlyAgent(role: AgentRole): boolean {
