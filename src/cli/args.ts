@@ -59,134 +59,105 @@ export function createProgram(): Command {
 
 	program
 		.name(MILHOUSE_BRANDING.shortName)
-		.description(
-			`${theme.muted(MILHOUSE_BRANDING.description)} - ${theme.dim("Supports ")}${theme.engine.aider("Aider")}${theme.dim(", ")}${theme.engine.claude("Claude")}${theme.dim(", ")}${theme.engine.gemini("Gemini")}${theme.dim(", ")}${theme.engine.opencode("OpenCode")}${theme.dim(", ")}${theme.engine.codex("Codex")}${theme.dim(", ")}${theme.engine.cursor("Cursor")}${theme.dim(", ")}${theme.engine.qwen("Qwen")}${theme.dim(" and ")}${theme.engine.droid("Droid")}`,
-		)
+		.description("Correctness-first AI coding orchestrator")
 		.version(VERSION)
-		.argument("[task...]", "Single task to execute (brownfield mode), or 'runs' subcommand")
+		.argument("[task...]", "Single task to execute, or 'runs' subcommand")
 		.allowExcessArguments(true)
-		.option("--init", `Initialize ${MILHOUSE_BRANDING.configDir}/ configuration`)
-		.option("--config", "Show current Milhouse configuration")
-		.option("--add-rule <rule>", "Add a rule to Milhouse config")
-		.option("--scan", `Run ${theme.phase.scan("Lead Investigator")} to create Work Brief v0`)
-		.option(
-			"--scope <focus>",
-			"Focus scan on specific area (e.g., 'add auth flow', 'frontend bugs', 'refactor API')",
-		)
-		.option("--type <type>", "Work item type hint: bug, feature, refactor, improvement, task")
-		.option(
-			"--validate",
-			`Run ${theme.phase.validate("Validators")} to validate work items with evidence`,
-		)
-		.option(
-			"--plan",
-			`Run ${theme.phase.plan("Planners")} to generate WBS for validated work items`,
-		)
-		.option(
-			"--consolidate",
-			`${theme.phase.consolidate("Merge")} WBS into unified Execution Plan with dependencies`,
-		)
-		.option("--exec", `${theme.phase.exec("Execute")} tasks from the Execution Plan`)
-		.option("--task-id <id>", "Execute a specific task by ID")
-		.option("--issues <ids>", "Comma-separated list of issue IDs to process (e.g., P-xxx,P-yyy)")
-		.option("--exclude-issues <ids>", "Comma-separated list of issue IDs to exclude")
-		.option("--severity <levels>", "Filter by severity: CRITICAL,HIGH,MEDIUM,LOW (comma-separated)")
-		.option(
-			"--min-severity <level>",
-			"Minimum severity level to process (CRITICAL > HIGH > MEDIUM > LOW)",
-		)
-		.option("--verify", `Run ${theme.phase.verify("verification")} gates and check for regressions`)
-		.option("--export", "Export Milhouse state to md/json formats")
-		.option("--format <formats>", "Export formats: md,json (default: md,json)", "md,json")
-		.option(
-			"--run",
-			`Run ${theme.highlight("full Milhouse pipeline")} (scan → validate → plan → consolidate → exec → verify)`,
-		)
-		.option("--run-id <id>", "Specify run ID to use (full or partial match)")
-		.option("--resume", "Resume Milhouse pipeline from where it left off")
-		.option("--force", "Force re-run even if phases already completed")
-		.option(
-			"--fail-fast",
-			"Stop on first failure — applies to both pipeline phases and task execution (default: true)",
-		)
-		.option("--start-phase <phase>", "Start from a specific phase")
-		.option("--end-phase <phase>", "Stop after a specific phase")
-		.option("--no-tests, --skip-tests", "Skip running tests")
-		.option("--no-lint, --skip-lint", "Skip running lint")
-		.option("--fast", "Skip both tests and lint")
-		.option("--aider", `Use ${theme.engine.aider("Aider")}`)
-		.option("--claude", `Use ${theme.engine.claude("Claude Code")} (default)`)
-		.option("--gemini", `Use ${theme.engine.gemini("Gemini CLI")}`)
-		.option("--opencode", `Use ${theme.engine.opencode("OpenCode")}`)
-		.option("--cursor", `Use ${theme.engine.cursor("Cursor Agent")}`)
-		.option("--codex", `Use ${theme.engine.codex("Codex")}`)
-		.option("--qwen", `Use ${theme.engine.qwen("Qwen-Code")}`)
-		.option("--droid", `Use ${theme.engine.droid("Factory Droid")}`)
-		.option("--dry-run", "Show what Milhouse would do without executing")
-		.option("--max-iterations <n>", "Maximum iterations (0 = unlimited)", "0")
-		.option("--max-retries <n>", "Maximum retries per task", "3")
-		.option("--retry-delay <n>", "Delay between retries in seconds", "5")
-		// Milhouse-first flags
-		.option("--workers [n]", "Enable parallel execution with optional worker count (default: 3)")
-		.option("--input <path>", "Task input file or folder (auto-detected)", "PRD.md")
-		.option("--tasks <path>", "Task input file or folder (alias for --input)")
-		.option("--pr", "Create pull request after each task")
-		.option("--draft", "Create PRs as draft (use with --pr)")
-		.option("--isolate", "Create isolated branch/worktree for each task")
-		.option("--worktree-per-task", "Create isolated worktree for each task (alias for --isolate)")
-		.option("--base-branch <branch>", "Base branch for PRs")
-		.option("--yaml <file>", "YAML task file")
-		.option("--github <repo>", "GitHub repo for issues (owner/repo)")
-		.option("--github-label <label>", "Filter GitHub issues by label")
+
+		// ── Setup ──────────────────────────────────────────────
+		.option("--init", "Initialize .milhouse/ with config and directory structure")
+		.option("--config", "Show current configuration")
+		.option("--add-rule <rule>", "Add a rule to .milhouse/config.ts")
+
+		// ── Pipeline ───────────────────────────────────────────
+		.option("--run", "Run full pipeline (phases configured in .milhouse/config.ts)")
+		.option("--resume", "Resume pipeline from where it left off")
+		.option("--run-id <id>", "Use a specific run ID (full or partial match)")
+		.option("--start-phase <phase>", "Start from this phase (scan|validate|plan|consolidate|exec|verify)")
+		.option("--end-phase <phase>", "Stop after this phase")
+		.option("--force", "Re-run even if phases already completed")
+		.option("--fail-fast", "Stop on first phase failure (default: true)")
+
+		// ── Individual Phases ──────────────────────────────────
+		.option("--scan", "Run scan phase (Lead Investigator)")
+		.option("--scope <focus>", "Focus area for scan (e.g. 'auth bugs', 'add search feature')")
+		.option("--type <type>", "Work item type hint: bug|feature|refactor|improvement|task")
+		.option("--validate", "Run validation phase")
+		.option("--plan", "Run planning phase (WBS generation)")
+		.option("--consolidate", "Run consolidation phase (merge & deduplicate)")
+		.option("--exec", "Run execution phase")
+		.option("--verify", "Run verification gates")
+		.option("--report", "Generate run report")
+		.option("--export", "Export state to md/json")
+		.option("--format <formats>", "Export formats: md,json", "md,json")
+
+		// ── AI Engine ──────────────────────────────────────────
+		.option("--claude", "Use Claude Code (default)")
+		.option("--aider", "Use Aider")
+		.option("--gemini", "Use Gemini CLI")
+		.option("--opencode", "Use OpenCode")
+		.option("--cursor", "Use Cursor Agent")
+		.option("--codex", "Use Codex")
+		.option("--qwen", "Use Qwen-Code")
+		.option("--droid", "Use Factory Droid")
+		.option("--model <name>", "Override model (e.g. opus, sonnet, gemini-2.0-flash)")
+		.option("--sonnet", "Shortcut for --claude --model sonnet")
+
+		// ── Execution ──────────────────────────────────────────
+		.option("--workers [n]", "Parallel workers (default: 3)")
+		.option("--isolate", "Isolate each issue in a branch/worktree")
 		.option("--no-commit", "Don't auto-commit changes")
-		.option("--browser", "Enable browser automation (agent-browser)")
+		.option("--no-merge", "Skip auto-merge after execution")
+		.option("--pr", "Create pull request after execution")
+		.option("--draft", "Create PRs as draft")
+		.option("--base-branch <branch>", "Base branch for PRs and worktrees")
+		.option("--exec-fail-fast", "Stop on first task failure")
+
+		// ── Filtering ──────────────────────────────────────────
+		.option("--issues <ids>", "Process only these issue IDs (comma-separated)")
+		.option("--exclude-issues <ids>", "Skip these issue IDs (comma-separated)")
+		.option("--severity <levels>", "Filter by severity: CRITICAL,HIGH,MEDIUM,LOW")
+		.option("--min-severity <level>", "Minimum severity to process")
+		.option("--task-id <id>", "Execute a specific task by ID")
+
+		// ── Skips ──────────────────────────────────────────────
+		.option("--no-tests, --skip-tests", "Skip tests")
+		.option("--no-lint, --skip-lint", "Skip linting")
+		.option("--fast", "Skip both tests and lint")
+		.option("--skip-probes", "Skip probe execution")
+		.option("--dry-run", "Show what would happen without executing")
+
+		// ── Retries ────────────────────────────────────────────
+		.option("--max-retries <n>", "Max retries per task (default: 3)", "3")
+		.option("--retry-delay <n>", "Retry delay in seconds (default: 5)", "5")
+		.option("--max-validation-retries <n>", "Max retries for unvalidated issues (default: 2)", "2")
+		.option("--no-retry-unvalidated", "Don't retry unvalidated issues")
+		.option("--retry-on-any-failure", "Retry all failures, not just retryable ones")
+
+		// ── Task Sources (legacy PRD mode) ─────────────────────
+		.option("--input <path>", "Task file or folder", "PRD.md")
+		.option("--tasks <path>", "Alias for --input")
+		.option("--yaml <file>", "YAML task file")
+		.option("--github <repo>", "GitHub repo (owner/repo)")
+		.option("--github-label <label>", "Filter GitHub issues by label")
+		.option("--max-iterations <n>", "Max iterations, 0 = unlimited", "0")
+
+		// ── Tmux (OpenCode only) ───────────────────────────────
+		.option("--tmux", "Run agents in tmux windows (--opencode only)")
+		.option("--tmux-auto-attach", "Auto-attach to tmux session")
+
+		// ── Advanced ───────────────────────────────────────────
+		.option("--worktree-per-task", "Alias for --isolate")
+		.option("--worktrees", "Force worktree isolation")
+		.option("--exec-by-issue", "Group tasks by issue (default)")
+		.option("--no-exec-by-issue", "Sequential/task-parallel mode")
+		.option("--browser", "Enable browser automation")
 		.option("--no-browser", "Disable browser automation")
-		.option("--model <name>", "Override default model for the engine")
-		.option("--sonnet", `Shortcut for --claude --model ${theme.code("sonnet")}`)
-		.option("--no-merge", "Skip automatic branch merging after parallel execution")
-		.option("--exec-fail-fast", "Stop execution on first task failure")
-		.option(
-			"--worktrees",
-			"Force worktree isolation for parallel execution (default when --workers)",
-		)
-		.option("--exec-by-issue", "Execute tasks grouped by issue (default)")
-		.option("--no-exec-by-issue", "Use sequential/task-parallel mode instead of issue-based")
-		.option("--skip-probes", "Skip automatic probe execution (use AI-only validation/planning)")
-		// Validation retry options
-		.option(
-			"--max-validation-retries <n>",
-			"Maximum retry attempts for UNVALIDATED issues during validation",
-			"2",
-		)
-		.option("--no-retry-unvalidated", "Disable automatic retry for UNVALIDATED issues")
-		.option(
-			"--retry-delay-validation <ms>",
-			"Delay between validation retry rounds in milliseconds",
-			"2000",
-		)
-		.option(
-			"--unsafe-dod-checks",
-			"Disable safety validation for DoD check_command execution (executes commands as-is). SECURITY RISK.",
-		)
-		.option(
-			"--retry-on-any-failure",
-			"Retry any failure, not just retryable errors (safety net mode). When enabled, all failures are retried up to maxRetries.",
-		)
-		.option("-v, --verbose", "Verbose Milhouse output")
-		// Tmux mode options (OpenCode only)
-		.option(
-			"--tmux",
-			"Run agents in tmux windows for interactive observation. Only supported with --opencode engine. Starts OpenCode in server mode and creates tmux sessions for each issue, allowing real-time observation of agent execution.",
-		)
-		.option(
-			"--tmux-auto-attach",
-			"Automatically attach to the tmux session after starting. Requires --tmux flag.",
-		)
-		.option(
-			"--auto-install",
-			"Automatically install missing dependencies (OpenCode, tmux) when they are not found on the system.",
-		)
-		.option("--no-auto-install", "Disable automatic installation of dependencies");
+		.option("--auto-install", "Auto-install missing deps (OpenCode, tmux)")
+		.option("--no-auto-install", "Don't auto-install")
+		.option("--retry-delay-validation <ms>", "Validation retry delay in ms", "2000")
+		.option("--unsafe-dod-checks", "Skip DoD command safety checks (SECURITY RISK)")
+		.option("-v, --verbose", "Verbose output");
 
 	return program;
 }
@@ -535,40 +506,40 @@ export function printHelp(): void {
 	const program = createProgram();
 	program.outputHelp();
 
-	// Add footer with Milhouse-specific examples
+	const $ = theme.dim("$");
+	const m = MILHOUSE_BRANDING.shortName;
+	const c = (s: string) => theme.muted(s);
+
 	console.log(`
-${theme.bold("Examples:")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --init                    ${theme.muted("# Initialize Milhouse configuration")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --scan --scope "frontend" ${theme.muted("# Scan with focus, creates new run")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --run                     ${theme.muted("# Run full Milhouse pipeline")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --exec --workers          ${theme.muted("# Execute tasks in parallel")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --exec --workers 5        ${theme.muted("# Execute with 5 parallel workers")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} "Fix the login bug"       ${theme.muted("# Single task mode")}
+${theme.bold("Quick Start:")}
+  ${$} ${m} --init                          ${c("# Create .milhouse/config.ts")}
+  ${$} ${m} --scan --scope "auth bugs"      ${c("# Scan repo for issues")}
+  ${$} ${m} --run                           ${c("# Run full pipeline")}
+  ${$} ${m} "Fix the login bug"             ${c("# Single task mode")}
 
-${theme.bold("Milhouse Pipeline Phases:")}
-	 ${theme.phase.scan("scan")}        → ${theme.phase.validate("validate")}    → ${theme.phase.plan("plan")}        → ${theme.phase.consolidate("consolidate")} → ${theme.phase.exec("exec")}        → ${theme.phase.verify("verify")}
+${theme.bold("Pipeline:")}
+  ${theme.phase.scan("scan")} → ${theme.phase.validate("validate")} → ${theme.phase.plan("plan")} → ${theme.phase.consolidate("consolidate")} → ${theme.phase.exec("exec")} → ${theme.phase.verify("verify")}
 
-${theme.bold("Run Management:")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} runs list                 ${theme.muted("# List all Milhouse runs")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} runs info [id]            ${theme.muted("# Show run details")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} runs switch <id>          ${theme.muted("# Switch to a different run")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} runs delete <id>          ${theme.muted("# Delete a run")}
+  ${$} ${m} --run --start-phase plan        ${c("# Start from plan phase")}
+  ${$} ${m} --run --end-phase consolidate   ${c("# Stop after consolidation")}
+  ${$} ${m} --resume                        ${c("# Resume from last checkpoint")}
+  ${$} ${m} --exec --workers 5              ${c("# Execute with 5 parallel agents")}
 
-${theme.bold("Issue Filtering:")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --validate --issues P-xxx,P-yyy    ${theme.muted("# Validate specific issues")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --plan --min-severity HIGH         ${theme.muted("# Plan only HIGH+ severity")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --run --severity CRITICAL,HIGH     ${theme.muted("# Full pipeline for CRITICAL/HIGH")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --exec --exclude-issues P-xxx      ${theme.muted("# Execute all except specified")}
+${theme.bold("Runs:")}
+  ${$} ${m} runs list                       ${c("# List all runs")}
+  ${$} ${m} runs info [id]                  ${c("# Show run details")}
+  ${$} ${m} runs switch <id>                ${c("# Switch active run")}
+  ${$} ${m} runs delete <id>                ${c("# Delete a run")}
 
-${theme.bold("Task Sources:")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --run --input tasks.md    ${theme.muted("# Use custom task file")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --run --tasks ./specs/    ${theme.muted("# Use folder of task specs")}
+${theme.bold("Filtering:")}
+  ${$} ${m} --validate --issues P-xxx,P-yyy ${c("# Validate specific issues")}
+  ${$} ${m} --run --min-severity HIGH       ${c("# Only HIGH+ severity")}
+  ${$} ${m} --exec --exclude-issues P-xxx   ${c("# Skip specific issues")}
 
-${theme.bold("Pull Requests:")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --exec --pr               ${theme.muted("# Create PR after each task")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --exec --pr --draft       ${theme.muted("# Create draft PRs")}
-	 ${theme.dim("$")} ${MILHOUSE_BRANDING.shortName} --exec --isolate          ${theme.muted("# Isolate each task in worktree")}
+${theme.bold("Config:")}
+  Edit ${theme.highlight(".milhouse/config.ts")} to configure phases, workers, rules, gates, and more.
+  CLI flags override config values for that run only.
 
-${theme.muted(`For more information, visit: ${MILHOUSE_BRANDING.repoUrl}`)}
+${theme.muted(`${MILHOUSE_BRANDING.repoUrl}`)}
 `);
 }
