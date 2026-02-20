@@ -101,8 +101,7 @@ export { runInit } from "./commands/init.ts";
 export { showConfig, addRule } from "./commands/config.ts";
 
 // Task commands
-export { runTask } from "./commands/task.ts";
-export { runPipelineV2, runLoop } from "./commands/run.ts";
+export { runPipelineV2 } from "./commands/run.ts";
 export { runsCommand } from "./commands/runs.ts";
 
 // Pipeline commands (thin wrappers around PhaseRunner)

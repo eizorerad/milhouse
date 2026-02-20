@@ -30,11 +30,8 @@ export { runInit } from "./init.ts";
 // Config command
 export { showConfig, addRule } from "./config.ts";
 
-// Task command
-export { runTask } from "./task.ts";
-
 // Run commands
-export { runPipelineV2, runLoop } from "./run.ts";
+export { runPipelineV2 } from "./run.ts";
 
 // Report command
 export { runReport } from "./report.ts";

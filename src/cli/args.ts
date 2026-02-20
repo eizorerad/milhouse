@@ -61,7 +61,7 @@ export function createProgram(): Command {
 		.name(MILHOUSE_BRANDING.shortName)
 		.description("Correctness-first AI coding orchestrator")
 		.version(VERSION)
-		.argument("[task...]", "Single task to execute, or 'runs' subcommand")
+		.argument("[task...]", "Run pipeline with this scope, or 'runs' subcommand")
 		.allowExcessArguments(true)
 
 		// ── Setup ──────────────────────────────────────────────
@@ -166,7 +166,7 @@ Examples:
   $ milhouse --run                           # Run full pipeline
   $ milhouse --resume                        # Resume from last checkpoint
   $ milhouse --exec --workers 5              # Execute with 5 parallel agents
-  $ milhouse "Fix the login bug"             # Single task mode
+  $ milhouse "Fix the login bug"             # Full pipeline with scope
   $ milhouse runs list                       # List all runs
 
 Pipeline:  scan → validate → plan → consolidate → exec → verify

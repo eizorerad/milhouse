@@ -10,9 +10,8 @@ import { runScanPipeline } from "./cli/commands/pipeline/scan.ts";
 import { runValidatePipeline } from "./cli/commands/pipeline/validate.ts";
 import { runVerifyPipeline } from "./cli/commands/pipeline/verify.ts";
 import { runReport } from "./cli/commands/report.ts";
-import { runLoop, runPipelineV2 } from "./cli/commands/run.ts";
+import { runPipelineV2 } from "./cli/commands/run.ts";
 import { runsCommand } from "./cli/commands/runs.ts";
-import { runTask } from "./cli/commands/task.ts";
 import { logError } from "./ui/logger.ts";
 
 async function main(): Promise<void> {
@@ -143,13 +142,17 @@ async function main(): Promise<void> {
 				return;
 			}
 
-			// Single task mode (brownfield)
-			await runTask(task, options);
-			return;
+			// Any other text → run full pipeline with it as scope
+			options.scanFocus = task;
 		}
 
-		// PRD loop mode (legacy)
-		await runLoop(options);
+		// Default: run full pipeline
+		await runPipelineV2(options, {
+			startPhase,
+			endPhase,
+			resume: resumeMode,
+			force: forceMode,
+		});
 	} catch (error) {
 		logError(error instanceof Error ? error.message : String(error));
 		process.exit(1);
