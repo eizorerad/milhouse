@@ -304,10 +304,6 @@ export {
 	initializeDir,
 	ensureGitignore,
 	generateId,
-	loadRunState,
-	saveRunState,
-	createRunState,
-	updateRunPhase,
 	recordGateResult,
 	updateProgress,
 } from "./manager.ts";

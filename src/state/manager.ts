@@ -6,28 +6,23 @@
  *
  * @module state/manager
  *
- * NOTE: Deprecated re-exports have been moved to _legacy/manager-reexports.ts.
- * For backward compatibility during migration, import from there or directly
- * from the specialized modules:
+ * For specialized state operations, import from the dedicated modules:
  * - runs.ts: Run management (create, list, switch, delete)
  * - issues.ts: Issue management
  * - tasks.ts: Task management
  * - graph.ts: Dependency graph operations
  * - executions.ts: Execution records
- * - probes.ts: Probe result storage
  * - compat.ts: Export to external formats
  * - migration.ts: Legacy state migration
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadJsonFile, saveJsonFile } from "./json-io.ts";
+import { saveJsonFile } from "./json-io.ts";
 import { MILHOUSE_DIR, getMilhouseDir } from "./paths.ts";
 import {
 	type ExecutionRecord,
 	type GateResult,
-	type RunState,
-	RunStateSchema,
 	STATE_FILES,
 	type Task,
 } from "./types.ts";
@@ -135,64 +130,6 @@ export function generateId(prefix = ""): string {
 // ============================================================================
 // INTERNAL FILE UTILITIES (using shared json-io module)
 // ============================================================================
-
-// ============================================================================
-// LEGACY RUN STATE MANAGEMENT
-// Note: For new code, use RunMeta from runs.ts instead
-// These functions are kept here for backward compatibility but are also
-// available in _legacy/manager-reexports.ts
-// ============================================================================
-
-/**
- * Load legacy run state
- * @deprecated Use getCurrentRun() from runs.ts for the new runs system
- */
-export function loadRunState(workDir = process.cwd()): RunState | null {
-	const path = getStatePath("run", workDir);
-	if (!existsSync(path)) {
-		return null;
-	}
-	return loadJsonFile(path, RunStateSchema, null as unknown as RunState);
-}
-
-/**
- * Save legacy run state
- * @deprecated Use saveRunMeta() from runs.ts for the new runs system
- */
-export function saveRunState(state: RunState, workDir = process.cwd()): void {
-	const path = getStatePath("run", workDir);
-	saveJsonFile(path, state);
-}
-
-/**
- * Create legacy run state
- * @deprecated Use createRun() from runs.ts for the new runs system
- */
-export function createRunState(workDir = process.cwd()): RunState {
-	const state: RunState = {
-		run_id: generateId("run"),
-		started_at: new Date().toISOString(),
-		phase: "idle",
-		issues_found: 0,
-		issues_validated: 0,
-		tasks_total: 0,
-		tasks_completed: 0,
-		tasks_failed: 0,
-	};
-	saveRunState(state, workDir);
-	return state;
-}
-
-/**
- * Update legacy run phase
- * @deprecated Use updateRunPhaseInMeta() from runs.ts for the new runs system
- */
-export function updateRunPhase(phase: RunState["phase"], workDir = process.cwd()): RunState {
-	const state = loadRunState(workDir) || createRunState(workDir);
-	const updated = { ...state, phase };
-	saveRunState(updated, workDir);
-	return updated;
-}
 
 // ============================================================================
 // TASK UPDATE WRAPPER
