@@ -301,24 +301,3 @@ export async function resolveConflictsWithContext(
 	return result;
 }
 
-// ============================================================================
-// Backward Compatibility Exports
-// ============================================================================
-
-/**
- * Attempt to resolve merge conflicts using AI
- * Returns true if conflicts were successfully resolved
- *
- * @deprecated Use resolveConflictsWithEngine() instead
- */
-export async function resolveConflictsWithAI(
-	engine: AIEngine,
-	conflictedFiles: string[],
-	branchName: string,
-	workDir: string,
-	modelOverride?: string,
-): Promise<boolean> {
-	const conflicts = createMergeConflictInfo(conflictedFiles, branchName, "HEAD");
-	const result = await resolveConflictsWithEngine(engine, conflicts, workDir, modelOverride);
-	return result.success;
-}

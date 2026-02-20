@@ -235,27 +235,3 @@ export function getBrowserInstructionsIfAvailable(config: BrowserConfig, compact
 	return compact ? generateCompactBrowserInstructions() : generateBrowserInstructions();
 }
 
-// ============================================================================
-// Backward Compatibility Exports
-// ============================================================================
-
-/**
- * Check if agent-browser CLI is available
- * @deprecated Use detectAgentBrowser() instead
- */
-export const isAgentBrowserInstalled = detectAgentBrowser;
-
-/**
- * Check if browser automation should be enabled
- * @deprecated Use shouldEnableBrowser() with BrowserMode instead
- */
-export function isBrowserAvailable(browserEnabled: "auto" | "true" | "false"): boolean {
-	const mode = legacyFlagToBrowserMode(browserEnabled);
-	return shouldEnableBrowser(mode);
-}
-
-/**
- * Get browser instructions for prompt injection
- * @deprecated Use generateBrowserInstructions() instead
- */
-export const getBrowserInstructions = generateBrowserInstructions;

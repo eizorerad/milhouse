@@ -77,10 +77,6 @@ export {
 	getBrowserInstructionsIfAvailable,
 	// Utilities
 	checkBrowserAvailability,
-	// Backward compatibility
-	isAgentBrowserInstalled,
-	isBrowserAvailable,
-	getBrowserInstructions,
 } from "./browser.ts";
 
 // ============================================================================
@@ -92,9 +88,6 @@ export {
 	buildPromptWithContext,
 	// Parallel execution prompts
 	buildParallelExecutionPrompt,
-	// Backward compatibility
-	buildPrompt,
-	buildParallelPrompt,
 } from "./prompt.ts";
 
 export type { ParallelPromptOptions } from "./prompt.ts";
@@ -120,15 +113,10 @@ export {
 	hasPendingFollowUps,
 	getTaskRetryCount,
 	shouldRetryTask,
-	// Backward compatibility
-	withRetry,
-	withRetryAndFollowUp,
 } from "./retry.ts";
 
 export type {
 	FollowUpTaskConfig,
-	RetryWithFollowUpOptions,
-	RetryWithFollowUpResult,
 } from "./retry.ts";
 
 // ============================================================================
@@ -144,6 +132,4 @@ export {
 	// Resolution
 	resolveConflictsWithEngine,
 	resolveConflictsWithContext,
-	// Backward compatibility
-	resolveConflictsWithAI,
 } from "./conflict-resolution.ts";
