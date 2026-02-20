@@ -327,6 +327,7 @@ async function executeItem<TItem, TResult>(
 		runId: ctx.runId,
 		agentRole: ROLE_TO_ENGINE[phaseConfig.role as AgentRole],
 		pipelinePhase: phaseConfig.name as PipelinePhase,
+		metadata: phaseConfig.engineMetadata,
 	};
 
 	try {

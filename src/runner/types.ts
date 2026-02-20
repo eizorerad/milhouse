@@ -160,6 +160,9 @@ export interface PhaseConfig<TItem = unknown, TResult = unknown> {
 	/** JSON schema for --json-schema (forces structured output) */
 	jsonSchema?: Record<string, unknown>;
 
+	/** Extra metadata forwarded to the engine (e.g. { maxTokens: 32000 }) */
+	engineMetadata?: Record<string, unknown>;
+
 	/** How to run: one agent for all items, or one agent per item */
 	mode: PhaseMode;
 

@@ -174,6 +174,12 @@ export class ClaudePlugin implements IEnginePlugin {
 			args.push("--max-budget-usd", String(request.metadata.maxBudgetUsd));
 		}
 
+		// Max output tokens
+		// --max-tokens: Maximum number of tokens in the response
+		if (request.metadata?.maxTokens && typeof request.metadata.maxTokens === "number") {
+			args.push("--max-tokens", String(request.metadata.maxTokens));
+		}
+
 		// Pass the prompt via -p flag for short prompts.
 		// For long prompts, pipe the content via stdin as context to avoid OS
 		// command-line length limits (ENAMETOOLONG on Windows).

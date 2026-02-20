@@ -61,7 +61,7 @@ ${tasks
 - **Files**: ${t.files.length > 0 ? t.files.join(", ") : "None specified"}
 - **Dependencies**: ${t.depends_on.length > 0 ? t.depends_on.join(", ") : "None"}
 - **Parallel Group**: ${t.parallel_group}
-- **Description**: ${t.description || "No description"}`,
+- **Description**: ${truncate(t.description || "No description", 200)}`,
 	)
 	.join("\n\n")}`);
 
@@ -117,4 +117,9 @@ Respond with JSON in this exact format:
 - Consider the full blast radius when recommending changes`);
 
 	return parts.join("\n\n");
+}
+
+function truncate(text: string, maxLen: number): string {
+	if (text.length <= maxLen) return text;
+	return `${text.slice(0, maxLen)}…`;
 }

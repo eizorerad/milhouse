@@ -298,6 +298,8 @@ export class PluginAdapter implements AIEngine {
 			runId: options?.runId,
 			agentRole: options?.agentRole,
 			pipelinePhase: options?.pipelinePhase,
+			// Forward engine metadata (maxTokens, maxTurns, etc.)
+			metadata: options?.metadata,
 		};
 
 		// Execute using the plugin system
@@ -358,6 +360,8 @@ export class PluginAdapter implements AIEngine {
 			runId: options?.runId,
 			agentRole: options?.agentRole,
 			pipelinePhase: options?.pipelinePhase,
+			// Forward engine metadata (maxTokens, maxTurns, etc.)
+			metadata: options?.metadata,
 		};
 
 		// Create step callback that translates ExecutionStep to DetailedStep

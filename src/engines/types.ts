@@ -57,6 +57,11 @@ export interface EngineOptions {
 	 * Used for phase-specific behavior and logging.
 	 */
 	pipelinePhase?: PipelinePhase;
+
+	/**
+	 * Extra metadata forwarded to the engine plugin (e.g. maxTokens, maxTurns).
+	 */
+	metadata?: Record<string, unknown>;
 }
 
 /**
