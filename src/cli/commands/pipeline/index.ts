@@ -19,15 +19,15 @@
 export * from "./types.ts";
 
 // ============================================================================
-// NEW: Thin wrappers that use PhaseRunner (preferred for new code)
+// Thin wrappers that use PhaseRunner
 // ============================================================================
 export { runScanPipeline } from "./scan.ts";
 export { runValidatePipeline } from "./validate.ts";
 export { runPlanPipeline } from "./plan.ts";
 export { runConsolidatePipeline } from "./consolidate.ts";
+export { runExecPipeline } from "./exec.ts";
 export { runVerifyPipeline } from "./verify.ts";
 
-// ============================================================================
-// Exec command (exec stays as-is, not runner-based yet)
-// ============================================================================
-export { runExec, buildExecutorPrompt, getReadyTasksForRun, type ExecResult } from "../exec.ts";
+// Re-export exec utilities for backward compatibility
+export { buildExecutorPrompt, getReadyTasksForRun } from "./exec.ts";
+export type { ExecResult } from "../exec.ts";

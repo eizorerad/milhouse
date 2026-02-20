@@ -24,7 +24,7 @@ export function composeMiddleware(middlewares: MiddlewareFn[]): MiddlewareFn {
 		let index = -1;
 
 		const dispatch = async (i: number): Promise<ExecutionResult> => {
-			// Prevent calling next() multiple times
+			// Prevent calling next() multiple times concurrently
 			if (i <= index) {
 				throw new Error("next() called multiple times in middleware");
 			}
@@ -33,11 +33,23 @@ export function composeMiddleware(middlewares: MiddlewareFn[]): MiddlewareFn {
 			// Get current middleware or fall through to final handler
 			const middleware = middlewares[i];
 			if (!middleware) {
-				return finalHandler();
+				try {
+					return await finalHandler();
+				} catch (error) {
+					// Reset index so upstream middleware (e.g. retry) can re-dispatch
+					index = i - 1;
+					throw error;
+				}
 			}
 
 			// Execute middleware with next function pointing to next middleware
-			return middleware(request, () => dispatch(i + 1));
+			try {
+				return await middleware(request, () => dispatch(i + 1));
+			} catch (error) {
+				// Reset index so upstream middleware (e.g. retry) can re-dispatch
+				index = i - 1;
+				throw error;
+			}
 		};
 
 		return dispatch(0);

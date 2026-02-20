@@ -4,11 +4,10 @@ import { z } from "zod";
  * Evidence reference - proof for claims
  */
 export const EvidenceSchema = z.object({
-	type: z.enum(["file", "probe", "log", "command"]),
+	type: z.enum(["file", "log", "command"]),
 	file: z.string().optional(),
 	line_start: z.number().optional(),
 	line_end: z.number().optional(),
-	probe_id: z.string().optional(),
 	command: z.string().optional(),
 	output: z.string().optional(),
 	timestamp: z.string(),
@@ -260,12 +259,6 @@ export const AgentRoleSchema = z.enum([
 	"EX",
 	"TV",
 	"RL",
-	"ETI",
-	"DLA",
-	"CA",
-	"SI",
-	"DVA",
-	"RR",
 ]);
 
 export type AgentRole = z.infer<typeof AgentRoleSchema>;
@@ -282,93 +275,7 @@ export const AGENT_ROLES: Record<AgentRole, string> = {
 	EX: "Executor - Task execution with minimal changes",
 	TV: "Truth Verifier Gate - Evidence validation blocker",
 	RL: "Repo Librarian - Fast context collection",
-	ETI: "Environment Topology Inspector - compose/k8s/.env",
-	DLA: "Database Layer Auditor - postgres schema/migrations",
-	CA: "Cache Auditor - redis TTL/keyspace/prefix",
-	SI: "Storage Inspector - S3/MinIO/FS/volume",
-	DVA: "Dependency Version Auditor - lockfile vs installed",
-	RR: "Repro Runner - logs and reproduction",
 };
-
-/**
- * Probe type identifiers - matches inspector agent roles
- */
-export const ProbeTypeSchema = z.enum([
-	"compose", // ETI - Environment Topology Inspector
-	"postgres", // DLA - Database Layer Auditor
-	"redis", // CA - Cache Auditor
-	"storage", // SI - Storage Inspector
-	"deps", // DVA - Dependency Version Auditor
-	"repro", // RR - Repro Runner
-	"validation", // Used during issue validation
-]);
-
-export type ProbeType = z.infer<typeof ProbeTypeSchema>;
-
-/**
- * Probe severity for issues found
- */
-export const ProbeSeveritySchema = z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]);
-
-export type ProbeSeverity = z.infer<typeof ProbeSeveritySchema>;
-
-/**
- * Probe finding - an issue or observation discovered by a probe
- */
-export const ProbeFindingSchema = z.object({
-	/** Unique finding identifier */
-	id: z.string(),
-	/** Brief title of the finding */
-	title: z.string(),
-	/** Detailed description */
-	description: z.string(),
-	/** Severity level */
-	severity: ProbeSeveritySchema,
-	/** File location if applicable */
-	file: z.string().optional(),
-	/** Line number in file if applicable */
-	line: z.number().optional(),
-	/** End line number if applicable */
-	line_end: z.number().optional(),
-	/** Suggested fix or action */
-	suggestion: z.string().optional(),
-	/** Related evidence */
-	evidence: z.array(z.string()).default([]),
-	/** Additional metadata */
-	metadata: z.record(z.string(), z.unknown()).default({}),
-});
-
-export type ProbeFinding = z.infer<typeof ProbeFindingSchema>;
-
-/**
- * Probe result - output from a probe execution
- */
-export const ProbeResultSchema = z.object({
-	/** Unique probe result identifier */
-	probe_id: z.string(),
-	/** Type of probe */
-	probe_type: ProbeTypeSchema,
-	/** Whether the probe executed successfully */
-	success: z.boolean(),
-	/** Human-readable output summary */
-	output: z.string().optional(),
-	/** Error message if probe failed */
-	error: z.string().optional(),
-	/** ISO timestamp of probe execution */
-	timestamp: z.string(),
-	/** Whether the probe was read-only (no side effects) */
-	read_only: z.boolean().default(true),
-	/** Execution duration in milliseconds */
-	duration_ms: z.number().optional(),
-	/** Findings discovered by the probe */
-	findings: z.array(ProbeFindingSchema).default([]),
-	/** Raw command output if applicable */
-	raw_output: z.string().optional(),
-	/** Exit code if a command was executed */
-	exit_code: z.number().optional(),
-});
-
-export type ProbeResult = z.infer<typeof ProbeResultSchema>;
 
 /**
  * Gate check result

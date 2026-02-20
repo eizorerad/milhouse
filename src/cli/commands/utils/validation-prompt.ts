@@ -89,7 +89,7 @@ ${issue.blast_radius ? `| **Blast Radius** | ${issue.blast_radius} |` : ""}
 ${issue.strategy ? `| **Suggested Strategy** | ${issue.strategy} |` : ""}
 
 ### Previous Evidence (from scan)
-${issue.evidence.length > 0 ? issue.evidence.map((e) => `- ${e.type}: ${e.file || e.command || e.probe_id || "N/A"}`).join("\n") : "No previous evidence collected"}`);
+${issue.evidence.length > 0 ? issue.evidence.map((e) => `- ${e.type}: ${e.file || e.command || "N/A"}`).join("\n") : "No previous evidence collected"}`);
 
 	// Deep investigation instructions - type-aware
 	const investigationInstructions =

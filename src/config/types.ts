@@ -25,7 +25,6 @@ export {
 	CommandsConfigSchema as CommandsSchema,
 	BoundariesConfigSchema as BoundariesSchema,
 	AllowedCommandsConfigSchema as AllowedCommandsSchema,
-	ProbeConfigSchema,
 	CurrentConfigSchema as MilhouseConfigSchema,
 } from "../domain/config/schema.ts";
 
@@ -36,7 +35,6 @@ export type {
 	CommandsConfig,
 	BoundariesConfig,
 	AllowedCommandsConfig,
-	ProbeConfig,
 	ExecutionConfig,
 	GatesConfig,
 } from "../domain/config/types.ts";

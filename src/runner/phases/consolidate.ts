@@ -9,7 +9,7 @@ import pc from "picocolors";
 import { type ConsolidateInput, buildConsolidatePrompt } from "../../agents/prompts/consolidate.ts";
 import { CONSOLIDATE_SCHEMA } from "../../agents/schemas/consolidate.ts";
 import { loadGraphForRun, saveGraphForRun } from "../../state/graph.ts";
-import { loadIssuesForRun } from "../../state/issues.ts";
+import { filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import { writeExecutionPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
@@ -39,14 +39,25 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 		const existingGraph = loadGraphForRun(ctx.runId, ctx.workDir);
 		if (existingGraph.length > 0) return [];
 
-		const tasks = loadTasksForRun(ctx.runId, ctx.workDir).filter((t) => t.status === "pending");
-		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
+		const allIssues = loadIssuesForRun(ctx.runId, ctx.workDir);
+		const issues = filterIssues(allIssues, {
+			issueIds: ctx.config.issueIds,
+			excludeIssueIds: ctx.config.excludeIssueIds,
+			severityFilter: ctx.config.severityFilter,
+			minSeverity: ctx.config.minSeverity,
+		});
+		const allowedIssueIds = new Set(issues.map((i) => i.id));
+
+		const allTasks = loadTasksForRun(ctx.runId, ctx.workDir);
+		const tasks = allTasks
+			.filter((t) => t.status === "pending")
+			.filter((t) => !t.issue_id || allowedIssueIds.has(t.issue_id));
 
 		if (tasks.length === 0) return [];
 
 		// Store tasks/issues in context for saveResults
-		ctx.store.allTasks = loadTasksForRun(ctx.runId, ctx.workDir);
-		ctx.store.allIssues = issues;
+		ctx.store.allTasks = allTasks;
+		ctx.store.allIssues = allIssues;
 
 		return [{ tasks, issues }];
 	},

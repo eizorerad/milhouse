@@ -21,8 +21,6 @@ import type {
 	MilhouseConfig,
 	PipelineConfig,
 	PipelinePhase,
-	ProbeConfig,
-	ProbePresetsConfig,
 	ProjectInfo,
 	RetryPolicy,
 	RunsConfig,
@@ -72,15 +70,6 @@ export const AllowedCommandsConfigSchema = z.object({
 }) satisfies z.ZodType<AllowedCommandsConfig>;
 
 /**
- * Probe config schema
- */
-export const ProbeConfigSchema = z.object({
-	enabled: z.boolean().default(true),
-	read_only: z.boolean().default(true),
-	timeout_ms: z.number().default(30000),
-}) satisfies z.ZodType<ProbeConfig>;
-
-/**
  * Execution mode schema
  */
 export const ExecutionModeSchema = z.enum([
@@ -108,7 +97,6 @@ export const GatesConfigSchema = z.object({
 	evidence_required: z.boolean().default(true),
 	diff_hygiene: z.boolean().default(true),
 	placeholder_check: z.boolean().default(true),
-	env_consistency: z.boolean().default(true),
 	dod_verification: z.boolean().default(true),
 }) satisfies z.ZodType<GatesConfig>;
 
@@ -184,43 +172,6 @@ export const RunsConfigSchema = z.object({
 }) satisfies z.ZodType<RunsConfig>;
 
 /**
- * Probe preset schema
- */
-export const ProbePresetSchema = z.object({
-	name: z.string(),
-	description: z.string().default(""),
-	enabledProbes: z.array(z.string()).default([]),
-	overrides: z.record(z.string(), ProbeConfigSchema.partial()).default({}),
-});
-
-/**
- * Probe presets config schema
- */
-export const ProbePresetsConfigSchema = z.object({
-	activePreset: z.string().default("standard"),
-	presets: z.record(z.string(), ProbePresetSchema).default({
-		standard: {
-			name: "standard",
-			description: "Standard probe configuration for most projects",
-			enabledProbes: ["compose", "postgres", "redis", "storage", "deps"],
-			overrides: {},
-		},
-		minimal: {
-			name: "minimal",
-			description: "Minimal probes for quick scans",
-			enabledProbes: ["deps"],
-			overrides: {},
-		},
-		comprehensive: {
-			name: "comprehensive",
-			description: "All probes enabled for thorough analysis",
-			enabledProbes: ["compose", "postgres", "redis", "storage", "deps", "repro"],
-			overrides: {},
-		},
-	}),
-}) satisfies z.ZodType<ProbePresetsConfig>;
-
-/**
  * Gate profile schema
  */
 export const GateProfileSchema = z.object({
@@ -242,7 +193,7 @@ export const GateProfilesConfigSchema = z.object({
 				evidence_required: true,
 				diff_hygiene: true,
 				placeholder_check: true,
-				env_consistency: true,
+
 				dod_verification: true,
 			},
 		},
@@ -253,7 +204,7 @@ export const GateProfilesConfigSchema = z.object({
 				evidence_required: true,
 				diff_hygiene: true,
 				placeholder_check: true,
-				env_consistency: true,
+
 				dod_verification: true,
 			},
 		},
@@ -264,7 +215,7 @@ export const GateProfilesConfigSchema = z.object({
 				evidence_required: false,
 				diff_hygiene: true,
 				placeholder_check: false,
-				env_consistency: false,
+
 				dod_verification: false,
 			},
 		},
@@ -293,7 +244,6 @@ export const ConfigSchemaV1 = z.object({
 	rules: z.array(z.string()).default([]),
 	boundaries: BoundariesConfigSchema.default({ never_touch: [] }),
 	allowed_commands: AllowedCommandsConfigSchema.default({ probes: [], execution: [] }),
-	probes: z.record(z.string(), ProbeConfigSchema).default({}),
 	execution: ExecutionConfigSchema.default({
 		mode: "branch",
 		parallel: 4,
@@ -305,12 +255,10 @@ export const ConfigSchemaV1 = z.object({
 		evidence_required: true,
 		diff_hygiene: true,
 		placeholder_check: true,
-		env_consistency: true,
 		dod_verification: true,
 	}),
 	pipeline: PipelineConfigSchema.optional(),
 	runs: RunsConfigSchema.optional(),
-	probePresets: ProbePresetsConfigSchema.optional(),
 	gateProfiles: GateProfilesConfigSchema.optional(),
 }) satisfies z.ZodType<MilhouseConfig>;
 

@@ -54,7 +54,6 @@ You are validating a specific work item (type: ${itemType}) identified by the Le
 				if (ev.type === "file" && ev.file)
 					return `- File: ${ev.file}${ev.line_start ? `:${ev.line_start}` : ""}`;
 				if (ev.type === "command" && ev.command) return `- Command: ${ev.command}`;
-				if (ev.type === "probe" && ev.probe_id) return `- Probe: ${ev.probe_id}`;
 				return `- ${ev.type}`;
 			})
 			.join("\n");
@@ -67,7 +66,12 @@ You are validating a specific work item (type: ${itemType}) identified by the Le
 Investigate this work item thoroughly and determine its validity.
 
 1. Search for evidence in the codebase (file:line references)
-2. Run any necessary probes or checks to verify claims
+2. If the issue relates to infrastructure, check these files directly:
+   - Docker: docker-compose.yml, compose.yaml — check for missing healthchecks, hardcoded secrets, circular dependencies, undefined networks
+   - Database: prisma/schema.prisma, drizzle/schema.ts, migrations/ — check for missing primary keys, missing indexes on foreign keys, missing timestamps
+   - Cache: .env (REDIS_* vars), redis.conf — check for missing eviction policy, missing maxmemory
+   - Dependencies: package.json, package-lock.json — check for known vulnerable or outdated versions
+   - Storage: .env (S3/MINIO/GCS vars) — check for public bucket access, missing encryption
 3. Determine the status:
    - **CONFIRMED**: Work item is valid and actionable with evidence
    - **FALSE**: Work item is not valid or not needed
@@ -89,7 +93,7 @@ Respond with JSON in this exact format:
   "corrected_description": "Only if PARTIAL or MISDIAGNOSED - describe the actual issue",
   "evidence": [
     {
-      "type": "file|probe|log|command",
+      "type": "file|log|command",
       "file": "path/to/file.ts",
       "line_start": 42,
       "line_end": 50,

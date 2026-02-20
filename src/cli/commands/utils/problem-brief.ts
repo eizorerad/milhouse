@@ -160,8 +160,6 @@ ${issue.validated_by ? `| **Validated By** | ${issue.validated_by} |` : ""}
 				if (ev.output) {
 					section += `  - Output: ${ev.output.slice(0, 200)}${ev.output.length > 200 ? "..." : ""}\n`;
 				}
-			} else if (ev.type === "probe" && ev.probe_id) {
-				section += `- **Probe**: ${ev.probe_id}\n`;
 			}
 		}
 		section += "\n";

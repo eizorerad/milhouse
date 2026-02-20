@@ -94,7 +94,6 @@ function createTestConfig(overrides: Partial<MilhouseConfig> = {}): MilhouseConf
 			probes: [],
 			execution: [],
 		},
-		probes: {},
 		execution: {
 			mode: "branch",
 			parallel: 4,
@@ -106,7 +105,6 @@ function createTestConfig(overrides: Partial<MilhouseConfig> = {}): MilhouseConf
 			evidence_required: true,
 			diff_hygiene: true,
 			placeholder_check: true,
-			env_consistency: true,
 			dod_verification: true,
 		},
 		...overrides,

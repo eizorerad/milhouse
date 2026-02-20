@@ -1,5 +1,6 @@
 import type { AIEngine } from "../engines/types.ts";
-import type { AgentRole, RunPhase } from "../state/types.ts";
+import type { RunCost } from "./cost.ts";
+import type { AgentRole, RunPhase, Severity } from "../state/types.ts";
 
 /** Per-phase model override */
 export interface PhaseModelConfig {
@@ -70,6 +71,9 @@ export interface ResolvedConfig {
 	/** Issue filtering */
 	issueIds?: string[];
 	excludeIssueIds?: string[];
+	/** Severity filtering */
+	severityFilter?: Severity[];
+	minSeverity?: Severity;
 	/** Validation retry settings */
 	maxValidationRetries: number;
 	retryUnvalidated: boolean;
@@ -79,6 +83,10 @@ export interface ResolvedConfig {
 	autoInstall: boolean;
 	/** Unsafe DoD checks */
 	unsafeDoDChecks: boolean;
+	/** Use issue-based parallel execution (default true) */
+	execByIssue: boolean;
+	/** Execute a single specific task by ID */
+	taskId?: string;
 }
 
 /**
@@ -175,6 +183,12 @@ export interface PhaseConfig<TItem = unknown, TResult = unknown> {
 
 	/** Format summary for terminal output */
 	formatSummary?(results: PhaseItemResult<TResult>[], ctx: PhaseContext): void;
+
+	// --- Custom execution (exec phase) ---
+	/** Replace the standard loadItems/executePool flow with custom logic.
+	 *  When provided, loadItems/buildPrompt/parseResponse are NOT called.
+	 *  Must return results in standard PhaseItemResult format for cost tracking. */
+	customExecute?(ctx: PhaseContext, runCost: RunCost): Promise<PhaseItemResult<TResult>[]>;
 
 	// --- Lifecycle hooks ---
 	beforeRun?(ctx: PhaseContext): Promise<void> | void;

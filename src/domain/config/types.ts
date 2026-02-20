@@ -64,20 +64,6 @@ export interface AllowedCommandsConfig {
 }
 
 /**
- * Probe configuration
- *
- * Settings for individual probe behavior.
- */
-export interface ProbeConfig {
-	/** Whether the probe is enabled */
-	enabled: boolean;
-	/** Whether the probe operates in read-only mode */
-	read_only: boolean;
-	/** Timeout in milliseconds */
-	timeout_ms: number;
-}
-
-/**
  * Execution mode
  *
  * Determines how tasks are executed in relation to git.
@@ -114,8 +100,6 @@ export interface GatesConfig {
 	diff_hygiene: boolean;
 	/** Check for placeholder text */
 	placeholder_check: boolean;
-	/** Verify environment consistency */
-	env_consistency: boolean;
 	/** Verify definition of done */
 	dod_verification: boolean;
 }
@@ -175,34 +159,6 @@ export interface RunsConfig {
 }
 
 /**
- * Probe preset configuration
- *
- * Predefined combinations of probe settings.
- */
-export interface ProbePreset {
-	/** Preset name */
-	name: string;
-	/** Preset description */
-	description: string;
-	/** Probes enabled in this preset */
-	enabledProbes: string[];
-	/** Probe-specific overrides */
-	overrides: Record<string, Partial<ProbeConfig>>;
-}
-
-/**
- * Probe presets configuration
- *
- * Collection of probe presets with active selection.
- */
-export interface ProbePresetsConfig {
-	/** Currently active preset */
-	activePreset: string;
-	/** Available presets */
-	presets: Record<string, ProbePreset>;
-}
-
-/**
  * Gate profile configuration
  *
  * Predefined gate strictness levels.
@@ -247,8 +203,6 @@ export interface MilhouseConfig {
 	boundaries: BoundariesConfig;
 	/** Allowed shell commands */
 	allowed_commands: AllowedCommandsConfig;
-	/** Probe configurations */
-	probes: Record<string, ProbeConfig>;
 	/** Execution settings */
 	execution: ExecutionConfig;
 	/** Quality gates */
@@ -257,8 +211,6 @@ export interface MilhouseConfig {
 	pipeline?: PipelineConfig;
 	/** Run isolation settings (Milhouse-specific) */
 	runs?: RunsConfig;
-	/** Probe presets (Milhouse-specific) */
-	probePresets?: ProbePresetsConfig;
 	/** Gate profiles (Milhouse-specific) */
 	gateProfiles?: GateProfilesConfig;
 }

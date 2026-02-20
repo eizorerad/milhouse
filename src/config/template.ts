@@ -194,14 +194,12 @@ const config: Config = {
   //   evidence       — require evidence for all claims
   //   diffHygiene    — check for debug code, TODO markers, etc.
   //   placeholder    — detect placeholder/stub implementations
-  //   envConsistency — verify environment didn't change unexpectedly
   //   dod            — Definition of Done (acceptance criteria) check
   //
   gates: {
     evidence: true,
     diffHygiene: true,
     placeholder: true,
-    envConsistency: true,
     dod: true,
   },
 

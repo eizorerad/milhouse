@@ -511,20 +511,6 @@ export function getPlansPathForCurrentRun(workDir = process.cwd()): string {
 	return join(getMilhouseDir(workDir), "plans");
 }
 
-/**
- * Get probes directory for current run
- */
-export function getProbesPathForCurrentRun(probeType: string, workDir = process.cwd()): string {
-	const currentRunId = getCurrentRunId(workDir);
-
-	if (currentRunId) {
-		return join(getRunDir(currentRunId, workDir), "probes", probeType);
-	}
-
-	// Legacy fallback
-	return join(getMilhouseDir(workDir), "probes", probeType);
-}
-
 // ============================================================================
 // CLEANUP OLD RUNS
 // ============================================================================

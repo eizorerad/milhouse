@@ -246,21 +246,6 @@ describe("problem-brief", () => {
 			expect(section).toContain("Output: Test output text");
 		});
 
-		it("should include probe evidence", () => {
-			const issue = createMockIssue({
-				evidence: [
-					{
-						type: "probe",
-						probe_id: "probe-123",
-						timestamp: "2024-01-01T00:00:00Z",
-					},
-				],
-			});
-			const section = formatIssueSection(issue);
-
-			expect(section).toContain("**Probe**: probe-123");
-		});
-
 		it("should truncate long command output", () => {
 			const longOutput = "a".repeat(300);
 			const issue = createMockIssue({

@@ -91,7 +91,7 @@ Respond with JSON in this exact format:
   "overall_pass": true|false,
   "gates": [
     {
-      "gate": "evidence|diffHygiene|placeholder|envConsistency|dod",
+      "gate": "evidence|diffHygiene|placeholder|dod",
       "passed": true|false,
       "message": "Description of findings",
       "evidence": []

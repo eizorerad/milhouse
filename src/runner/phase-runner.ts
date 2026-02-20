@@ -177,41 +177,51 @@ export async function runPhase<TItem, TResult>(
 			await phaseConfig.beforeRun(ctx);
 		}
 
-		// 8. Load items
-		const items = await phaseConfig.loadItems(ctx);
-		if (items.length === 0 && phaseConfig.mode === "per-item") {
-			logWarn(`No items to process for phase "${phaseConfig.name}"`);
-			return makeResult(phaseConfig.name, runId, true, [], 0, 0, 0, startTime, { runId });
-		}
+		let allResults: PhaseItemResult<TResult>[];
 
-		// 8b. Display phase header
-		displayPhaseHeader(phaseConfig.name, config.engine, runId);
+		if (phaseConfig.customExecute) {
+			// Custom execution path (used by exec phase)
+			displayPhaseHeader(phaseConfig.name, config.engine, runId);
+			allResults = await phaseConfig.customExecute(ctx, runCost);
+		} else {
+			// Standard execution path
 
-		// 9. Execute with pool
-		let allResults = await executePool(phaseConfig, items, ctx, model, config, runCost);
+			// 8. Load items
+			const items = await phaseConfig.loadItems(ctx);
+			if (items.length === 0 && phaseConfig.mode === "per-item") {
+				logWarn(`No items to process for phase "${phaseConfig.name}"`);
+				return makeResult(phaseConfig.name, runId, true, [], 0, 0, 0, startTime, { runId });
+			}
 
-		// 10. Retry loop (if configured)
-		if (phaseConfig.isRetryable && phaseConfig.retryFilter) {
-			const maxRounds = phaseConfig.maxRetryRounds ?? 2;
-			for (let round = 0; round < maxRounds; round++) {
-				const retryItems = phaseConfig.retryFilter(items, allResults);
-				if (retryItems.length === 0) break;
+			// 8b. Display phase header
+			displayPhaseHeader(phaseConfig.name, config.engine, runId);
 
-				logInfo(`Retry round ${round + 1}: ${retryItems.length} items to retry`);
+			// 9. Execute with pool
+			allResults = await executePool(phaseConfig, items, ctx, model, config, runCost);
 
-				const retryResults = await executePool(
-					phaseConfig,
-					retryItems,
-					ctx,
-					model,
-					config,
-					runCost,
-				);
+			// 10. Retry loop (if configured)
+			if (phaseConfig.isRetryable && phaseConfig.retryFilter) {
+				const maxRounds = phaseConfig.maxRetryRounds ?? 2;
+				for (let round = 0; round < maxRounds; round++) {
+					const retryItems = phaseConfig.retryFilter(items, allResults);
+					if (retryItems.length === 0) break;
 
-				// Merge retry results — replace old results for retried items
-				const retryIds = new Set(retryItems.map((i) => getFullItemId(i)));
-				allResults = allResults.filter((r) => !retryIds.has(getFullItemId(r.item)));
-				allResults.push(...retryResults);
+					logInfo(`Retry round ${round + 1}: ${retryItems.length} items to retry`);
+
+					const retryResults = await executePool(
+						phaseConfig,
+						retryItems,
+						ctx,
+						model,
+						config,
+						runCost,
+					);
+
+					// Merge retry results — replace old results for retried items
+					const retryIds = new Set(retryItems.map((i) => getFullItemId(i)));
+					allResults = allResults.filter((r) => !retryIds.has(getFullItemId(r.item)));
+					allResults.push(...retryResults);
+				}
 			}
 		}
 
@@ -288,6 +298,7 @@ function getPhaseLabel(phaseConfig: PhaseConfig<unknown, unknown>): string {
 		validate: "Validating issues",
 		plan: "Planning tasks",
 		consolidate: "Consolidating plans",
+		exec: "Executing tasks",
 		verify: "Verifying results",
 	};
 	return labels[phaseConfig.name] ?? `${agentName} working`;

@@ -24,8 +24,6 @@ describe("Migration Tests", () => {
 	const milhouseDir = join(testDir, ".milhouse");
 	const legacyStateDir = join(milhouseDir, "state");
 	const legacyPlansDir = join(milhouseDir, "plans");
-	const legacyProbesDir = join(milhouseDir, "probes");
-
 	beforeEach(() => {
 		if (existsSync(testDir)) {
 			rmSync(testDir, { recursive: true, force: true });
@@ -178,25 +176,6 @@ describe("Migration Tests", () => {
 			// Verify content
 			const briefContent = readFileSync(join(runPlansDir, "problem_brief.md"), "utf-8");
 			expect(briefContent).toContain("# Problem Brief");
-		});
-
-		test("should migrate legacy probes to new run", () => {
-			// Create legacy state and probes
-			mkdirSync(legacyStateDir, { recursive: true });
-			mkdirSync(join(legacyProbesDir, "validation"), { recursive: true });
-
-			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
-			writeFileSync(
-				join(legacyProbesDir, "validation", "probe-1.json"),
-				JSON.stringify({ probe_id: "probe-1", success: true }),
-			);
-
-			// Migrate
-			const run = migrateLegacyToRun({ workDir: testDir });
-
-			// Verify probes were copied
-			const runProbesDir = join(getRunDir(run?.id ?? "", testDir), "probes", "validation");
-			expect(existsSync(join(runProbesDir, "probe-1.json"))).toBe(true);
 		});
 
 		test("should set migrated run as latest run", () => {

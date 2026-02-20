@@ -9,7 +9,7 @@
 import pc from "picocolors";
 import { buildPlanPrompt } from "../../agents/prompts/plan.ts";
 import { PLAN_SCHEMA } from "../../agents/schemas/plan.ts";
-import { loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
+import { filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import { writeIssueWbsJsonForRun, writeIssueWbsPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import { createTaskForRun, loadTasksForRun } from "../../state/tasks.ts";
@@ -56,11 +56,14 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 		const existingTasks = loadTasksForRun(ctx.runId, ctx.workDir);
 		const issuesWithTasks = new Set(existingTasks.map((t) => t.issue_id).filter(Boolean));
 
-		return issues.filter(
-			(i) =>
-				(i.status === "CONFIRMED" || i.status === "PARTIAL") &&
-				!issuesWithTasks.has(i.id),
-		);
+		const filtered = filterIssues(issues, {
+			issueIds: ctx.config.issueIds,
+			excludeIssueIds: ctx.config.excludeIssueIds,
+			severityFilter: ctx.config.severityFilter,
+			minSeverity: ctx.config.minSeverity,
+			statusFilter: ["CONFIRMED", "PARTIAL"],
+		});
+		return filtered.filter((i) => !issuesWithTasks.has(i.id));
 	},
 
 	buildPrompt(issue, ctx) {

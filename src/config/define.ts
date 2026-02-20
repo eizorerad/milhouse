@@ -73,12 +73,7 @@ export interface Config {
 		evidence?: boolean;
 		diffHygiene?: boolean;
 		placeholder?: boolean;
-		envConsistency?: boolean;
 		dod?: boolean;
-	};
-
-	probes?: {
-		preset?: "standard" | "minimal" | "comprehensive";
 	};
 
 	/** Extra instructions appended to agent prompts per phase */
@@ -139,17 +134,14 @@ export const DEFAULTS = {
 		evidence: true,
 		diffHygiene: true,
 		placeholder: true,
-		envConsistency: true,
 		dod: true,
 	},
-
-	probes: { preset: "standard" },
 
 	report: { enabled: true, format: "json", autoGenerate: true },
 
 	skipTests: false,
 	skipLint: false,
-	skipProbes: false,
+	skipProbes: false, // deprecated, no-op
 
 	tmux: { enabled: false, autoAttach: false },
 };
@@ -169,8 +161,7 @@ export interface ResolvedFullConfig {
 	rules: string[];
 	boundaries: { neverTouch: string[] };
 	execution: { mode: string; autoCommit: boolean; createPr: boolean; draftPr: boolean; skipMerge: boolean };
-	gates: { evidence: boolean; diffHygiene: boolean; placeholder: boolean; envConsistency: boolean; dod: boolean };
-	probes: { preset: string };
+	gates: { evidence: boolean; diffHygiene: boolean; placeholder: boolean; dod: boolean };
 	report: { enabled: boolean; format: string; autoGenerate: boolean };
 	skipTests: boolean;
 	skipLint: boolean;
@@ -211,12 +202,11 @@ export function resolveConfig(user: Config): ResolvedFullConfig {
 		boundaries: { ...DEFAULTS.boundaries, ...strip(user.boundaries) },
 		execution: { ...DEFAULTS.execution, ...strip(user.execution) },
 		gates: { ...DEFAULTS.gates, ...strip(user.gates) },
-		probes: { ...DEFAULTS.probes, ...strip(user.probes) },
 		report: { ...DEFAULTS.report, ...strip(user.report) },
 
 		skipTests: user.skipTests ?? DEFAULTS.skipTests,
 		skipLint: user.skipLint ?? DEFAULTS.skipLint,
-		skipProbes: user.skipProbes ?? DEFAULTS.skipProbes,
+		skipProbes: DEFAULTS.skipProbes,
 
 		tmux: { ...DEFAULTS.tmux, ...strip(user.tmux) },
 		prompts: user.prompts,

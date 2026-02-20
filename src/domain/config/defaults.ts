@@ -19,7 +19,6 @@ import type {
 	MilhouseConfig,
 	PipelineConfig,
 	PipelinePhase,
-	ProbePresetsConfig,
 	ProjectInfo,
 	RetryPolicy,
 	RunsConfig,
@@ -78,7 +77,7 @@ export const DEFAULT_GATES_CONFIG: GatesConfig = {
 	evidence_required: true,
 	diff_hygiene: true,
 	placeholder_check: true,
-	env_consistency: true,
+
 	dod_verification: true,
 };
 
@@ -132,33 +131,6 @@ export const DEFAULT_RUNS_CONFIG: RunsConfig = {
 };
 
 /**
- * Default probe presets config
- */
-export const DEFAULT_PROBE_PRESETS_CONFIG: ProbePresetsConfig = {
-	activePreset: "standard",
-	presets: {
-		standard: {
-			name: "standard",
-			description: "Standard probe configuration for most projects",
-			enabledProbes: ["compose", "postgres", "redis", "storage", "deps"],
-			overrides: {},
-		},
-		minimal: {
-			name: "minimal",
-			description: "Minimal probes for quick scans",
-			enabledProbes: ["deps"],
-			overrides: {},
-		},
-		comprehensive: {
-			name: "comprehensive",
-			description: "All probes enabled for thorough analysis",
-			enabledProbes: ["compose", "postgres", "redis", "storage", "deps", "repro"],
-			overrides: {},
-		},
-	},
-};
-
-/**
  * Default gate profiles config
  */
 export const DEFAULT_GATE_PROFILES_CONFIG: GateProfilesConfig = {
@@ -171,7 +143,7 @@ export const DEFAULT_GATE_PROFILES_CONFIG: GateProfilesConfig = {
 				evidence_required: true,
 				diff_hygiene: true,
 				placeholder_check: true,
-				env_consistency: true,
+			
 				dod_verification: true,
 			},
 		},
@@ -182,7 +154,7 @@ export const DEFAULT_GATE_PROFILES_CONFIG: GateProfilesConfig = {
 				evidence_required: true,
 				diff_hygiene: true,
 				placeholder_check: true,
-				env_consistency: true,
+			
 				dod_verification: true,
 			},
 		},
@@ -193,7 +165,7 @@ export const DEFAULT_GATE_PROFILES_CONFIG: GateProfilesConfig = {
 				evidence_required: false,
 				diff_hygiene: true,
 				placeholder_check: false,
-				env_consistency: false,
+			
 				dod_verification: false,
 			},
 		},
@@ -212,12 +184,10 @@ export const DEFAULT_CONFIG_V1: MilhouseConfig = {
 	rules: [],
 	boundaries: DEFAULT_BOUNDARIES_CONFIG,
 	allowed_commands: DEFAULT_ALLOWED_COMMANDS_CONFIG,
-	probes: {},
 	execution: DEFAULT_EXECUTION_CONFIG,
 	gates: DEFAULT_GATES_CONFIG,
 	pipeline: DEFAULT_PIPELINE_CONFIG,
 	runs: DEFAULT_RUNS_CONFIG,
-	probePresets: DEFAULT_PROBE_PRESETS_CONFIG,
 	gateProfiles: DEFAULT_GATE_PROFILES_CONFIG,
 };
 
@@ -251,12 +221,10 @@ export function mergeWithDefaults(partial: Partial<MilhouseConfig>): MilhouseCon
 		rules: partial.rules ?? defaults.rules,
 		boundaries: { ...defaults.boundaries, ...partial.boundaries },
 		allowed_commands: { ...defaults.allowed_commands, ...partial.allowed_commands },
-		probes: { ...defaults.probes, ...partial.probes },
 		execution: { ...defaults.execution, ...partial.execution },
 		gates: { ...defaults.gates, ...partial.gates },
 		pipeline: partial.pipeline ?? defaults.pipeline,
 		runs: partial.runs ?? defaults.runs,
-		probePresets: partial.probePresets ?? defaults.probePresets,
 		gateProfiles: partial.gateProfiles ?? defaults.gateProfiles,
 	};
 }

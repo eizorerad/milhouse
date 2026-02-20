@@ -206,7 +206,6 @@ export {
 	hasRuns,
 	getStatePathForCurrentRun,
 	getPlansPathForCurrentRun,
-	getProbesPathForCurrentRun,
 	cleanupOldRuns,
 	parseDuration,
 	getDateFromDuration,
@@ -218,20 +217,6 @@ export {
 	acquireRunLock,
 	isRunLocked,
 } from "./run-lock.ts";
-
-// Probes module - Probe result storage
-export {
-	saveProbeResult,
-	saveProbeResultForRun,
-	loadProbeResults,
-	loadProbeResultsForRun,
-	loadProbeResult,
-	deleteProbeResult,
-	getProbeTypes,
-	getProbeTypesForRun,
-	countProbeResults,
-	getProbeResultsBySeverity,
-} from "./probes.ts";
 
 // Migration module - Legacy state migration
 export {

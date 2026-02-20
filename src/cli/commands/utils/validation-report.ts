@@ -241,7 +241,7 @@ ${
 	report.evidence
 		.map(
 			(e) => `
-### ${e.type}: ${e.file || e.command || e.probe_id || "N/A"}
+### ${e.type}: ${e.file || e.command || "N/A"}
 ${e.line_start ? `**Lines**: ${e.line_start}-${e.line_end || e.line_start}` : ""}
 ${e.output ? `\`\`\`\n${e.output}\n\`\`\`` : ""}
 `,

@@ -20,8 +20,20 @@ import type { IEnginePlugin } from "../../core/types";
  *
  * @see https://code.claude.com/docs/en/cli-reference
  */
+/**
+ * Maximum prompt length (in characters) to pass via the -p command-line argument.
+ * Prompts exceeding this are piped through stdin as context instead, to avoid OS
+ * command-line length limits (Windows CreateProcess has a ~32K char limit; libuv
+ * reports ENAMETOOLONG).
+ *
+ * The documented pattern is: `cat content | claude -p "query"`
+ * where stdin provides context and -p provides the instruction.
+ */
+const MAX_ARG_PROMPT_LENGTH = 12_000;
+
 export class ClaudePlugin implements IEnginePlugin {
 	readonly name = "claude";
+	private _promptViaStdin = false;
 
 	readonly config: EngineConfig = {
 		name: "claude",
@@ -162,8 +174,19 @@ export class ClaudePlugin implements IEnginePlugin {
 			args.push("--max-budget-usd", String(request.metadata.maxBudgetUsd));
 		}
 
-		// Add the prompt using -p flag (print mode for non-interactive usage)
-		args.push("-p", request.prompt);
+		// Pass the prompt via -p flag for short prompts.
+		// For long prompts, pipe the content via stdin as context to avoid OS
+		// command-line length limits (ENAMETOOLONG on Windows).
+		// Pattern: `cat content | claude -p "instruction"` (see CLI reference).
+		if (request.prompt.length <= MAX_ARG_PROMPT_LENGTH) {
+			args.push("-p", request.prompt);
+			this._promptViaStdin = false;
+		} else {
+			// Prompt is too long for a CLI arg. Pipe it via stdin as context,
+			// and use -p with a short pass-through instruction.
+			args.push("-p", "Process the instructions provided via standard input exactly as described.");
+			this._promptViaStdin = true;
+		}
 
 		// Note: Working directory is handled by the executor via Bun.spawn's cwd option
 		// Claude CLI does not have a --cwd flag
@@ -192,10 +215,11 @@ export class ClaudePlugin implements IEnginePlugin {
 
 	/**
 	 * Indicates whether this plugin uses stdin for prompt input.
-	 * Claude CLI uses the -p flag for prompts, not stdin.
+	 * Returns true when buildArgs() determined the prompt was too long
+	 * for a command-line argument and switched to stdin mode.
 	 */
 	usesStdinForPrompt(): boolean {
-		return false;
+		return this._promptViaStdin;
 	}
 }
 

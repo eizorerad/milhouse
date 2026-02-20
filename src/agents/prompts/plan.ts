@@ -63,7 +63,6 @@ You are creating a Work Breakdown Structure (WBS) for a validated work item (typ
 					return line;
 				}
 				if (ev.type === "command" && ev.command) return `- **Command**: \`${ev.command}\``;
-				if (ev.type === "probe" && ev.probe_id) return `- **Probe**: ${ev.probe_id}`;
 				return `- ${ev.type}`;
 			})
 			.join("\n");

@@ -16,13 +16,6 @@ export const AgentRoleSchema = z.enum([
 	"TV", // Truth Verifier Gate
 	// Context/support agents
 	"RL", // Repo Librarian
-	// Inspector agents (probes)
-	"ETI", // Environment Topology Inspector
-	"DLA", // Database Layer Auditor
-	"CA", // Cache Auditor
-	"SI", // Storage Inspector
-	"DVA", // Dependency Version Auditor
-	"RR", // Repro Runner
 ]);
 
 export type AgentRole = z.infer<typeof AgentRoleSchema>;
@@ -35,7 +28,7 @@ export const AGENT_ROLE_DESCRIPTIONS: Record<AgentRole, string> = AGENT_ROLES;
 /**
  * Agent categories - groups of related agents
  */
-export type AgentCategory = "pipeline" | "support" | "inspector";
+export type AgentCategory = "pipeline" | "support";
 
 /**
  * Map roles to categories
@@ -49,12 +42,6 @@ export const AGENT_CATEGORIES: Record<AgentRole, AgentCategory> = {
 	EX: "pipeline",
 	TV: "pipeline",
 	RL: "support",
-	ETI: "inspector",
-	DLA: "inspector",
-	CA: "inspector",
-	SI: "inspector",
-	DVA: "inspector",
-	RR: "inspector",
 };
 
 /**
@@ -99,12 +86,6 @@ export const DEFAULT_AGENT_CONFIGS: Record<AgentRole, AgentConfig> = {
 	EX: cfg("EX", "Executor", { maxRetries: 3, retryDelayMs: 10000 }),
 	TV: cfg("TV", "Truth Verifier", { maxRetries: 1 }),
 	RL: cfg("RL", "Repo Librarian", { retryDelayMs: 2000 }),
-	ETI: cfg("ETI", "Environment Topology Inspector", { retryDelayMs: 2000 }),
-	DLA: cfg("DLA", "Database Layer Auditor"),
-	CA: cfg("CA", "Cache Auditor", { retryDelayMs: 2000 }),
-	SI: cfg("SI", "Storage Inspector", { retryDelayMs: 2000 }),
-	DVA: cfg("DVA", "Dependency Version Auditor"),
-	RR: cfg("RR", "Repro Runner", { retryDelayMs: 5000 }),
 };
 
 /**
@@ -535,9 +516,10 @@ export function isPipelineAgent(role: AgentRole): boolean {
 
 /**
  * Check if a role is an inspector agent
+ * @deprecated No inspector agents remain after probe system removal
  */
-export function isInspectorAgent(role: AgentRole): boolean {
-	return AGENT_CATEGORIES[role] === "inspector";
+export function isInspectorAgent(_role: AgentRole): boolean {
+	return false;
 }
 
 /**

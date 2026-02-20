@@ -47,6 +47,7 @@ function mapToResolvedConfig(cfg: ResolvedFullConfig): ResolvedConfig {
 		tmuxAutoAttach: cfg.tmux.autoAttach,
 		autoInstall: true,
 		unsafeDoDChecks: false,
+		execByIssue: cfg.execution.mode !== "in-place",
 	};
 }
 
@@ -91,6 +92,10 @@ function applyCLIOverrides(config: ResolvedConfig, cli: RuntimeOptions): Resolve
 	if (cli.scanFocus) result.scanFocus = cli.scanFocus;
 	if (cli.issueIds) result.issueIds = cli.issueIds;
 	if (cli.excludeIssueIds) result.excludeIssueIds = cli.excludeIssueIds;
+	if (cli.severityFilter) result.severityFilter = cli.severityFilter;
+	if (cli.minSeverity) result.minSeverity = cli.minSeverity;
+	if (cli.execByIssue !== undefined) result.execByIssue = cli.execByIssue;
+	if (cli.taskId) result.taskId = cli.taskId;
 
 	return result;
 }

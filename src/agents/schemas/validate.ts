@@ -21,7 +21,7 @@ export const VALIDATE_SCHEMA = {
 			items: {
 				type: "object",
 				properties: {
-					type: { type: "string", enum: ["file", "probe", "log", "command"] },
+					type: { type: "string", enum: ["file", "log", "command"] },
 					file: { type: "string" },
 					line_start: { type: "number" },
 					line_end: { type: "number" },

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { parseArgs } from "./cli/args.ts";
 import { addRule, showConfig } from "./cli/commands/config.ts";
-import { runExec } from "./cli/commands/exec.ts";
+import { runExecPipeline } from "./cli/commands/pipeline/exec.ts";
 import { parseFormats, runExport } from "./cli/commands/export.ts";
 import { runInit } from "./cli/commands/init.ts";
 import { runConsolidatePipeline } from "./cli/commands/pipeline/consolidate.ts";
@@ -93,9 +93,9 @@ async function main(): Promise<void> {
 			return;
 		}
 
-		// Handle --exec (stays specialized, not in PhaseRunner)
+		// Handle --exec (PhaseRunner)
 		if (execMode) {
-			await runExec(options);
+			await runExecPipeline(options);
 			return;
 		}
 
@@ -129,7 +129,7 @@ async function main(): Promise<void> {
 				validate: () => runValidatePipeline(options),
 				plan: () => runPlanPipeline(options),
 				consolidate: () => runConsolidatePipeline(options),
-				exec: () => runExec(options),
+				exec: () => runExecPipeline(options),
 				verify: () => runVerifyPipeline(options),
 				report: () => runReport(options),
 				init: () => runInit(),

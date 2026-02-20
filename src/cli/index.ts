@@ -109,15 +109,12 @@ export { runScanPipeline } from "./commands/pipeline/scan.ts";
 export { runValidatePipeline } from "./commands/pipeline/validate.ts";
 export { runPlanPipeline } from "./commands/pipeline/plan.ts";
 export { runConsolidatePipeline } from "./commands/pipeline/consolidate.ts";
+export { runExecPipeline } from "./commands/pipeline/exec.ts";
 export { runVerifyPipeline } from "./commands/pipeline/verify.ts";
 
-// Exec command (stays specialized, not in PhaseRunner)
-export {
-	runExec,
-	buildExecutorPrompt,
-	getReadyTasksForRun,
-	type ExecResult,
-} from "./commands/exec.ts";
+// Exec utilities (re-exported for backward compatibility)
+export { buildExecutorPrompt, getReadyTasksForRun } from "./commands/pipeline/exec.ts";
+export type { ExecResult } from "./commands/exec.ts";
 
 // Utility commands
 export { runExport, parseFormats } from "./commands/export.ts";

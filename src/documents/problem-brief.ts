@@ -133,14 +133,6 @@ function formatEvidence(issue: Issue): string {
 					parts.push(`- **File**: \`${ev.file}\``);
 				}
 				break;
-			case "probe":
-				parts.push(`- **Probe**: \`${ev.probe_id}\``);
-				if (ev.output) {
-					parts.push(
-						`  - Output: ${ev.output.slice(0, 200)}${ev.output.length > 200 ? "..." : ""}`,
-					);
-				}
-				break;
 			case "log":
 				parts.push(
 					`- **Log**: ${ev.output?.slice(0, 200) || "N/A"}${(ev.output?.length || 0) > 200 ? "..." : ""}`,

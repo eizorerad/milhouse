@@ -31,20 +31,14 @@ const createMockReport = (overrides: Partial<VerificationReport> = {}): Verifica
 	duration_ms: 5000,
 	overall_success: true,
 	gates: {
-		total: 3,
-		passed: 2,
+		total: 2,
+		passed: 1,
 		failed: 1,
 		results: [
 			{
 				gate: "diff-hygiene",
 				passed: true,
 				message: "No issues found",
-				evidence: [],
-			},
-			{
-				gate: "env-consistency",
-				passed: true,
-				message: "Environment is consistent",
 				evidence: [],
 			},
 			{
@@ -405,7 +399,6 @@ describe("verification-report", () => {
 
 			expect(markdown).toContain("## Gate Results");
 			expect(markdown).toContain("| diff-hygiene | ✅ PASSED | No issues found |");
-			expect(markdown).toContain("| env-consistency | ✅ PASSED | Environment is consistent |");
 			expect(markdown).toContain("| dod | ❌ FAILED | Definition of Done not met |");
 		});
 

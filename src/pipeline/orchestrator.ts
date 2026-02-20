@@ -1,8 +1,7 @@
 /**
  * Pipeline orchestrator -- simplified, stateless, cost-aware
  *
- * Loops over phases using PhaseRunner for scan/validate/plan/consolidate/verify.
- * Special-cases exec (delegates to existing exec code).
+ * Loops over phases using PhaseRunner for all phases including exec.
  * Accumulates cost across all phases, checks budget between phases.
  * Supports smart resume with --resume --run-id <id>.
  */
@@ -19,6 +18,7 @@ import {
 } from "../runner/cost.ts";
 import { runPhase } from "../runner/phase-runner.ts";
 import { consolidatePhaseConfig } from "../runner/phases/consolidate.ts";
+import { execPhaseConfig } from "../runner/phases/exec.ts";
 import { planPhaseConfig } from "../runner/phases/plan.ts";
 import { scanPhaseConfig } from "../runner/phases/scan.ts";
 import { validatePhaseConfig } from "../runner/phases/validate.ts";
@@ -34,6 +34,7 @@ const PHASE_CONFIGS: Record<string, PhaseConfig> = {
 	validate: validatePhaseConfig,
 	plan: planPhaseConfig,
 	consolidate: consolidatePhaseConfig,
+	exec: execPhaseConfig,
 	verify: verifyPhaseConfig,
 };
 
@@ -191,8 +192,8 @@ function failResult(
 /**
  * Run the full pipeline.
  *
- * Loops over the resolved phase list. For each phase checks budget,
- * delegates exec to the exec module, and calls runPhase() for all others.
+ * Loops over the resolved phase list. For each phase checks budget
+ * and calls runPhase() with the appropriate PhaseConfig.
  */
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
 	const { workDir, config } = options;
@@ -234,14 +235,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 		const phaseStart = Date.now();
 
 		try {
-			if (phase === "exec") {
-				// Exec is specialised -- delegate to existing exec code (wired in T9).
-				logInfo('Phase "exec" -- delegating to exec module');
-				phasesCompleted.push(phase);
-				outcomes.push({ phase, success: true, duration: Date.now() - phaseStart });
-				continue;
-			}
-
 			const phaseConfig = PHASE_CONFIGS[phase];
 			if (!phaseConfig) {
 				logWarn(`Unknown phase: ${phase}, skipping`);

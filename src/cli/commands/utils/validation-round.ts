@@ -184,7 +184,7 @@ export async function executeValidationRound(
 				// Prepare validated evidence
 				const validatedEvidence: Evidence[] = [];
 				for (const ev of result.report.evidence || []) {
-					const validTypes = ["file", "probe", "log", "command"] as const;
+					const validTypes = ["file", "log", "command"] as const;
 					const evType = validTypes.includes(ev.type as (typeof validTypes)[number])
 						? (ev.type as (typeof validTypes)[number])
 						: "file";
@@ -197,7 +197,6 @@ export async function executeValidationRound(
 					if (ev.file) evidenceItem.file = String(ev.file);
 					if (typeof ev.line_start === "number") evidenceItem.line_start = ev.line_start;
 					if (typeof ev.line_end === "number") evidenceItem.line_end = ev.line_end;
-					if (ev.probe_id) evidenceItem.probe_id = String(ev.probe_id);
 					if (ev.command) evidenceItem.command = String(ev.command);
 					if (ev.output) evidenceItem.output = String(ev.output);
 
@@ -548,7 +547,7 @@ export async function executeValidationRoundTmux(
 					// Prepare validated evidence
 					const validatedEvidence: Evidence[] = [];
 					for (const ev of report.evidence || []) {
-						const validTypes = ["file", "probe", "log", "command"] as const;
+						const validTypes = ["file", "log", "command"] as const;
 						const evType = validTypes.includes(ev.type as (typeof validTypes)[number])
 							? (ev.type as (typeof validTypes)[number])
 							: "file";
@@ -561,7 +560,6 @@ export async function executeValidationRoundTmux(
 						if (ev.file) evidenceItem.file = String(ev.file);
 						if (typeof ev.line_start === "number") evidenceItem.line_start = ev.line_start;
 						if (typeof ev.line_end === "number") evidenceItem.line_end = ev.line_end;
-						if (ev.probe_id) evidenceItem.probe_id = String(ev.probe_id);
 						if (ev.command) evidenceItem.command = String(ev.command);
 						if (ev.output) evidenceItem.output = String(ev.output);
 

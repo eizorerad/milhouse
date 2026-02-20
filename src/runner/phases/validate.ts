@@ -9,7 +9,7 @@
 import pc from "picocolors";
 import { buildValidatePrompt } from "../../agents/prompts/validate.ts";
 import { VALIDATE_SCHEMA } from "../../agents/schemas/validate.ts";
-import { loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
+import { filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import type { Issue, IssueStatus, RunPhase } from "../../state/types.ts";
 import { logDebug, logWarn } from "../../ui/logger.ts";
@@ -47,7 +47,13 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 
 	loadItems(ctx) {
 		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
-		return issues.filter((i) => i.status === "UNVALIDATED");
+		return filterIssues(issues, {
+			issueIds: ctx.config.issueIds,
+			excludeIssueIds: ctx.config.excludeIssueIds,
+			severityFilter: ctx.config.severityFilter,
+			minSeverity: ctx.config.minSeverity,
+			statusFilter: ["UNVALIDATED"],
+		});
 	},
 
 	buildPrompt(issue, ctx) {
@@ -126,7 +132,7 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 
 			const evidence = (result.evidence ?? []).map((ev) => ({
 				...ev,
-				type: ev.type as "file" | "probe" | "log" | "command",
+				type: ev.type as "file" | "log" | "command",
 				timestamp: ev.timestamp ?? now,
 			}));
 

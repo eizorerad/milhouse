@@ -200,7 +200,6 @@ function migrateUnversionedToV1(config: Record<string, unknown>): Record<string,
 			evidence_required: true,
 			diff_hygiene: true,
 			placeholder_check: true,
-			env_consistency: true,
 			dod_verification: true,
 		};
 	}

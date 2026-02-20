@@ -454,8 +454,8 @@ describe("Immutability Tests", () => {
 				{
 					evidence: [
 						{
-							type: "probe" as const,
-							probe_id: "probe-1",
+							type: "file" as const,
+							file: "test.ts",
 							timestamp: now,
 						},
 					],
@@ -466,7 +466,7 @@ describe("Immutability Tests", () => {
 			// Verify update succeeded
 			expect(updated).not.toBeNull();
 			expect(updated?.evidence.length).toBe(1);
-			expect(updated?.evidence[0].type).toBe("probe");
+			expect(updated?.evidence[0].type).toBe("file");
 
 			// Verify original evidence array was not mutated
 			expect(originalIssue.evidence.length).toBe(originalEvidenceLength);
