@@ -1,180 +1,53 @@
 /**
- * Config loader -- merges defaults + config.yml + CLI flags into ResolvedConfig
+ * Config loader — merges .milhouse/config.ts + CLI flags into ResolvedConfig
  *
- * Precedence: CLI flags > config.yml > defaults
+ * Precedence: CLI flags > .milhouse/config.ts > defaults
+ *
+ * Internally delegates to the unified config loader (src/config/loader.ts)
+ * which reads .milhouse/config.ts (primary) or .milhouse/config.yaml (fallback).
+ * Then maps the unified Config to the ResolvedConfig interface that PhaseRunner expects.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { RuntimeOptions } from "../cli/runtime-options.ts";
-import { logInfo } from "../ui/logger.ts";
+import { type ResolvedFullConfig, resolveConfig } from "../config/define.ts";
+import { loadUserConfig } from "../config/loader.ts";
 import type { CostConfig, ReportConfig, ResolvedConfig } from "./types.ts";
 
-/** Default cost configuration */
-const DEFAULT_COST: CostConfig = {
-	inputPerMillion: 5,
-	outputPerMillion: 25,
-	budgetLimit: 0, // unlimited
-};
-
-/** Default report configuration */
-const DEFAULT_REPORT: ReportConfig = {
-	enabled: true,
-	format: "json",
-	autoGenerate: true,
-};
-
-/** Default resolved config values */
-const DEFAULTS: ResolvedConfig = {
-	engine: "claude",
-	model: "opus",
-	phases: {},
-	workers: 5,
-	cost: DEFAULT_COST,
-	report: DEFAULT_REPORT,
-	skipTests: false,
-	skipLint: false,
-	skipProbes: false,
-	autoCommit: true,
-	createPr: false,
-	isolate: false,
-	skipMerge: false,
-	verbose: false,
-	dryRun: false,
-	failFast: false,
-	maxRetries: 3,
-	baseBranch: "",
-	draftPr: false,
-	maxValidationRetries: 2,
-	retryUnvalidated: true,
-	tmux: false,
-	tmuxAutoAttach: false,
-	autoInstall: true,
-	unsafeDoDChecks: false,
-};
-
 /**
- * Deep merge two objects (target is overwritten by source where source has values)
+ * Map unified Config → ResolvedConfig (the flat interface PhaseRunner expects)
  */
-function deepMerge<T>(target: T, source: Partial<T>): T {
-	const result = { ...target };
-	for (const key of Object.keys(source) as Array<keyof T>) {
-		const srcVal = source[key];
-		const tgtVal = target[key];
-		if (
-			srcVal !== undefined &&
-			srcVal !== null &&
-			typeof srcVal === "object" &&
-			!Array.isArray(srcVal) &&
-			typeof tgtVal === "object" &&
-			tgtVal !== null &&
-			!Array.isArray(tgtVal)
-		) {
-			(result as Record<string, unknown>)[key as string] = deepMerge(
-				tgtVal as Record<string, unknown>,
-				srcVal as Record<string, unknown>,
-			);
-		} else if (srcVal !== undefined) {
-			(result as Record<string, unknown>)[key as string] = srcVal;
-		}
-	}
-	return result;
-}
-
-/**
- * Load and parse .milhouse/config.yaml if it exists
- */
-function loadYamlConfig(workDir: string): Record<string, unknown> | null {
-	const paths = [
-		join(workDir, ".milhouse", "config.yaml"),
-		join(workDir, ".milhouse", "config.yml"),
-	];
-
-	for (const configPath of paths) {
-		if (existsSync(configPath)) {
-			try {
-				const content = readFileSync(configPath, "utf-8");
-				const parsed = parseYaml(content);
-				return typeof parsed === "object" && parsed !== null
-					? (parsed as Record<string, unknown>)
-					: null;
-			} catch {
-				return null;
-			}
-		}
-	}
-	return null;
-}
-
-/**
- * Map YAML config keys to ResolvedConfig structure
- */
-function mapYamlToResolved(yaml: Record<string, unknown>): Partial<ResolvedConfig> {
-	const result: Partial<ResolvedConfig> = {};
-
-	if (yaml.engine) result.engine = String(yaml.engine);
-	if (yaml.model) result.model = String(yaml.model);
-	if (yaml.workers) result.workers = Number(yaml.workers);
-
-	// Per-phase model overrides
-	if (yaml.phases && typeof yaml.phases === "object") {
-		result.phases = {};
-		for (const [phase, config] of Object.entries(yaml.phases as Record<string, unknown>)) {
-			if (typeof config === "object" && config !== null) {
-				const phaseConfig = config as Record<string, unknown>;
-				result.phases[phase] = {};
-				if (phaseConfig.model) {
-					result.phases[phase].model = String(phaseConfig.model);
-				}
-			} else if (typeof config === "string") {
-				// Shorthand: phases.scan: sonnet
-				result.phases[phase] = { model: config };
-			}
-		}
-	}
-
-	// Cost config
-	if (yaml.cost && typeof yaml.cost === "object") {
-		const costYaml = yaml.cost as Record<string, unknown>;
-		result.cost = {
-			inputPerMillion: Number(
-				costYaml.input_per_million ?? costYaml.inputPerMillion ?? DEFAULT_COST.inputPerMillion,
-			),
-			outputPerMillion: Number(
-				costYaml.output_per_million ?? costYaml.outputPerMillion ?? DEFAULT_COST.outputPerMillion,
-			),
-			budgetLimit: Number(
-				costYaml.budget_limit ?? costYaml.budgetLimit ?? DEFAULT_COST.budgetLimit,
-			),
-		};
-	}
-
-	// Report config
-	if (yaml.report && typeof yaml.report === "object") {
-		const reportYaml = yaml.report as Record<string, unknown>;
-		result.report = {
-			enabled: reportYaml.enabled !== false,
-			format: (reportYaml.format as ReportConfig["format"]) ?? DEFAULT_REPORT.format,
-			autoGenerate: reportYaml.auto_generate !== false && reportYaml.autoGenerate !== false,
-		};
-	}
-
-	// Skip options
-	if (yaml.skip_tests !== undefined) result.skipTests = Boolean(yaml.skip_tests);
-	if (yaml.skip_lint !== undefined) result.skipLint = Boolean(yaml.skip_lint);
-	if (yaml.skip_probes !== undefined) result.skipProbes = Boolean(yaml.skip_probes);
-
-	// Exec options
-	if (yaml.exec && typeof yaml.exec === "object") {
-		const execYaml = yaml.exec as Record<string, unknown>;
-		if (execYaml.auto_commit !== undefined) result.autoCommit = Boolean(execYaml.auto_commit);
-		if (execYaml.create_pr !== undefined) result.createPr = Boolean(execYaml.create_pr);
-		if (execYaml.isolate !== undefined) result.isolate = Boolean(execYaml.isolate);
-		if (execYaml.skip_merge !== undefined) result.skipMerge = Boolean(execYaml.skip_merge);
-	}
-
-	return result;
+function mapToResolvedConfig(cfg: ResolvedFullConfig): ResolvedConfig {
+	return {
+		engine: cfg.engine,
+		model: cfg.model,
+		phases: Object.fromEntries(
+			Object.entries(cfg.phases)
+				.filter(([_, p]) => p.model !== cfg.model)
+				.map(([name, p]) => [name, { model: p.model }]),
+		),
+		workers: cfg.phases.exec.workers,
+		cost: cfg.cost as CostConfig,
+		report: cfg.report as ReportConfig,
+		skipTests: cfg.skipTests,
+		skipLint: cfg.skipLint,
+		skipProbes: cfg.skipProbes,
+		autoCommit: cfg.execution.autoCommit,
+		createPr: cfg.execution.createPr,
+		isolate: cfg.execution.mode === "worktree",
+		skipMerge: cfg.execution.skipMerge,
+		verbose: false,
+		dryRun: false,
+		failFast: cfg.failFast,
+		maxRetries: cfg.phases.exec.retries,
+		baseBranch: "",
+		draftPr: cfg.execution.draftPr,
+		maxValidationRetries: cfg.phases.validate.retries,
+		retryUnvalidated: true,
+		tmux: cfg.tmux.enabled,
+		tmuxAutoAttach: cfg.tmux.autoAttach,
+		autoInstall: true,
+		unsafeDoDChecks: false,
+	};
 }
 
 /**
@@ -206,8 +79,7 @@ function applyCLIOverrides(config: ResolvedConfig, cli: RuntimeOptions): Resolve
 	if (cli.isolate !== undefined) result.isolate = cli.isolate;
 	else if (cli.branchPerTask) result.isolate = true;
 	if (cli.skipMerge !== undefined) result.skipMerge = cli.skipMerge;
-	if (cli.maxValidationRetries !== undefined)
-		result.maxValidationRetries = cli.maxValidationRetries;
+	if (cli.maxValidationRetries !== undefined) result.maxValidationRetries = cli.maxValidationRetries;
 	if (cli.retryUnvalidated !== undefined) result.retryUnvalidated = cli.retryUnvalidated;
 	if (cli.tmux !== undefined) result.tmux = cli.tmux;
 	if (cli.tmuxAutoAttach !== undefined) result.tmuxAutoAttach = cli.tmuxAutoAttach;
@@ -224,45 +96,24 @@ function applyCLIOverrides(config: ResolvedConfig, cli: RuntimeOptions): Resolve
 }
 
 /**
- * Load resolved configuration
+ * Load resolved configuration.
  *
- * Merges: defaults -> config.yml -> CLI flags
- * CLI flags always win.
- *
- * @param workDir - Working directory containing .milhouse/
- * @param cliOptions - CLI runtime options
- * @returns Fully resolved configuration
+ * Reads .milhouse/config.ts (or .yaml fallback), merges with defaults,
+ * then applies CLI flag overrides.
  */
-export function loadResolvedConfig(workDir: string, cliOptions: RuntimeOptions): ResolvedConfig {
-	// Start with defaults
-	let config: ResolvedConfig = {
-		...DEFAULTS,
-		cost: { ...DEFAULT_COST },
-		report: { ...DEFAULT_REPORT },
-	};
-
-	// Merge config.yml (if exists)
-	const yaml = loadYamlConfig(workDir);
-	if (yaml) {
-		const yamlConfig = mapYamlToResolved(yaml);
-		config = deepMerge(config, yamlConfig);
-	} else {
-		logInfo('No .milhouse/config.yaml found, using defaults. Run "milhouse --init" to configure.');
-	}
-
-	// CLI flags override everything
-	config = applyCLIOverrides(config, cliOptions);
-
-	return config;
+export async function loadResolvedConfig(
+	workDir: string,
+	cliOptions: RuntimeOptions,
+): Promise<ResolvedConfig> {
+	const userConfig = await loadUserConfig(workDir);
+	const resolved = resolveConfig(userConfig);
+	const mapped = mapToResolvedConfig(resolved);
+	return applyCLIOverrides(mapped, cliOptions);
 }
 
 /**
  * Get the resolved config defaults (for testing/reference)
  */
 export function getConfigDefaults(): ResolvedConfig {
-	return {
-		...DEFAULTS,
-		cost: { ...DEFAULT_COST },
-		report: { ...DEFAULT_REPORT },
-	};
+	return mapToResolvedConfig(resolveConfig({}));
 }

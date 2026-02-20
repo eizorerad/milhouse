@@ -51,13 +51,19 @@ export async function runPipelineV2(
 	const workDir = process.cwd();
 	setVerbose(options.verbose);
 
-	const config = loadResolvedConfig(workDir, options);
+	const config = await loadResolvedConfig(workDir, options);
+
+	// Load user config for pipeline phase order
+	const { loadUserConfig } = await import("../../config/loader.ts");
+	const { resolveConfig } = await import("../../config/define.ts");
+	const userConfig = resolveConfig(await loadUserConfig(workDir));
 
 	const result = await runPipelineImpl({
 		workDir,
 		config,
 		scope: options.scanFocus,
 		runId: options.runId,
+		pipeline: userConfig.pipeline,
 		startPhase: pipelineOptions.startPhase,
 		endPhase: pipelineOptions.endPhase,
 		resume: pipelineOptions.resume,

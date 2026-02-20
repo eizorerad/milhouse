@@ -11,7 +11,7 @@ import type { RuntimeOptions } from "../../runtime-options.ts";
 
 export async function runVerifyPipeline(options: RuntimeOptions): Promise<void> {
 	const workDir = process.cwd();
-	const config = loadResolvedConfig(workDir, options);
+	const config = await loadResolvedConfig(workDir, options);
 	await runPhase(verifyPhaseConfig, {
 		workDir,
 		config,

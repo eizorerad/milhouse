@@ -55,6 +55,8 @@ export interface PipelineOptions {
 	workDir: string;
 	config: ResolvedConfig;
 	scope?: string;
+	/** Custom phase order from config (overrides default) */
+	pipeline?: string[];
 	/** Resume from this run ID */
 	runId?: string;
 	/** Start from this phase (inclusive) */
@@ -77,9 +79,9 @@ export interface PipelineResult {
 	error?: string;
 }
 
-/** Resolve the phases to run based on start/end options. */
+/** Resolve the phases to run based on start/end options and config pipeline. */
 function resolvePhases(opts: PipelineOptions): string[] {
-	let phases = [...PHASE_ORDER];
+	let phases = [...(opts.pipeline ?? PHASE_ORDER)];
 	if (opts.startPhase) {
 		const idx = phases.indexOf(opts.startPhase);
 		if (idx >= 0) phases = phases.slice(idx);

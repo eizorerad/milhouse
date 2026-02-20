@@ -6,6 +6,7 @@
  */
 
 import type { PhaseContext } from "../../runner/types.ts";
+import { appendUserConfig } from "./common.ts";
 import {
 	AGENT_ROLES,
 	type Issue,

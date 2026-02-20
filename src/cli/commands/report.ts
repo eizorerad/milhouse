@@ -15,7 +15,7 @@ import type { RuntimeOptions } from "../runtime-options.ts";
 
 export async function runReport(options: RuntimeOptions & { format?: string }): Promise<void> {
 	const workDir = process.cwd();
-	const config = loadResolvedConfig(workDir, options);
+	const config = await loadResolvedConfig(workDir, options);
 
 	// Determine run ID
 	let runId = options.runId;

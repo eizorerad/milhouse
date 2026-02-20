@@ -125,8 +125,10 @@ export interface PhaseContext {
 	workDir: string;
 	engine: AIEngine;
 	config: ResolvedConfig;
-	/** Timestamp (ms) when this phase started — used for duration display */
+	/** Timestamp (ms) when this phase started */
 	startTime: number;
+	/** Unified user config (rules, prompts, boundaries, project, commands) */
+	userConfig: import("../config/define.ts").ResolvedFullConfig;
 	/** Shared store for passing data between hooks */
 	store: Record<string, unknown>;
 }

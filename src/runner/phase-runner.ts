@@ -260,7 +260,6 @@ export async function runPhase<TItem, TResult>(
 		}
 
 		const success = allResults.every((r) => r.success);
-		const phaseCost = runCost.byPhase[phaseConfig.name]?.cost ?? 0;
 
 		return makeResult(
 			phaseConfig.name,

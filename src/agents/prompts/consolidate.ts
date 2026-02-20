@@ -7,6 +7,7 @@
 
 import type { PhaseContext } from "../../runner/types.ts";
 import { AGENT_ROLES, type Issue, type Task, getWorkItemTitle } from "../../state/types.ts";
+import { appendUserConfig } from "./common.ts";
 
 /**
  * Input for the consolidate prompt.
