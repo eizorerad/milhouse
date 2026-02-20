@@ -4,6 +4,18 @@
 
 Milhouse investigates before it acts and verifies after. Instead of throwing a prompt at an AI and hoping, it runs a structured pipeline: scan the codebase, validate findings with evidence, plan tasks, execute in isolated worktrees, and verify through quality gates.
 
+## What's New in v0.2.0
+
+Complete rewrite for simplicity and reliability:
+
+- **One runner for all phases.** Five separate 800-line command files replaced by a single PhaseRunner (~300 lines). All phases — scan, validate, plan, consolidate, verify — go through the same code path with the same retry, cost tracking, and progress display logic.
+- **One config file.** `.milhouse/config.ts` is the single place to configure everything: pipeline phases, workers per phase, model overrides, rules, boundaries, quality gates, cost budget. Typed — IDE autocomplete and `tsc` catch errors.
+- **No more `current_run` pointer.** The mutable global pointer that caused race conditions in parallel runs is gone. All state operations take an explicit `runId`. The latest run is derived from the runs index.
+- **Pipeline-first CLI.** `milhouse "fix auth bugs"` runs the full pipeline with that text as scope. No more single-task mode — the pipeline is the default.
+- **Stateless orchestrator.** The pipeline orchestrator doesn't hold state between phases. Each phase reads from disk, writes to disk. Resume after crash works by checking what's already on disk.
+- **~2000 lines of dead code removed.** Old pipeline, agent factories, capability system, compat module, duplicate config loaders — all cleaned up.
+- **Bug fixes.** Timer leak in agent timeouts, retry comparison by object reference, duplicate `phaseCost` declaration, crash-resume duplicates, dangling dependency references, 56-year duration display.
+
 ---
 
 ## Quick Start
