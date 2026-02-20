@@ -89,7 +89,6 @@ export interface Config {
 
 	skipTests?: boolean;
 	skipLint?: boolean;
-	skipProbes?: boolean;
 
 	tmux?: {
 		enabled?: boolean;
@@ -141,7 +140,6 @@ export const DEFAULTS = {
 
 	skipTests: false,
 	skipLint: false,
-	skipProbes: false, // deprecated, no-op
 
 	tmux: { enabled: false, autoAttach: false },
 };
@@ -165,7 +163,6 @@ export interface ResolvedFullConfig {
 	report: { enabled: boolean; format: string; autoGenerate: boolean };
 	skipTests: boolean;
 	skipLint: boolean;
-	skipProbes: boolean;
 	tmux: { enabled: boolean; autoAttach: boolean };
 	prompts?: Partial<Record<PhaseName, { extraInstructions?: string }>>;
 }
@@ -206,7 +203,6 @@ export function resolveConfig(user: Config): ResolvedFullConfig {
 
 		skipTests: user.skipTests ?? DEFAULTS.skipTests,
 		skipLint: user.skipLint ?? DEFAULTS.skipLint,
-		skipProbes: DEFAULTS.skipProbes,
 
 		tmux: { ...DEFAULTS.tmux, ...strip(user.tmux) },
 		prompts: user.prompts,

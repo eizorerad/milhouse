@@ -46,7 +46,6 @@ export interface ResolvedConfig {
 	/** Skip options */
 	skipTests: boolean;
 	skipLint: boolean;
-	skipProbes: boolean;
 	/** Execution settings */
 	autoCommit: boolean;
 	createPr: boolean;

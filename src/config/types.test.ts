@@ -47,7 +47,6 @@ describe("RuntimeOptions type consistency", () => {
 		expect(ConfigDefaultOptions).toHaveProperty("githubRepo");
 		expect(ConfigDefaultOptions).toHaveProperty("githubLabel");
 		expect(ConfigDefaultOptions).toHaveProperty("browserEnabled");
-		expect(ConfigDefaultOptions).toHaveProperty("skipProbes");
 		expect(ConfigDefaultOptions).toHaveProperty("maxValidationRetries");
 		expect(ConfigDefaultOptions).toHaveProperty("retryUnvalidated");
 		expect(ConfigDefaultOptions).toHaveProperty("retryDelayValidation");
@@ -75,7 +74,6 @@ describe("RuntimeOptions type consistency", () => {
 		expect(ConfigDefaultOptions.githubRepo).toBe("");
 		expect(ConfigDefaultOptions.githubLabel).toBe("");
 		expect(ConfigDefaultOptions.browserEnabled).toBe("auto");
-		expect(ConfigDefaultOptions.skipProbes).toBe(false);
 		expect(ConfigDefaultOptions.maxValidationRetries).toBe(2);
 		expect(ConfigDefaultOptions.retryUnvalidated).toBe(true);
 		expect(ConfigDefaultOptions.retryDelayValidation).toBe(2000);

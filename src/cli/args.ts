@@ -124,7 +124,6 @@ export function createProgram(): Command {
 		.option("--no-tests, --skip-tests", "Skip tests")
 		.option("--no-lint, --skip-lint", "Skip linting")
 		.option("--fast", "Skip both tests and lint")
-		.option("--skip-probes", "Skip probe execution")
 		.option("--dry-run", "Show what would happen without executing")
 
 		// ── Retries ────────────────────────────────────────────
@@ -430,7 +429,6 @@ export function parseArgs(args: string[]): ParsedArgs {
 		excludeIssueIds: parseIssueIds(opts.excludeIssues),
 		minSeverity: parseSingleSeverity(opts.minSeverity),
 		severityFilter: parseSeverityLevels(opts.severity),
-		skipProbes: opts.skipProbes || false,
 		runId: opts.runId,
 		// Validation retry options
 		maxValidationRetries:

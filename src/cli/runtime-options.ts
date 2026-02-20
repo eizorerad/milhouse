@@ -119,9 +119,6 @@ export interface RuntimeOptions {
 	minSeverity?: Severity;
 	severityFilter?: Severity[];
 
-	// Probe control
-	skipProbes?: boolean;
-
 	/** Explicit run ID to use instead of current_run */
 	runId?: string;
 
@@ -231,7 +228,6 @@ export const DEFAULT_OPTIONS: RuntimeOptions = {
 	mode: "branch",
 	scope: ["all"],
 	env: "local",
-	skipProbes: false,
 
 	// Validation retry defaults
 	maxValidationRetries: 2,

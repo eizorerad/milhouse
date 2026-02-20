@@ -30,7 +30,6 @@ function mapToResolvedConfig(cfg: ResolvedFullConfig): ResolvedConfig {
 		report: cfg.report as ReportConfig,
 		skipTests: cfg.skipTests,
 		skipLint: cfg.skipLint,
-		skipProbes: cfg.skipProbes,
 		autoCommit: cfg.execution.autoCommit,
 		createPr: cfg.execution.createPr,
 		isolate: cfg.execution.mode === "worktree",
@@ -75,7 +74,6 @@ function applyCLIOverrides(config: ResolvedConfig, cli: RuntimeOptions): Resolve
 	result.baseBranch = cli.baseBranch;
 
 	// Conditional overrides — only apply when explicitly provided
-	if (cli.skipProbes !== undefined) result.skipProbes = cli.skipProbes;
 	if (cli.failFast !== undefined) result.failFast = cli.failFast;
 	if (cli.isolate !== undefined) result.isolate = cli.isolate;
 	else if (cli.branchPerTask) result.isolate = true;
