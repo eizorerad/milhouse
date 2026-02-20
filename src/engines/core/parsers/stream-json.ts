@@ -32,6 +32,8 @@ interface StreamMessage {
 	};
 	subtype?: string;
 	result?: unknown;
+	/** Structured output from --json-schema flag (available on result messages) */
+	structured_output?: unknown;
 	error?: string;
 	usage?: UsageInfo;
 }
@@ -140,7 +142,23 @@ function parseStreamMessage(message: StreamMessage): ExecutionStep[] {
 			break;
 
 		case "result": {
-			// Handle result content - avoid double-stringifying if already a string
+			// Prefer structured_output (from --json-schema) over result text.
+			// When --json-schema is used, the validated JSON is in structured_output
+			// while result contains the markdown text response.
+			if (message.structured_output !== undefined && message.structured_output !== null) {
+				const structuredContent =
+					typeof message.structured_output === "string"
+						? message.structured_output
+						: JSON.stringify(message.structured_output);
+				steps.push({
+					type: "result",
+					content: structuredContent,
+					timestamp,
+					metadata: { subtype: message.subtype, isStructuredOutput: true },
+				});
+			}
+
+			// Also emit the text result (may be needed when --json-schema is not used)
 			let resultContent: string;
 			if (typeof message.result === "string") {
 				resultContent = message.result;
@@ -273,6 +291,7 @@ export function extractThinking(steps: ExecutionStep[]): string[] {
  *
  * This function looks for the final response from the AI.
  * It returns the last meaningful result step content, which could be:
+ * - Structured JSON output (from --json-schema, preferred)
  * - Text response from the AI
  * - JSON array/object (e.g., for scan results)
  *
@@ -284,7 +303,21 @@ export function extractThinking(steps: ExecutionStep[]): string[] {
  * - Empty content
  */
 export function extractFinalResult(steps: ExecutionStep[]): string | null {
-	// Find all result steps that are not tool results, system messages, or internal messages
+	// Prefer structured_output steps (from --json-schema) — these contain
+	// validated JSON that matches the requested schema.
+	const structuredSteps = steps.filter(
+		(step) =>
+			step.type === "result" &&
+			step.metadata?.isStructuredOutput &&
+			step.content &&
+			step.content.trim().length > 0,
+	);
+
+	if (structuredSteps.length > 0) {
+		return structuredSteps[structuredSteps.length - 1].content;
+	}
+
+	// Fallback: find all result steps that are not tool results, system messages, or internal messages
 	const resultSteps = steps.filter(
 		(step) =>
 			step.type === "result" &&

@@ -1,6 +1,10 @@
 /**
  * JSON Schema for scan phase (LI agent)
  * Forces structured JSON output from the AI engine.
+ *
+ * Compliant with Anthropic Structured Outputs requirements:
+ * - additionalProperties: false on all objects
+ * - All properties listed in required
  */
 export const SCAN_SCHEMA = {
 	type: "object",
@@ -17,9 +21,11 @@ export const SCAN_SCHEMA = {
 					scope_impact: { type: "string" },
 					strategy: { type: "string" },
 				},
-				required: ["type", "title", "rationale", "severity"],
+				required: ["type", "title", "rationale", "severity", "scope_impact", "strategy"],
+				additionalProperties: false,
 			},
 		},
 	},
 	required: ["items"],
+	additionalProperties: false,
 } as const;

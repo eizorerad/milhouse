@@ -1,6 +1,10 @@
 /**
  * JSON Schema for consolidate phase (CDM agent)
  * Forces structured JSON output from the AI engine.
+ *
+ * Compliant with Anthropic Structured Outputs requirements:
+ * - additionalProperties: false on all objects
+ * - All properties listed in required
  */
 export const CONSOLIDATE_SCHEMA = {
 	type: "object",
@@ -14,6 +18,8 @@ export const CONSOLIDATE_SCHEMA = {
 					remove: { type: "array", items: { type: "string" } },
 					reason: { type: "string" },
 				},
+				required: ["keep", "remove", "reason"],
+				additionalProperties: false,
 			},
 		},
 		cross_dependencies: {
@@ -25,6 +31,8 @@ export const CONSOLIDATE_SCHEMA = {
 					depends_on: { type: "array", items: { type: "string" } },
 					reason: { type: "string" },
 				},
+				required: ["task_id", "depends_on", "reason"],
+				additionalProperties: false,
 			},
 		},
 		parallel_groups: {
@@ -35,9 +43,12 @@ export const CONSOLIDATE_SCHEMA = {
 					group: { type: "number" },
 					task_ids: { type: "array", items: { type: "string" } },
 				},
+				required: ["group", "task_ids"],
+				additionalProperties: false,
 			},
 		},
 		execution_order: { type: "array", items: { type: "string" } },
 	},
 	required: ["duplicates", "cross_dependencies", "parallel_groups", "execution_order"],
+	additionalProperties: false,
 } as const;
