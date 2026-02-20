@@ -45,6 +45,10 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 	mode: "per-item",
 	defaultParallel: 5,
 
+	// Retry: if an item fails (e.g. CLI hang timeout), retry it
+	isRetryable: true,
+	maxRetryRounds: 1,
+
 	loadItems(ctx) {
 		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
 		return issues.filter((i) => i.status === "CONFIRMED" || i.status === "PARTIAL");
@@ -104,6 +108,16 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 		} catch {
 			return { issue_id: item.id, summary: "Failed to parse WBS JSON", tasks: [] };
 		}
+	},
+
+	retryFilter(items, results) {
+		// Retry items that failed or produced no tasks (e.g. CLI hang, parse failure)
+		const failedIds = new Set(
+			results
+				.filter((r) => !r.success || r.result.tasks.length === 0)
+				.map((r) => (r.item as Issue).id),
+		);
+		return items.filter((i) => failedIds.has(i.id));
 	},
 
 	async saveResults(results, ctx) {
