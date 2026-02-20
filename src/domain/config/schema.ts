@@ -325,38 +325,3 @@ export const CurrentConfigSchema = ConfigSchemaV1;
  * Type inferred from the current schema
  */
 export type InferredMilhouseConfig = z.infer<typeof CurrentConfigSchema>;
-
-/**
- * Parse and validate configuration
- *
- * @param data - Raw configuration data
- * @returns Validated configuration
- * @throws ZodError if validation fails
- */
-export function parseConfig(data: unknown): MilhouseConfig {
-	return CurrentConfigSchema.parse(data);
-}
-
-/**
- * Safely parse configuration
- *
- * @param data - Raw configuration data
- * @returns Parse result with success/error
- */
-export function safeParseConfig(data: unknown) {
-	return CurrentConfigSchema.safeParse(data);
-}
-
-/**
- * Get the version from a raw config object
- *
- * @param data - Raw configuration data
- * @returns Version string or undefined if not present
- */
-export function getConfigVersion(data: unknown): string | undefined {
-	if (typeof data === "object" && data !== null && "version" in data) {
-		const version = (data as Record<string, unknown>).version;
-		return typeof version === "string" ? version : undefined;
-	}
-	return undefined;
-}

@@ -50,7 +50,6 @@ export {
 	getWorkRelativePath,
 	getStateRelativePath,
 	getRunRelativePath,
-	getRunWorktreeRelativePath,
 	getAllDirectoryRelativePaths,
 	getConfigFileRelativePath,
 	getProgressFileRelativePath,
@@ -85,9 +84,6 @@ export {
 	GateProfilesConfigSchema,
 	ConfigSchemaV1,
 	CurrentConfigSchema,
-	parseConfig,
-	safeParseConfig,
-	getConfigVersion,
 } from "./schema.ts";
 
 export type { InferredMilhouseConfig } from "./schema.ts";
@@ -109,6 +105,5 @@ export {
 	DEFAULT_GATE_PROFILES_CONFIG,
 	DEFAULT_CONFIG_V1,
 	getCurrentDefaults,
-	getDefaultsForVersion,
 	mergeWithDefaults,
 } from "./defaults.ts";

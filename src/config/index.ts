@@ -136,9 +136,6 @@ export {
 	GateProfileSchema,
 	GateProfilesConfigSchema,
 	ConfigSchemaV1,
-	parseConfig,
-	safeParseConfig,
-	getConfigVersion,
 	type InferredMilhouseConfig,
 } from "../domain/config/schema.ts";
 

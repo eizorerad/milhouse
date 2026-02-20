@@ -12,55 +12,7 @@ import { createSpinner } from "nanospinner";
 import pc from "picocolors";
 import type { DetailedStep } from "../../engines/base.ts";
 import { formatStepForDisplay } from "../../engines/base.ts";
-import { type SpinnerInstance, spinners } from "../spinners.ts";
-import { theme } from "../theme.ts";
-
-/**
- * Create a simple spinner
- *
- * @deprecated Use `spinners.start()` for new code.
- */
-export function createSimpleSpinner(text: string): SpinnerInstance {
-	return createSpinner(text).start();
-}
-
-/**
- * Adapter to convert legacy spinner usage to new system
- *
- * @deprecated This is a migration helper. Use `spinners` directly for new code.
- */
-export class LegacySpinnerAdapter {
-	private id: string;
-	private startTime: number;
-
-	constructor(id: string, text: string) {
-		this.id = id;
-		this.startTime = Date.now();
-		spinners.start(id, text, "task");
-	}
-
-	update(text: string): void {
-		spinners.update(this.id, text);
-	}
-
-	success(text?: string): void {
-		const duration = Date.now() - this.startTime;
-		const durationStr = theme.muted(`(${(duration / 1000).toFixed(1)}s)`);
-		spinners.succeed(this.id, text ? `${text} ${durationStr}` : undefined);
-	}
-
-	error(text?: string): void {
-		spinners.fail(this.id, text);
-	}
-
-	warn(text?: string): void {
-		spinners.warn(this.id, text);
-	}
-
-	stop(): void {
-		spinners.stop(this.id);
-	}
-}
+import type { SpinnerInstance } from "../spinners.ts";
 
 // ============================================================================
 // Legacy Spinner Classes (moved from spinners.ts for backward compatibility)

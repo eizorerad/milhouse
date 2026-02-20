@@ -171,16 +171,6 @@ export const DEFAULT_UNSAFE_PATTERNS: RegExp[] = [
 ];
 
 /**
- * Check if a command contains unsafe patterns
- */
-export function containsUnsafePattern(
-	command: string,
-	patterns: RegExp[] = DEFAULT_UNSAFE_PATTERNS,
-): boolean {
-	return patterns.some((pattern) => pattern.test(command));
-}
-
-/**
  * Find which unsafe pattern was matched
  */
 export function findUnsafePattern(
@@ -601,30 +591,6 @@ export abstract class BaseProbe<TOutput = unknown> implements IProbe<TOutput> {
 	private delay(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
-}
-
-/**
- * Create probe input helper
- */
-export function createProbeInput(
-	workDir: string,
-	options?: Partial<Omit<ProbeInput, "workDir">>,
-): ProbeInput {
-	return {
-		workDir,
-		targets: options?.targets ? [...options.targets] : [],
-		options: options?.options ? { ...options.options } : {},
-		timeout_ms: options?.timeout_ms ?? 30000,
-		verbose: options?.verbose ?? false,
-	};
-}
-
-/**
- * Check if a probe supports execution in a directory
- */
-export function isProbeSupported(_probeType: ProbeType, workDir: string): boolean {
-	// This is a simple check - specific probes can implement more sophisticated checks
-	return workDir.trim().length > 0;
 }
 
 /**

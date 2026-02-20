@@ -159,17 +159,6 @@ export function getRunRelativePath(runId: string): string {
 }
 
 /**
- * Get the relative path for a run's worktree directory
- *
- * @param runId - Run identifier
- * @param taskId - Task identifier
- * @returns Relative path from project root
- */
-export function getRunWorktreeRelativePath(runId: string, taskId: string): string {
-	return `${DIRECTORIES.runs}/${runId}/worktrees/${taskId}`;
-}
-
-/**
  * Get all directory paths that should exist in .milhouse/
  *
  * @returns Array of relative paths

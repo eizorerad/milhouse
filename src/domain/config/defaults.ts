@@ -234,22 +234,6 @@ export function getCurrentDefaults(): MilhouseConfig {
 }
 
 /**
- * Get default configuration for a specific version
- *
- * @param version - Configuration version
- * @returns Default configuration for the specified version
- * @throws Error if version is not supported
- */
-export function getDefaultsForVersion(version: string): MilhouseConfig {
-	switch (version) {
-		case "1.0":
-			return { ...DEFAULT_CONFIG_V1 };
-		default:
-			throw new Error(`Unsupported configuration version: ${version}`);
-	}
-}
-
-/**
  * Merge partial config with defaults
  *
  * Deep merges a partial configuration with the default values.

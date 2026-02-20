@@ -124,10 +124,7 @@ export {
 	// Utility functions
 	generateProbeId,
 	DEFAULT_UNSAFE_PATTERNS,
-	containsUnsafePattern,
 	findUnsafePattern,
-	createProbeInput,
-	isProbeSupported,
 	// Parallel execution
 	mergeProbeMetrics,
 	executeProbesInParallel,

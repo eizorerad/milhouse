@@ -254,7 +254,5 @@ export function createThemedSpinner(id: string, text: string, type: SpinnerType 
 export {
 	ProgressSpinner,
 	DynamicAgentSpinner,
-	createSimpleSpinner,
-	LegacySpinnerAdapter,
 	type ActionCounts,
 } from "./_legacy/spinners-deprecated.ts";
