@@ -125,6 +125,8 @@ export interface PhaseContext {
 	workDir: string;
 	engine: AIEngine;
 	config: ResolvedConfig;
+	/** Timestamp (ms) when this phase started — used for duration display */
+	startTime: number;
 	/** Shared store for passing data between hooks */
 	store: Record<string, unknown>;
 }

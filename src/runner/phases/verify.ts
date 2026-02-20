@@ -97,7 +97,7 @@ export const verifyPhaseConfig: PhaseConfig<VerifyInput, VerifyResult> = {
 			totalInput += r.inputTokens;
 			totalOutput += r.outputTokens;
 		}
-		const startTime = (ctx.store._startTime as number) ?? 0;
+		const startTime = ctx.startTime;
 		displayPhaseSummaryHeader("verify", results, totalInput, totalOutput, ctx.config, startTime);
 
 		for (const r of results) {

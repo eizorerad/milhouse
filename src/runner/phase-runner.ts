@@ -159,7 +159,8 @@ export async function runPhase<TItem, TResult>(
 			workDir,
 			engine,
 			config,
-			store: { _startTime: startTime },
+			startTime,
+			store: {},
 		};
 
 		// 6. Update run phase

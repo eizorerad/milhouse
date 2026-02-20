@@ -132,7 +132,7 @@ export const scanPhaseConfig: PhaseConfig<ScanInput, ScanResult> = {
 			totalInput += r.inputTokens;
 			totalOutput += r.outputTokens;
 		}
-		const startTime = (ctx.store._startTime as number) ?? 0;
+		const startTime = ctx.startTime;
 		displayPhaseSummaryHeader("scan", results, totalInput, totalOutput, ctx.config, startTime);
 
 		const allIssues = results.flatMap((r) => (r.success ? r.result.issues : []));

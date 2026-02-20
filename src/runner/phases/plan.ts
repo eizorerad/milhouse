@@ -181,7 +181,7 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 			totalInput += r.inputTokens;
 			totalOutput += r.outputTokens;
 		}
-		const startTime = (ctx.store._startTime as number) ?? 0;
+		const startTime = ctx.startTime;
 		displayPhaseSummaryHeader("plan", results, totalInput, totalOutput, ctx.config, startTime);
 
 		let totalTasks = 0;

@@ -164,7 +164,7 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 			totalInput += r.inputTokens;
 			totalOutput += r.outputTokens;
 		}
-		const startTime = (ctx.store._startTime as number) ?? 0;
+		const startTime = ctx.startTime;
 		displayPhaseSummaryHeader("validate", results, totalInput, totalOutput, ctx.config, startTime);
 
 		// Group by status

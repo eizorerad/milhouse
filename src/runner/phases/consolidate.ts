@@ -150,7 +150,7 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 			totalInput += r.inputTokens;
 			totalOutput += r.outputTokens;
 		}
-		const startTime = (ctx.store._startTime as number) ?? 0;
+		const startTime = ctx.startTime;
 		displayPhaseSummaryHeader(
 			"consolidate",
 			results,
