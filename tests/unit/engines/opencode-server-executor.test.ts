@@ -7,13 +7,13 @@
  * @module tests/unit/engines/opencode-server-executor
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { PortManager } from "../../../src/engines/opencode/port-manager";
 import {
+	type OpencodeServerConfig,
 	OpencodeServerExecutor,
 	createOpencodeExecutor,
-	type OpencodeServerConfig,
 } from "../../../src/engines/opencode/server-executor";
-import { PortManager } from "../../../src/engines/opencode/port-manager";
 
 describe("OpencodeServerExecutor", () => {
 	let executor: OpencodeServerExecutor;
@@ -167,9 +167,7 @@ describe("OpencodeServerExecutor", () => {
 		describe("getMessages", () => {
 			it("should throw when server is not running", async () => {
 				executor = new OpencodeServerExecutor();
-				await expect(executor.getMessages("session-id")).rejects.toThrow(
-					"Server is not running",
-				);
+				await expect(executor.getMessages("session-id")).rejects.toThrow("Server is not running");
 			});
 		});
 
@@ -192,9 +190,7 @@ describe("OpencodeServerExecutor", () => {
 		describe("abortSession", () => {
 			it("should throw when server is not running", async () => {
 				executor = new OpencodeServerExecutor();
-				await expect(executor.abortSession("session-id")).rejects.toThrow(
-					"Server is not running",
-				);
+				await expect(executor.abortSession("session-id")).rejects.toThrow("Server is not running");
 			});
 		});
 
@@ -219,18 +215,14 @@ describe("OpencodeServerExecutor", () => {
 		describe("forkSession", () => {
 			it("should throw when server is not running", async () => {
 				executor = new OpencodeServerExecutor();
-				await expect(executor.forkSession("session-id")).rejects.toThrow(
-					"Server is not running",
-				);
+				await expect(executor.forkSession("session-id")).rejects.toThrow("Server is not running");
 			});
 		});
 
 		describe("deleteSession", () => {
 			it("should throw when server is not running", async () => {
 				executor = new OpencodeServerExecutor();
-				await expect(executor.deleteSession("session-id")).rejects.toThrow(
-					"Server is not running",
-				);
+				await expect(executor.deleteSession("session-id")).rejects.toThrow("Server is not running");
 			});
 		});
 

@@ -9,12 +9,12 @@
  * @module tests/unit/execution/retry.test.ts
  */
 
-import { describe, expect, it, mock, spyOn, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
+	calculateRetryDelay,
 	executeWithRetry,
 	isErrorRetryable,
 	isRetryableError,
-	calculateRetryDelay,
 } from "../../../src/execution/runtime/retry.ts";
 import type { MilhouseRetryConfig } from "../../../src/execution/runtime/types.ts";
 import { DEFAULT_RETRY_CONFIG } from "../../../src/execution/runtime/types.ts";
@@ -56,15 +56,21 @@ function createFailingFn<T>(
 		return successValue;
 	};
 
-	return { fn, get attempts() { return state.attempts; } };
+	return {
+		fn,
+		get attempts() {
+			return state.attempts;
+		},
+	};
 }
 
 /**
  * Create a function that always fails
  */
-function createAlwaysFailingFn(
-	errorMessage = "Test error",
-): { fn: () => Promise<never>; attempts: number[] } {
+function createAlwaysFailingFn(errorMessage = "Test error"): {
+	fn: () => Promise<never>;
+	attempts: number[];
+} {
 	const state = { attempts: [] as number[] };
 
 	const fn = async (): Promise<never> => {
@@ -72,7 +78,12 @@ function createAlwaysFailingFn(
 		throw new Error(errorMessage);
 	};
 
-	return { fn, get attempts() { return state.attempts; } };
+	return {
+		fn,
+		get attempts() {
+			return state.attempts;
+		},
+	};
 }
 
 // ============================================================================
@@ -150,7 +161,7 @@ describe("executeWithRetry", () => {
 			await executeWithRetry(fn, config);
 
 			const retryReasonLog = loggedMessages.find((msg) =>
-				msg.includes("Retrying: --retry-on-any-failure enabled")
+				msg.includes("Retrying: --retry-on-any-failure enabled"),
 			);
 			expect(retryReasonLog).toBeDefined();
 		});
@@ -167,7 +178,7 @@ describe("executeWithRetry", () => {
 			await executeWithRetry(fn, config);
 
 			const notRetryingLog = loggedMessages.find((msg) =>
-				msg.includes("Not retrying: error is not retryable")
+				msg.includes("Not retrying: error is not retryable"),
 			);
 			expect(notRetryingLog).toBeDefined();
 		});

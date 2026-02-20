@@ -66,10 +66,10 @@ describe("Run-aware task functions", () => {
 			const result = readTaskForRun(run.id, task.id, testDir);
 
 			expect(result).not.toBeNull();
-			expect(result!.id).toBe(task.id);
-			expect(result!.title).toBe("Test Task for ISSUE-1");
-			expect(result!.issue_id).toBe("ISSUE-1");
-			expect(result!.status).toBe("pending");
+			expect(result?.id).toBe(task.id);
+			expect(result?.title).toBe("Test Task for ISSUE-1");
+			expect(result?.issue_id).toBe("ISSUE-1");
+			expect(result?.status).toBe("pending");
 		});
 
 		it("should return null for non-existent task ID", () => {
@@ -99,16 +99,16 @@ describe("Run-aware task functions", () => {
 		it("should return the correct task when multiple tasks exist", () => {
 			const run = createRun({ scope: "multiple tasks", workDir: testDir });
 
-			const task1 = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
+			const _task1 = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 			const task2 = createTaskForRun(run.id, createTestTaskData("ISSUE-2"), testDir);
-			const task3 = createTaskForRun(run.id, createTestTaskData("ISSUE-3"), testDir);
+			const _task3 = createTaskForRun(run.id, createTestTaskData("ISSUE-3"), testDir);
 
 			// Read the middle task
 			const result = readTaskForRun(run.id, task2.id, testDir);
 
 			expect(result).not.toBeNull();
-			expect(result!.id).toBe(task2.id);
-			expect(result!.issue_id).toBe("ISSUE-2");
+			expect(result?.id).toBe(task2.id);
+			expect(result?.issue_id).toBe("ISSUE-2");
 		});
 
 		it("should not find task from a different run", () => {
@@ -290,10 +290,10 @@ describe("Run-aware task functions", () => {
 			);
 
 			expect(updated).not.toBeNull();
-			expect(updated!.status).toBe("done");
-			expect(updated!.description).toBe("Updated description");
+			expect(updated?.status).toBe("done");
+			expect(updated?.description).toBe("Updated description");
 			// updated_at should be >= original (could be same millisecond)
-			expect(new Date(updated!.updated_at).getTime()).toBeGreaterThanOrEqual(
+			expect(new Date(updated?.updated_at ?? "").getTime()).toBeGreaterThanOrEqual(
 				new Date(task.updated_at).getTime(),
 			);
 		});
@@ -301,12 +301,7 @@ describe("Run-aware task functions", () => {
 		it("should return null for non-existent task", () => {
 			const run = createRun({ scope: "non-existent update", workDir: testDir });
 
-			const result = updateTaskForRun(
-				run.id,
-				"NON-EXISTENT-TASK",
-				{ status: "done" },
-				testDir,
-			);
+			const result = updateTaskForRun(run.id, "NON-EXISTENT-TASK", { status: "done" }, testDir);
 
 			expect(result).toBeNull();
 		});
@@ -324,7 +319,7 @@ describe("Run-aware task functions", () => {
 
 			// Verify task in run1 is unchanged
 			const taskInRun1 = readTaskForRun(run1.id, task.id, testDir);
-			expect(taskInRun1!.status).toBe("pending");
+			expect(taskInRun1?.status).toBe("pending");
 		});
 	});
 
@@ -333,15 +328,10 @@ describe("Run-aware task functions", () => {
 			const run = createRun({ scope: "safe update test", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
-			const updated = await updateTaskForRunSafe(
-				run.id,
-				task.id,
-				{ status: "running" },
-				testDir,
-			);
+			const updated = await updateTaskForRunSafe(run.id, task.id, { status: "running" }, testDir);
 
 			expect(updated).not.toBeNull();
-			expect(updated!.status).toBe("running");
+			expect(updated?.status).toBe("running");
 		});
 
 		it("should handle concurrent updates safely", async () => {
@@ -360,7 +350,7 @@ describe("Run-aware task functions", () => {
 
 			// Final task should have one of the descriptions
 			const finalTask = readTaskForRun(run.id, task.id, testDir);
-			expect(finalTask!.description).toMatch(/^Update \d$/);
+			expect(finalTask?.description).toMatch(/^Update \d$/);
 		});
 
 		it("should return null for non-existent task", async () => {
@@ -383,18 +373,13 @@ describe("Run-aware task functions", () => {
 			const task = createTaskForRun(run1.id, createTestTaskData("ISSUE-1"), testDir);
 
 			// Try to update using run2's ID
-			const result = await updateTaskForRunSafe(
-				run2.id,
-				task.id,
-				{ status: "done" },
-				testDir,
-			);
+			const result = await updateTaskForRunSafe(run2.id, task.id, { status: "done" }, testDir);
 
 			expect(result).toBeNull();
 
 			// Verify task in run1 is unchanged
 			const taskInRun1 = readTaskForRun(run1.id, task.id, testDir);
-			expect(taskInRun1!.status).toBe("pending");
+			expect(taskInRun1?.status).toBe("pending");
 		});
 	});
 });

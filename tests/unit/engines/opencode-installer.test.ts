@@ -7,12 +7,12 @@
  * @module tests/unit/engines/opencode-installer
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
+	type InstallMethod,
 	OpencodeInstaller,
 	ensureOpencodeInstalled,
 	getInstallationInstructions,
-	type InstallMethod,
 } from "../../../src/engines/opencode/installer";
 
 describe("OpencodeInstaller", () => {

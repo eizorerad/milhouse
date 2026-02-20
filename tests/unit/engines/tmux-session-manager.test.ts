@@ -223,9 +223,7 @@ describe("TmuxSessionManager", () => {
 
 			// List with filter
 			const filteredSessions = await manager.listSessions(true);
-			const hasTestSession = filteredSessions.some((s) =>
-				s.name.startsWith(testSessionPrefix),
-			);
+			const hasTestSession = filteredSessions.some((s) => s.name.startsWith(testSessionPrefix));
 			expect(hasTestSession).toBe(true);
 
 			// Clean up
@@ -248,9 +246,7 @@ describe("TmuxSessionManager", () => {
 			}
 
 			const sessions = await manager.listSessions(true);
-			const testSession = sessions.find((s) =>
-				s.name.includes("test-parse"),
-			);
+			const testSession = sessions.find((s) => s.name.includes("test-parse"));
 
 			if (testSession) {
 				expect(typeof testSession.name).toBe("string");
@@ -503,9 +499,7 @@ describe("TmuxSessionManager", () => {
 
 			// Verify they're gone
 			const sessions = await manager.listSessions(true);
-			const remaining = sessions.filter((s) =>
-				s.name.includes("test-kill-all"),
-			);
+			const remaining = sessions.filter((s) => s.name.includes("test-kill-all"));
 			expect(remaining.length).toBe(0);
 		});
 	});

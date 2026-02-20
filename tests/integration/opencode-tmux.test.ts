@@ -8,10 +8,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { OpencodeServerExecutor } from "../../src/engines/opencode/server-executor";
-import { TmuxSessionManager, isTmuxAvailable } from "../../src/engines/tmux/session-manager";
 import { OpencodeInstaller } from "../../src/engines/opencode/installer";
 import { PortManager } from "../../src/engines/opencode/port-manager";
+import { OpencodeServerExecutor } from "../../src/engines/opencode/server-executor";
+import { TmuxSessionManager, isTmuxAvailable } from "../../src/engines/tmux/session-manager";
 
 // Skip integration tests if environment variable is set
 const skipIntegrationTests = process.env.SKIP_OPENCODE_TESTS === "true";
@@ -113,7 +113,7 @@ describe("OpenCode tmux Integration", () => {
 
 				try {
 					// Start server
-					const port = await executor.startServer(process.cwd());
+					const _port = await executor.startServer(process.cwd());
 					const baseUrl = executor.getBaseUrl();
 
 					// Create tmux session with attach command
@@ -126,7 +126,7 @@ describe("OpenCode tmux Integration", () => {
 					expect(result.data?.sessionName).toContain("test-integration");
 
 					// Verify session exists
-					const exists = await tmuxManager.sessionExists(result.data!.sessionName);
+					const exists = await tmuxManager.sessionExists(result.data?.sessionName ?? "");
 					expect(exists).toBe(true);
 
 					// Clean up tmux session
@@ -195,9 +195,7 @@ describe("OpenCode tmux Integration", () => {
 
 					// Verify all sessions exist
 					const sessions = await tmuxManager.listSessions(true);
-					const testSessions = sessions.filter((s) =>
-						s.name.includes("test-multi"),
-					);
+					const testSessions = sessions.filter((s) => s.name.includes("test-multi"));
 					expect(testSessions.length).toBe(sessionNames.length);
 				} finally {
 					// Clean up
@@ -243,9 +241,7 @@ describe("OpenCode tmux Integration", () => {
 
 				// Verify they exist
 				let sessions = await tmuxManager.listSessions(true);
-				const beforeCount = sessions.filter((s) =>
-					s.name.includes("cleanup-"),
-				).length;
+				const beforeCount = sessions.filter((s) => s.name.includes("cleanup-")).length;
 				expect(beforeCount).toBe(2);
 
 				// Kill all
@@ -254,9 +250,7 @@ describe("OpenCode tmux Integration", () => {
 
 				// Verify they're gone
 				sessions = await tmuxManager.listSessions(true);
-				const afterCount = sessions.filter((s) =>
-					s.name.includes("cleanup-"),
-				).length;
+				const afterCount = sessions.filter((s) => s.name.includes("cleanup-")).length;
 				expect(afterCount).toBe(0);
 			},
 		);

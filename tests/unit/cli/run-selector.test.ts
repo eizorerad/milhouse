@@ -8,7 +8,7 @@
  * @module tests/unit/cli/run-selector
  */
 
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -18,7 +18,7 @@ import {
 	selectOrRequireRun,
 } from "../../../src/cli/commands/utils/run-selector.ts";
 import * as runs from "../../../src/state/runs.ts";
-import type { RunMeta, RunPhase } from "../../../src/state/types.ts";
+import type { RunMeta } from "../../../src/state/types.ts";
 
 describe("run-selector", () => {
 	const testDir = join(process.cwd(), ".test-run-selector");
@@ -40,7 +40,7 @@ describe("run-selector", () => {
 		test("should return exact match when full ID provided", () => {
 			// Create actual runs for testing
 			const run1 = runs.createRun({ scope: "test scope 1", workDir: testDir });
-			const run2 = runs.createRun({ scope: "test scope 2", workDir: testDir });
+			const _run2 = runs.createRun({ scope: "test scope 2", workDir: testDir });
 
 			const result = resolveRunId(run1.id, testDir);
 			expect(result).toBe(run1.id);
@@ -83,8 +83,8 @@ describe("run-selector", () => {
 			// Create two runs that could match the same partial ID
 			// This is tricky because run IDs include timestamps and random parts
 			// We'll create runs and then try to match on a common substring
-			const run1 = runs.createRun({ scope: "test", name: "test", workDir: testDir });
-			const run2 = runs.createRun({ scope: "test", name: "test", workDir: testDir });
+			const _run1 = runs.createRun({ scope: "test", name: "test", workDir: testDir });
+			const _run2 = runs.createRun({ scope: "test", name: "test", workDir: testDir });
 
 			// Both runs should contain "test" in their ID
 			// Try to match on "test" which should match both
@@ -136,7 +136,7 @@ describe("run-selector", () => {
 
 		test("should filter by phase when requirePhase is specified", async () => {
 			// Create runs in different phases
-			const scanRun = runs.createRun({ scope: "scan run", workDir: testDir });
+			const _scanRun = runs.createRun({ scope: "scan run", workDir: testDir });
 			// scanRun is in 'scan' phase by default
 
 			const validateRun = runs.createRun({ scope: "validate run", workDir: testDir });
@@ -158,7 +158,7 @@ describe("run-selector", () => {
 			await expect(
 				selectOrRequireRun(run.id, testDir, {
 					requirePhase: ["validate", "plan"],
-				})
+				}),
 			).rejects.toThrow(/phase/i);
 		});
 
@@ -173,7 +173,7 @@ describe("run-selector", () => {
 			await expect(
 				selectOrRequireRun(undefined, testDir, {
 					requirePhase: ["exec", "verify"],
-				})
+				}),
 			).rejects.toThrow(/No eligible runs/);
 		});
 

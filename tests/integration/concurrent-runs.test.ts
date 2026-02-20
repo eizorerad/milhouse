@@ -11,13 +11,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createRun, loadRunsIndex } from "../../src/state/runs.ts";
+import { createRun } from "../../src/state/runs.ts";
 import {
 	createTaskForRun,
 	loadTasksForRun,
 	readTaskForRun,
-	saveTasksForRun,
-	updateTaskForRun,
 	updateTaskForRunSafe,
 } from "../../src/state/tasks.ts";
 import type { Task } from "../../src/state/types.ts";
@@ -71,12 +69,12 @@ describe("Concurrent run operations", () => {
 			// Verify task1 in run1 is updated
 			const updatedTask1 = readTaskForRun(run1.id, task1.id, testDir);
 			expect(updatedTask1).not.toBeNull();
-			expect(updatedTask1!.status).toBe("done");
+			expect(updatedTask1?.status).toBe("done");
 
 			// Verify task2 in run2 is NOT affected
 			const unchangedTask2 = readTaskForRun(run2.id, task2.id, testDir);
 			expect(unchangedTask2).not.toBeNull();
-			expect(unchangedTask2!.status).toBe("pending");
+			expect(unchangedTask2?.status).toBe("pending");
 
 			// Verify run1 tasks don't appear in run2
 			const run2Tasks = loadTasksForRun(run2.id, testDir);
@@ -96,12 +94,7 @@ describe("Concurrent run operations", () => {
 			const task1 = createTaskForRun(run1.id, createTestTaskData("ISOLATED-1"), testDir);
 
 			// Try to update task1 using run2's ID (should not find it)
-			const result = await updateTaskForRunSafe(
-				run2.id,
-				task1.id,
-				{ status: "failed" },
-				testDir,
-			);
+			const result = await updateTaskForRunSafe(run2.id, task1.id, { status: "failed" }, testDir);
 
 			// The update should return null because task1 doesn't exist in run2
 			expect(result).toBeNull();
@@ -109,7 +102,7 @@ describe("Concurrent run operations", () => {
 			// Verify task1 in run1 is still pending (unchanged)
 			const task1InRun1 = readTaskForRun(run1.id, task1.id, testDir);
 			expect(task1InRun1).not.toBeNull();
-			expect(task1InRun1!.status).toBe("pending");
+			expect(task1InRun1?.status).toBe("pending");
 		});
 
 		it("should handle parallel updates to different runs without interference", async () => {
@@ -122,12 +115,8 @@ describe("Concurrent run operations", () => {
 			const run2Tasks: Task[] = [];
 
 			for (let i = 0; i < 2; i++) {
-				run1Tasks.push(
-					createTaskForRun(run1.id, createTestTaskData(`RUN1-ISSUE-${i}`), testDir),
-				);
-				run2Tasks.push(
-					createTaskForRun(run2.id, createTestTaskData(`RUN2-ISSUE-${i}`), testDir),
-				);
+				run1Tasks.push(createTaskForRun(run1.id, createTestTaskData(`RUN1-ISSUE-${i}`), testDir));
+				run2Tasks.push(createTaskForRun(run2.id, createTestTaskData(`RUN2-ISSUE-${i}`), testDir));
 			}
 
 			// Perform parallel updates to both runs simultaneously
@@ -183,11 +172,7 @@ describe("Concurrent run operations", () => {
 			const run2 = createRun({ scope: "follow-up run 2", workDir: testDir });
 
 			// Create initial task in run1
-			const parentTask = createTaskForRun(
-				run1.id,
-				createTestTaskData("PARENT-ISSUE-1"),
-				testDir,
-			);
+			const parentTask = createTaskForRun(run1.id, createTestTaskData("PARENT-ISSUE-1"), testDir);
 
 			// Simulate creating a follow-up task in run1 (like retry.ts does)
 			const followUpTask = createTaskForRun(
@@ -219,8 +204,8 @@ describe("Concurrent run operations", () => {
 			const readTask = readTaskForRun(run.id, task.id, testDir);
 
 			expect(readTask).not.toBeNull();
-			expect(readTask!.id).toBe(task.id);
-			expect(readTask!.issue_id).toBe("READ-ISSUE-1");
+			expect(readTask?.id).toBe(task.id);
+			expect(readTask?.issue_id).toBe("READ-ISSUE-1");
 		});
 
 		it("should return null for non-existent task", () => {
@@ -257,12 +242,7 @@ describe("Concurrent run operations", () => {
 
 			// Perform a few concurrent updates (reduced from 10 to avoid timeout)
 			const updatePromises = Array.from({ length: 3 }, (_, i) =>
-				updateTaskForRunSafe(
-					run.id,
-					task.id,
-					{ description: `Update ${i}` },
-					testDir,
-				),
+				updateTaskForRunSafe(run.id, task.id, { description: `Update ${i}` }, testDir),
 			);
 
 			const results = await Promise.all(updatePromises);
@@ -273,7 +253,7 @@ describe("Concurrent run operations", () => {
 			// Final task should have one of the descriptions
 			const finalTask = readTaskForRun(run.id, task.id, testDir);
 			expect(finalTask).not.toBeNull();
-			expect(finalTask!.description).toMatch(/^Update \d$/);
+			expect(finalTask?.description).toMatch(/^Update \d$/);
 		});
 
 		it("should handle concurrent updates to different tasks in same run", async () => {
@@ -286,12 +266,7 @@ describe("Concurrent run operations", () => {
 
 			// Update all tasks concurrently
 			const updatePromises = tasks.map((task, i) =>
-				updateTaskForRunSafe(
-					run.id,
-					task.id,
-					{ status: i % 2 === 0 ? "done" : "failed" },
-					testDir,
-				),
+				updateTaskForRunSafe(run.id, task.id, { status: i % 2 === 0 ? "done" : "failed" }, testDir),
 			);
 
 			await Promise.all(updatePromises);
@@ -303,7 +278,7 @@ describe("Concurrent run operations", () => {
 			for (let i = 0; i < finalTasks.length; i++) {
 				const task = finalTasks.find((t) => t.issue_id === `MULTI-ISSUE-${i}`);
 				expect(task).toBeDefined();
-				expect(task!.status).toBe(i % 2 === 0 ? "done" : "failed");
+				expect(task?.status).toBe(i % 2 === 0 ? "done" : "failed");
 			}
 		});
 	});

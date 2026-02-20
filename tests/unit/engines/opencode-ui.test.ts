@@ -8,26 +8,26 @@
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
-	formatTokens,
-	formatTokenPair,
+	type ServerInfo,
+	displayAttachInstructions,
+	displayServerInfo,
+	displayTmuxCompletionSummary,
+	displayTmuxLayoutCommand,
+	displayTmuxModeHeader,
+	formatServerStatusLine,
+} from "../../../src/engines/opencode/ui/attach-instructions";
+import {
+	type AgentStatus,
+	clearAgentStatuses,
+	createProgressBar,
+	displayAgentSummary,
 	displayStatusDashboard,
 	formatCompactStatus,
-	displayAgentSummary,
-	createProgressBar,
-	updateAgentStatus,
+	formatTokenPair,
+	formatTokens,
 	getAllAgentStatuses,
-	clearAgentStatuses,
-	type AgentStatus,
+	updateAgentStatus,
 } from "../../../src/engines/opencode/ui/status-dashboard";
-import {
-	displayTmuxModeHeader,
-	displayServerInfo,
-	displayAttachInstructions,
-	displayTmuxLayoutCommand,
-	formatServerStatusLine,
-	displayTmuxCompletionSummary,
-	type ServerInfo,
-} from "../../../src/engines/opencode/ui/attach-instructions";
 
 describe("Status Dashboard UI", () => {
 	describe("formatTokens", () => {
