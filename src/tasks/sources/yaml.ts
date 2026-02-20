@@ -329,7 +329,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 	/**
 	 * Convert YAML tasks to Milhouse task format
 	 */
-	private convertToTasks(yamlTasks: YamlTask[], rawContent: string): MilhouseTask[] {
+	private convertToTasks(yamlTasks: YamlTask[], _rawContent: string): MilhouseTask[] {
 		const discoveredAt = new Date().toISOString();
 		const defaultPriority = this.fileMetadata?.default_priority || "medium";
 		const defaultEngineHints = this.fileMetadata?.default_engine_hints;
@@ -521,7 +521,11 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 			...collection,
 			tasks,
 			collectionMetadata: {
-				...collection.collectionMetadata!,
+				...(collection.collectionMetadata ?? {
+					totalDiscovered: 0,
+					filteredCount: 0,
+					schemaVersion: "",
+				}),
 				filteredCount: collection.tasks.length - tasks.length,
 				filterCriteria: this.getFilterCriteria(options),
 			},

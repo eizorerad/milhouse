@@ -14,9 +14,9 @@ import {
 	updateVerificationIndex,
 } from "./verification-report.ts";
 import type {
-	VerificationReport,
 	VerificationIndex,
 	VerificationIndexEntry,
+	VerificationReport,
 } from "./verification-types.ts";
 
 // Test directory for file operations

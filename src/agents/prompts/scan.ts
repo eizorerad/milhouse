@@ -16,7 +16,7 @@ import { AGENT_ROLES } from "../../state/types.ts";
  * @param ctx - Phase context with config
  * @returns Full prompt string
  */
-export function buildScanPrompt(scope: string, workDir: string, ctx: PhaseContext): string {
+export function buildScanPrompt(scope: string, _workDir: string, _ctx: PhaseContext): string {
 	const parts: string[] = [];
 
 	// Role

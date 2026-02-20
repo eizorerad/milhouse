@@ -622,7 +622,7 @@ export function createProbeInput(
 /**
  * Check if a probe supports execution in a directory
  */
-export function isProbeSupported(probeType: ProbeType, workDir: string): boolean {
+export function isProbeSupported(_probeType: ProbeType, workDir: string): boolean {
 	// This is a simple check - specific probes can implement more sophisticated checks
 	return workDir.trim().length > 0;
 }

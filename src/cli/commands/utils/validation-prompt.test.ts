@@ -4,9 +4,9 @@
  * Tests for prompt building functions used in validation.
  */
 
-import { describe, expect, it, beforeEach, afterEach, mock } from "bun:test";
-import { buildDeepIssueValidatorPrompt, buildIssueValidatorPrompt } from "./validation-prompt.ts";
+import { describe, expect, it } from "bun:test";
 import type { Issue } from "../../../state/types.ts";
+import { buildDeepIssueValidatorPrompt, buildIssueValidatorPrompt } from "./validation-prompt.ts";
 
 // Create a mock issue for testing
 const createMockIssue = (overrides: Partial<Issue> = {}): Issue => ({

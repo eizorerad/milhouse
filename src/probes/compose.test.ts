@@ -285,14 +285,8 @@ services:
 
 			expect(result).not.toBeNull();
 			expect(result?.services?.nginx).toBeDefined();
-			expect(result?.services?.nginx.ports).toEqual([
-				"80:80",
-				"443:443",
-				"8080:8080",
-			]);
-			expect(result?.services?.nginx.volumes).toEqual([
-				"./nginx.conf:/etc/nginx/nginx.conf:ro",
-			]);
+			expect(result?.services?.nginx.ports).toEqual(["80:80", "443:443", "8080:8080"]);
+			expect(result?.services?.nginx.volumes).toEqual(["./nginx.conf:/etc/nginx/nginx.conf:ro"]);
 		});
 	});
 
@@ -411,9 +405,7 @@ services:
 					},
 				},
 			});
-			expect(result?.services?.service2?.logging).toEqual(
-				result?.services?.service1?.logging
-			);
+			expect(result?.services?.service2?.logging).toEqual(result?.services?.service1?.logging);
 		});
 
 		test("should parse extension fields with x- prefix", () => {
@@ -551,10 +543,7 @@ services:
 			expect(result).not.toBeNull();
 			expect(result?.services?.api?.depends_on).toBeDefined();
 
-			const dependsOn = result?.services?.api?.depends_on as Record<
-				string,
-				{ condition: string }
-			>;
+			const dependsOn = result?.services?.api?.depends_on as Record<string, { condition: string }>;
 			expect(Object.keys(dependsOn)).toHaveLength(3);
 			expect(dependsOn.db?.condition).toBe("service_healthy");
 			expect(dependsOn.redis?.condition).toBe("service_healthy");
@@ -803,10 +792,7 @@ volumes:
 
 			// Verify healthchecks are properly parsed (merged from anchor)
 			expect(result?.services?.db?.healthcheck?.interval).toBe("10s");
-			expect(result?.services?.db?.healthcheck?.test).toEqual([
-				"CMD-SHELL",
-				"pg_isready -U app",
-			]);
+			expect(result?.services?.db?.healthcheck?.test).toEqual(["CMD-SHELL", "pg_isready -U app"]);
 
 			// Verify redis command with block scalar
 			const redisCommand = result?.services?.redis?.command as string;

@@ -46,7 +46,11 @@ export function loadExecutionsForRun(runId: string, workDir = process.cwd()): Ex
 /**
  * Save executions for a specific run
  */
-export function saveExecutionsForRun(runId: string, executions: ExecutionRecord[], workDir = process.cwd()): void {
+export function saveExecutionsForRun(
+	runId: string,
+	executions: ExecutionRecord[],
+	workDir = process.cwd(),
+): void {
 	const path = getExecutionsPathForRun(runId, workDir);
 	const dir = join(path, "..");
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -56,7 +60,11 @@ export function saveExecutionsForRun(runId: string, executions: ExecutionRecord[
 /**
  * Create a new execution record for a specific run
  */
-export function createExecutionForRun(runId: string, execution: Omit<ExecutionRecord, "id">, workDir = process.cwd()): ExecutionRecord {
+export function createExecutionForRun(
+	runId: string,
+	execution: Omit<ExecutionRecord, "id">,
+	workDir = process.cwd(),
+): ExecutionRecord {
 	const executions = loadExecutionsForRun(runId, workDir);
 	const newExecution: ExecutionRecord = { ...execution, id: generateExecutionId() };
 	saveExecutionsForRun(runId, [...executions, newExecution], workDir);
@@ -66,7 +74,12 @@ export function createExecutionForRun(runId: string, execution: Omit<ExecutionRe
 /**
  * Update an existing execution for a specific run
  */
-export function updateExecutionForRun(runId: string, id: string, update: Partial<Omit<ExecutionRecord, "id">>, workDir = process.cwd()): ExecutionRecord | null {
+export function updateExecutionForRun(
+	runId: string,
+	id: string,
+	update: Partial<Omit<ExecutionRecord, "id">>,
+	workDir = process.cwd(),
+): ExecutionRecord | null {
 	const executions = loadExecutionsForRun(runId, workDir);
 	const index = executions.findIndex((e) => e.id === id);
 	if (index === -1) return null;

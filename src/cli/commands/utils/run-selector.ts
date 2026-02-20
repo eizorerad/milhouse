@@ -64,9 +64,7 @@ export function resolveRunId(partialId: string, workDir: string): string {
 	const runs = listRuns(workDir);
 
 	if (runs.length === 0) {
-		throw new Error(
-			`No runs found. Start with: milhouse scan --scope "your scope"`,
-		);
+		throw new Error(`No runs found. Start with: milhouse scan --scope "your scope"`);
 	}
 
 	// Try exact match first
@@ -101,9 +99,7 @@ export function resolveRunId(partialId: string, workDir: string): string {
 
 	// No match found
 	const availableRuns = runs.map((r) => `  • ${r.id}`).join("\n");
-	throw new Error(
-		`Run not found: "${partialId}"\n\nAvailable runs:\n${availableRuns}`,
-	);
+	throw new Error(`Run not found: "${partialId}"\n\nAvailable runs:\n${availableRuns}`);
 }
 
 /**
@@ -162,15 +158,13 @@ export async function selectOrRequireRun(
 	const allRuns = listRuns(workDir);
 
 	if (allRuns.length === 0) {
-		throw new Error(
-			`No runs found. Start with: milhouse scan --scope "your scope"`,
-		);
+		throw new Error(`No runs found. Start with: milhouse scan --scope "your scope"`);
 	}
 
 	// 3. Filter by phase if required
 	let eligibleRuns = allRuns;
 	if (options?.requirePhase) {
-		eligibleRuns = allRuns.filter((r) => options.requirePhase!.includes(r.phase));
+		eligibleRuns = allRuns.filter((r) => options.requirePhase?.includes(r.phase));
 	}
 
 	// 4. If no eligible runs, error

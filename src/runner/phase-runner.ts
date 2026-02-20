@@ -6,27 +6,23 @@
  */
 
 import pLimit from "p-limit";
-import { DEFAULT_AGENT_CONFIGS, type AgentRole } from "../agents/types.ts";
+import { type AgentRole, DEFAULT_AGENT_CONFIGS } from "../agents/types.ts";
 import { createEngine } from "../engines/index.ts";
 import type { AgentRole as EngineAgentRole, PipelinePhase } from "../schemas/engine.schema.ts";
 import { acquireRunLock } from "../state/run-lock.ts";
-import {
-	createRun,
-	loadRunsIndex,
-	updateRunPhaseInMetaWithLock,
-} from "../state/runs.ts";
+import { createRun, loadRunsIndex, updateRunPhaseInMetaWithLock } from "../state/runs.ts";
 import type { RunPhase } from "../state/types.ts";
 import { logInfo, logWarn } from "../ui/logger.ts";
-import { ProgressSpinner, DynamicAgentSpinner } from "../ui/spinners.ts";
+import { DynamicAgentSpinner, ProgressSpinner } from "../ui/spinners.ts";
 import {
-	addPhaseCost,
 	BudgetExceededError,
+	type RunCost,
+	addPhaseCost,
 	calculateCost,
 	checkBudget,
 	createRunCost,
 	formatCost,
 	formatTokens,
-	type RunCost,
 } from "./cost.ts";
 import type {
 	PhaseConfig,
@@ -83,7 +79,7 @@ export async function runPhase<TItem, TResult>(
 			// For other phases, find the latest run
 			const index = loadRunsIndex(workDir);
 			if (index.runs.length === 0) {
-				throw new Error("No runs found. Start with: milhouse --scan --scope \"your scope\"");
+				throw new Error('No runs found. Start with: milhouse --scan --scope "your scope"');
 			}
 			runId = index.runs[index.runs.length - 1].id;
 		}
@@ -93,8 +89,10 @@ export async function runPhase<TItem, TResult>(
 	const lock = acquireRunLock(runId, phaseConfig.name, workDir);
 
 	try {
-		// 3. Create engine
-		const engine = await createEngine(config.engine);
+		// 3. Create engine with concurrency matching worker count
+		const engine = await createEngine(config.engine, {
+			maxConcurrent: config.workers ?? phaseConfig.defaultParallel,
+		});
 
 		// 4. Resolve model for this phase
 		const model = resolvePhaseModel(config, phaseConfig.name);
@@ -109,17 +107,7 @@ export async function runPhase<TItem, TResult>(
 		};
 
 		// 6. Update run phase
-		const phaseMap: Record<string, RunPhase> = {
-			scan: "scan",
-			validate: "validate",
-			plan: "plan",
-			consolidate: "consolidate",
-			verify: "verify",
-		};
-		const currentRunPhase = phaseMap[phaseConfig.name];
-		if (currentRunPhase) {
-			await updateRunPhaseInMetaWithLock(runId, currentRunPhase, workDir);
-		}
+		await updateRunPhaseInMetaWithLock(runId, phaseConfig.name as RunPhase, workDir);
 
 		// 7. beforeRun hook
 		if (phaseConfig.beforeRun) {
@@ -134,14 +122,7 @@ export async function runPhase<TItem, TResult>(
 		}
 
 		// 9. Execute with pool
-		let allResults = await executePool(
-			phaseConfig,
-			items,
-			ctx,
-			model,
-			config,
-			runCost,
-		);
+		let allResults = await executePool(phaseConfig, items, ctx, model, config, runCost);
 
 		// 10. Retry loop (if configured)
 		if (phaseConfig.isRetryable && phaseConfig.retryFilter) {
@@ -161,9 +142,9 @@ export async function runPhase<TItem, TResult>(
 					runCost,
 				);
 
-				// Merge retry results (replace old results for retried items)
-				const retryItemSet = new Set(retryItems);
-				allResults = allResults.filter(r => !retryItemSet.has(r.item as TItem));
+				// Merge retry results — replace old results for retried items
+				const retryIds = new Set(retryItems.map((i) => getFullItemId(i)));
+				allResults = allResults.filter((r) => !retryIds.has(getFullItemId(r.item)));
 				allResults.push(...retryResults);
 			}
 		}
@@ -191,7 +172,14 @@ export async function runPhase<TItem, TResult>(
 		if (phaseConfig.formatSummary) {
 			phaseConfig.formatSummary(allResults, ctx);
 		} else {
-			displayDefaultSummary(phaseConfig.name, allResults, totalInput, totalOutput, config, startTime);
+			displayDefaultSummary(
+				phaseConfig.name,
+				allResults,
+				totalInput,
+				totalOutput,
+				config,
+				startTime,
+			);
 		}
 
 		// 15. Phase transition
@@ -202,12 +190,18 @@ export async function runPhase<TItem, TResult>(
 			}
 		}
 
-		const success = allResults.every(r => r.success);
+		const success = allResults.every((r) => r.success);
 		const phaseCost = runCost.byPhase[phaseConfig.name]?.cost ?? 0;
 
 		return makeResult(
-			phaseConfig.name, runId, success, allResults,
-			totalInput, totalOutput, phaseCost, startTime,
+			phaseConfig.name,
+			runId,
+			success,
+			allResults,
+			totalInput,
+			totalOutput,
+			phaseCost,
+			startTime,
 			{ runId },
 		);
 	} finally {
@@ -259,7 +253,12 @@ async function executeItem<TItem, TResult>(
 	try {
 		// Prefer streaming for real-time progress
 		const aiResult = ctx.engine.executeStreaming
-			? await ctx.engine.executeStreaming(prompt, ctx.workDir, (step) => onProgress?.(step), engineOpts)
+			? await ctx.engine.executeStreaming(
+					prompt,
+					ctx.workDir,
+					(step) => onProgress?.(step),
+					engineOpts,
+				)
 			: await ctx.engine.execute(prompt, ctx.workDir, engineOpts);
 
 		if (!aiResult.success) {
@@ -316,10 +315,15 @@ async function executePool<TItem, TResult>(
 		try {
 			checkBudget(runCost, config.cost);
 		} catch (e) {
-			if (e instanceof BudgetExceededError) { spinner.error("Budget exceeded"); throw e; }
+			if (e instanceof BudgetExceededError) {
+				spinner.error("Budget exceeded");
+				throw e;
+			}
 		}
 
-		const result = await executeItem(phaseConfig, items[0], ctx, model, (step) => spinner.updateStep(step));
+		const result = await executeItem(phaseConfig, items[0], ctx, model, (step) =>
+			spinner.updateStep(step),
+		);
 		const tokenInfo = `${formatTokens(result.inputTokens)} in / ${formatTokens(result.outputTokens)} out`;
 
 		if (result.success) {
@@ -339,7 +343,10 @@ async function executePool<TItem, TResult>(
 			try {
 				checkBudget(runCost, config.cost);
 			} catch (e) {
-				if (e instanceof BudgetExceededError) { spinner.error("Budget exceeded"); throw e; }
+				if (e instanceof BudgetExceededError) {
+					spinner.error("Budget exceeded");
+					throw e;
+				}
 			}
 
 			const itemId = getItemId(item, idx);
@@ -352,18 +359,29 @@ async function executePool<TItem, TResult>(
 
 			spinner.releaseSlot(slot, result.success);
 			return result;
-		})
+		}),
 	);
 
 	try {
 		const results = await Promise.all(tasks);
-		const succeeded = results.filter(r => r.success).length;
-		spinner.success(`${getPhaseLabel(phaseConfig)} complete (${succeeded}/${results.length} succeeded)`);
+		const succeeded = results.filter((r) => r.success).length;
+		spinner.success(
+			`${getPhaseLabel(phaseConfig)} complete (${succeeded}/${results.length} succeeded)`,
+		);
 		return results;
 	} catch (error) {
 		spinner.error(`${getPhaseLabel(phaseConfig)} failed`);
 		throw error;
 	}
+}
+
+/** Extract full item ID for deduplication (no truncation) */
+function getFullItemId(item: unknown): string {
+	if (item && typeof item === "object") {
+		const obj = item as Record<string, unknown>;
+		if (typeof obj.id === "string") return obj.id;
+	}
+	return "";
 }
 
 /** Extract a short identifier from an item for spinner display */
@@ -391,8 +409,8 @@ function displayDefaultSummary<TResult>(
 	const duration = Date.now() - startTime;
 	const minutes = Math.floor(duration / 60000);
 	const seconds = Math.floor((duration % 60000) / 1000);
-	const succeeded = results.filter(r => r.success).length;
-	const failed = results.filter(r => !r.success).length;
+	const succeeded = results.filter((r) => r.success).length;
+	const failed = results.filter((r) => !r.success).length;
 
 	const cost = calculateCost({ input: totalInput, output: totalOutput }, config.cost);
 
@@ -405,7 +423,7 @@ function displayDefaultSummary<TResult>(
 	console.log(`  Cost:      ${formatCost(cost)}`);
 
 	// Show errors for failed items
-	const failedItems = results.filter(r => !r.success && r.error);
+	const failedItems = results.filter((r) => !r.success && r.error);
 	for (const item of failedItems) {
 		console.log(`  Error:     ${item.error}`);
 	}

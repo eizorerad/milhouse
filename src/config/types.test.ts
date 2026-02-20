@@ -9,13 +9,13 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-	DEFAULT_OPTIONS as ConfigDefaultOptions,
-	type RuntimeOptions as ConfigRuntimeOptions,
-} from "./types.ts";
-import {
 	DEFAULT_OPTIONS as CliDefaultOptions,
 	type RuntimeOptions as CliRuntimeOptions,
 } from "../cli/runtime-options.ts";
+import {
+	DEFAULT_OPTIONS as ConfigDefaultOptions,
+	type RuntimeOptions as ConfigRuntimeOptions,
+} from "./types.ts";
 
 describe("RuntimeOptions type consistency", () => {
 	test("config/types.ts re-exports RuntimeOptions from cli/runtime-options.ts", () => {

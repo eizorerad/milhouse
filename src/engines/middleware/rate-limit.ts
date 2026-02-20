@@ -126,26 +126,26 @@ export function getEngineRateLimiter(
 	engineName: string,
 	options: RateLimitOptions = {},
 ): Bottleneck {
-	if (!engineLimiters.has(engineName)) {
-		const { maxPerMinute = 30, minTime = 200, maxConcurrent = 1 } = options;
-
-		const limiter = new Bottleneck({
-			reservoir: maxPerMinute,
-			reservoirRefreshAmount: maxPerMinute,
-			reservoirRefreshInterval: 60 * 1000,
-			minTime,
-			maxConcurrent,
-		});
-
-		engineLimiters.set(engineName, limiter);
-
-		loggers.engine.info(
-			{ engineName, maxPerMinute, minTime },
-			"Per-engine rate limiter initialized",
-		);
+	const existing = engineLimiters.get(engineName);
+	if (existing) {
+		return existing;
 	}
 
-	return engineLimiters.get(engineName)!;
+	const { maxPerMinute = 30, minTime = 200, maxConcurrent = 1 } = options;
+
+	const limiter = new Bottleneck({
+		reservoir: maxPerMinute,
+		reservoirRefreshAmount: maxPerMinute,
+		reservoirRefreshInterval: 60 * 1000,
+		minTime,
+		maxConcurrent,
+	});
+
+	engineLimiters.set(engineName, limiter);
+
+	loggers.engine.info({ engineName, maxPerMinute, minTime }, "Per-engine rate limiter initialized");
+
+	return limiter;
 }
 
 /**

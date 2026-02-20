@@ -58,285 +58,53 @@ export const AGENT_CATEGORIES: Record<AgentRole, AgentCategory> = {
 };
 
 /**
- * Agent capability flags
- */
-export interface AgentCapabilities {
-	/** Can read files from the repository */
-	canReadFiles: boolean;
-	/** Can write/modify files */
-	canWriteFiles: boolean;
-	/** Can execute shell commands */
-	canExecuteCommands: boolean;
-	/** Can create git branches */
-	canCreateBranches: boolean;
-	/** Can create commits */
-	canCreateCommits: boolean;
-	/** Can create PRs */
-	canCreatePRs: boolean;
-	/** Produces read-only output (probes) */
-	isReadOnly: boolean;
-	/** Can run in parallel with other agents */
-	supportsParallel: boolean;
-}
-
-/**
- * Default capabilities per agent category
- */
-export const CATEGORY_CAPABILITIES: Record<AgentCategory, AgentCapabilities> = {
-	pipeline: {
-		canReadFiles: true,
-		canWriteFiles: true,
-		canExecuteCommands: true,
-		canCreateBranches: true,
-		canCreateCommits: true,
-		canCreatePRs: true,
-		isReadOnly: false,
-		supportsParallel: true,
-	},
-	support: {
-		canReadFiles: true,
-		canWriteFiles: false,
-		canExecuteCommands: false,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-		isReadOnly: true,
-		supportsParallel: true,
-	},
-	inspector: {
-		canReadFiles: true,
-		canWriteFiles: false,
-		canExecuteCommands: true,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-		isReadOnly: true,
-		supportsParallel: true,
-	},
-};
-
-/**
- * Agent capability overrides per role (exceptions to category defaults)
- */
-export const AGENT_CAPABILITY_OVERRIDES: Partial<Record<AgentRole, Partial<AgentCapabilities>>> = {
-	LI: {
-		canWriteFiles: false,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-	},
-	IV: {
-		canWriteFiles: false,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-	},
-	PL: {
-		canWriteFiles: false,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-	},
-	PR: {
-		canWriteFiles: false,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-	},
-	CDM: {
-		canWriteFiles: false,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-	},
-	TV: {
-		canWriteFiles: false,
-		canCreateBranches: false,
-		canCreateCommits: false,
-		canCreatePRs: false,
-	},
-};
-
-/**
- * Get capabilities for a specific agent role
- */
-export function getAgentCapabilities(role: AgentRole): AgentCapabilities {
-	const category = AGENT_CATEGORIES[role];
-	const baseCapabilities = CATEGORY_CAPABILITIES[category];
-	const overrides = AGENT_CAPABILITY_OVERRIDES[role] || {};
-
-	return {
-		...baseCapabilities,
-		...overrides,
-	};
-}
-
-/**
  * Agent execution configuration
  */
 export interface AgentConfig {
-	/** Agent role */
 	role: AgentRole;
-	/** Human-readable name */
 	name: string;
-	/** Description of what the agent does */
 	description: string;
-	/** Agent capabilities */
-	capabilities: AgentCapabilities;
-	/** Default AI engine to use */
 	defaultEngine: AIEngineName;
-	/** Timeout in milliseconds */
 	timeoutMs: number;
-	/** Maximum retries on failure */
 	maxRetries: number;
-	/** Delay between retries in milliseconds */
 	retryDelayMs: number;
+}
+
+/** Create an agent config with shared defaults */
+function cfg(
+	role: AgentRole,
+	name: string,
+	overrides?: { maxRetries?: number; retryDelayMs?: number },
+): AgentConfig {
+	return {
+		role,
+		name,
+		description: AGENT_ROLE_DESCRIPTIONS[role],
+		defaultEngine: "claude",
+		timeoutMs: 4_000_000,
+		maxRetries: overrides?.maxRetries ?? 2,
+		retryDelayMs: overrides?.retryDelayMs ?? 3000,
+	};
 }
 
 /**
  * Default agent configurations
  */
 export const DEFAULT_AGENT_CONFIGS: Record<AgentRole, AgentConfig> = {
-	LI: {
-		role: "LI",
-		name: "Lead Investigator",
-		description: AGENT_ROLE_DESCRIPTIONS.LI,
-		capabilities: getAgentCapabilities("LI"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 5000,
-	},
-	IV: {
-		role: "IV",
-		name: "Issue Validator",
-		description: AGENT_ROLE_DESCRIPTIONS.IV,
-		capabilities: getAgentCapabilities("IV"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 3000,
-	},
-	PL: {
-		role: "PL",
-		name: "Planner",
-		description: AGENT_ROLE_DESCRIPTIONS.PL,
-		capabilities: getAgentCapabilities("PL"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 5000,
-	},
-	PR: {
-		role: "PR",
-		name: "Plan Reviewer",
-		description: AGENT_ROLE_DESCRIPTIONS.PR,
-		capabilities: getAgentCapabilities("PR"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 1,
-		retryDelayMs: 3000,
-	},
-	CDM: {
-		role: "CDM",
-		name: "Consolidator",
-		description: AGENT_ROLE_DESCRIPTIONS.CDM,
-		capabilities: getAgentCapabilities("CDM"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 5000,
-	},
-	EX: {
-		role: "EX",
-		name: "Executor",
-		description: AGENT_ROLE_DESCRIPTIONS.EX,
-		capabilities: getAgentCapabilities("EX"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 3,
-		retryDelayMs: 10000,
-	},
-	TV: {
-		role: "TV",
-		name: "Truth Verifier",
-		description: AGENT_ROLE_DESCRIPTIONS.TV,
-		capabilities: getAgentCapabilities("TV"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 1,
-		retryDelayMs: 3000,
-	},
-	RL: {
-		role: "RL",
-		name: "Repo Librarian",
-		description: AGENT_ROLE_DESCRIPTIONS.RL,
-		capabilities: getAgentCapabilities("RL"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 2000,
-	},
-	ETI: {
-		role: "ETI",
-		name: "Environment Topology Inspector",
-		description: AGENT_ROLE_DESCRIPTIONS.ETI,
-		capabilities: getAgentCapabilities("ETI"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 2000,
-	},
-	DLA: {
-		role: "DLA",
-		name: "Database Layer Auditor",
-		description: AGENT_ROLE_DESCRIPTIONS.DLA,
-		capabilities: getAgentCapabilities("DLA"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 3000,
-	},
-	CA: {
-		role: "CA",
-		name: "Cache Auditor",
-		description: AGENT_ROLE_DESCRIPTIONS.CA,
-		capabilities: getAgentCapabilities("CA"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 2000,
-	},
-	SI: {
-		role: "SI",
-		name: "Storage Inspector",
-		description: AGENT_ROLE_DESCRIPTIONS.SI,
-		capabilities: getAgentCapabilities("SI"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 2000,
-	},
-	DVA: {
-		role: "DVA",
-		name: "Dependency Version Auditor",
-		description: AGENT_ROLE_DESCRIPTIONS.DVA,
-		capabilities: getAgentCapabilities("DVA"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 3000,
-	},
-	RR: {
-		role: "RR",
-		name: "Repro Runner",
-		description: AGENT_ROLE_DESCRIPTIONS.RR,
-		capabilities: getAgentCapabilities("RR"),
-		defaultEngine: "claude",
-		timeoutMs: 4000000, // ~66 minutes
-		maxRetries: 2,
-		retryDelayMs: 5000,
-	},
+	LI: cfg("LI", "Lead Investigator", { retryDelayMs: 5000 }),
+	IV: cfg("IV", "Issue Validator"),
+	PL: cfg("PL", "Planner", { retryDelayMs: 5000 }),
+	PR: cfg("PR", "Plan Reviewer", { maxRetries: 1 }),
+	CDM: cfg("CDM", "Consolidator", { retryDelayMs: 5000 }),
+	EX: cfg("EX", "Executor", { maxRetries: 3, retryDelayMs: 10000 }),
+	TV: cfg("TV", "Truth Verifier", { maxRetries: 1 }),
+	RL: cfg("RL", "Repo Librarian", { retryDelayMs: 2000 }),
+	ETI: cfg("ETI", "Environment Topology Inspector", { retryDelayMs: 2000 }),
+	DLA: cfg("DLA", "Database Layer Auditor"),
+	CA: cfg("CA", "Cache Auditor", { retryDelayMs: 2000 }),
+	SI: cfg("SI", "Storage Inspector", { retryDelayMs: 2000 }),
+	DVA: cfg("DVA", "Dependency Version Auditor"),
+	RR: cfg("RR", "Repro Runner", { retryDelayMs: 5000 }),
 };
 
 /**
@@ -422,16 +190,11 @@ export function buildPromptFromSections(sections: PromptSection[]): string {
  */
 export function createRoleSection(role: AgentRole, additionalContext?: string): PromptSection {
 	const description = AGENT_ROLE_DESCRIPTIONS[role];
-	const config = DEFAULT_AGENT_CONFIGS[role];
-
-	let content = `Role: ${config.name} (${role})\n${description}`;
-	if (additionalContext) {
-		content += `\n\n${additionalContext}`;
-	}
+	const { name } = DEFAULT_AGENT_CONFIGS[role];
 
 	return {
 		type: "role",
-		header: `Role: ${config.name} (${role})`,
+		header: `Role: ${name} (${role})`,
 		content: additionalContext ? `${description}\n\n${additionalContext}` : description,
 		priority: SECTION_PRIORITIES.role,
 	};
@@ -734,50 +497,6 @@ export interface TVOutput {
 }
 
 /**
- * Parallel execution types
- */
-
-/** Strategy for parallel agent execution */
-export type ParallelStrategy = "all" | "wave" | "limited";
-
-/** Parallel execution configuration */
-export interface ParallelExecutionConfig {
-	/** Strategy to use */
-	strategy: ParallelStrategy;
-	/** Maximum concurrent agents (for 'limited' strategy) */
-	maxConcurrent?: number;
-	/** Whether to fail fast on first error */
-	failFast: boolean;
-	/** Timeout for entire parallel batch */
-	batchTimeoutMs?: number;
-}
-
-/** Default parallel execution config */
-export const DEFAULT_PARALLEL_CONFIG: ParallelExecutionConfig = {
-	strategy: "limited",
-	maxConcurrent: 4,
-	failFast: false,
-	batchTimeoutMs: 4000000, // ~66 minutes
-};
-
-/** Result of parallel agent execution */
-export interface ParallelExecutionResult<TOutput = unknown> {
-	/** Individual agent results */
-	results: Array<{
-		request: AgentRequest;
-		response: AgentResponse<TOutput>;
-	}>;
-	/** Overall success (all succeeded) */
-	allSucceeded: boolean;
-	/** Number of successes */
-	successCount: number;
-	/** Number of failures */
-	failureCount: number;
-	/** Combined metrics */
-	totalMetrics: AgentMetrics;
-}
-
-/**
  * Agent lifecycle hooks
  */
 
@@ -822,10 +541,12 @@ export function isInspectorAgent(role: AgentRole): boolean {
 }
 
 /**
- * Check if a role is read-only
+ * Check if a role is read-only (non-pipeline agents are read-only, EX is the only pipeline writer)
  */
 export function isReadOnlyAgent(role: AgentRole): boolean {
-	return getAgentCapabilities(role).isReadOnly;
+	const category = AGENT_CATEGORIES[role];
+	if (category !== "pipeline") return true;
+	return role !== "EX";
 }
 
 /**

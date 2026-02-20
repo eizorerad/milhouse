@@ -277,7 +277,7 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 			const match = line.match(CHECKBOX_PATTERN);
 
 			if (match) {
-				const [, indent, checkMark, rawTitle] = match;
+				const [, _indent, checkMark, rawTitle] = match;
 				const isCompleted = checkMark.toLowerCase() === "x";
 				const task = this.createTaskFromLine(
 					rawTitle,
@@ -315,9 +315,8 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 
 		// Extract labels
 		const labels: string[] = [];
-		let labelMatch: RegExpExecArray | null;
 		const labelRegex = new RegExp(LABEL_PATTERN.source, "g");
-		while ((labelMatch = labelRegex.exec(rawTitle)) !== null) {
+		for (const labelMatch of rawTitle.matchAll(labelRegex)) {
 			labels.push(labelMatch[1]);
 		}
 
@@ -327,18 +326,16 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 
 		// Extract engine hints
 		const engines: EngineType[] = [];
-		let engineMatch: RegExpExecArray | null;
 		const engineRegex = new RegExp(ENGINE_PATTERN.source, "g");
-		while ((engineMatch = engineRegex.exec(rawTitle)) !== null) {
+		for (const engineMatch of rawTitle.matchAll(engineRegex)) {
 			const engine = parseEngineType(engineMatch[1]);
 			if (engine) engines.push(engine);
 		}
 
 		// Extract expected artifacts
 		const artifacts: ExpectedArtifact[] = [];
-		let artifactMatch: RegExpExecArray | null;
 		const artifactRegex = new RegExp(ARTIFACT_PATTERN.source, "g");
-		while ((artifactMatch = artifactRegex.exec(rawTitle)) !== null) {
+		for (const artifactMatch of rawTitle.matchAll(artifactRegex)) {
 			artifacts.push({
 				type: artifactMatch[1] as ExpectedArtifact["type"],
 				pattern: artifactMatch[2],
@@ -348,9 +345,8 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 
 		// Extract dependencies
 		const dependencies: string[] = [];
-		let dependsMatch: RegExpExecArray | null;
 		const dependsRegex = new RegExp(DEPENDS_PATTERN.source, "g");
-		while ((dependsMatch = dependsRegex.exec(rawTitle)) !== null) {
+		for (const dependsMatch of rawTitle.matchAll(dependsRegex)) {
 			dependencies.push(dependsMatch[1]);
 		}
 
@@ -551,7 +547,11 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 			...collection,
 			tasks,
 			collectionMetadata: {
-				...collection.collectionMetadata!,
+				...(collection.collectionMetadata ?? {
+					totalDiscovered: 0,
+					filteredCount: 0,
+					schemaVersion: "",
+				}),
 				filteredCount: collection.tasks.length - tasks.length,
 				filterCriteria: this.getFilterCriteria(options),
 			},

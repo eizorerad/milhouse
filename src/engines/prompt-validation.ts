@@ -160,8 +160,10 @@ function extractSectionHeaders(prompt: string): string[] {
 	let match: RegExpExecArray | null;
 
 	const pattern = new RegExp(SECTION_HEADER_PATTERN.source, "gm");
-	while ((match = pattern.exec(prompt)) !== null) {
+	match = pattern.exec(prompt);
+	while (match !== null) {
 		headers.push(match[1].trim());
+		match = pattern.exec(prompt);
 	}
 
 	return headers;

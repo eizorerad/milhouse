@@ -19,8 +19,9 @@ import {
 	mkdirSync,
 	readFileSync,
 	readlinkSync,
-	readdirSync,
 	rmSync,
+	symlinkSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -151,9 +152,7 @@ describe("PlanStore", () => {
 
 			// Test first run
 			setupActiveRun(tempDir, runId1);
-			expect(getCurrentPlansDir(tempDir)).toBe(
-				join(tempDir, ".milhouse", "runs", runId1, "plans"),
-			);
+			expect(getCurrentPlansDir(tempDir)).toBe(join(tempDir, ".milhouse", "runs", runId1, "plans"));
 
 			// Switch to second run
 			const runsIndex = {
@@ -168,9 +167,7 @@ describe("PlanStore", () => {
 				JSON.stringify(runsIndex, null, 2),
 			);
 
-			expect(getCurrentPlansDir(tempDir)).toBe(
-				join(tempDir, ".milhouse", "runs", runId2, "plans"),
-			);
+			expect(getCurrentPlansDir(tempDir)).toBe(join(tempDir, ".milhouse", "runs", runId2, "plans"));
 		});
 	});
 
@@ -709,6 +706,27 @@ describe("PlanStore", () => {
 		});
 
 		test("returns 0 when legacy dir is already a symlink", () => {
+			// Symlinks may not be supported on Windows without elevated permissions
+			const canSymlink = (() => {
+				try {
+					const testTarget = join(tempDir, ".symtest-target");
+					const testLink = join(tempDir, ".symtest-link");
+					mkdirSync(testTarget, { recursive: true });
+					symlinkSync(testTarget, testLink, "dir");
+					unlinkSync(testLink);
+					rmSync(testTarget, { recursive: true, force: true });
+					return true;
+				} catch {
+					return false;
+				}
+			})();
+
+			if (!canSymlink) {
+				// On systems without symlink support, syncLegacyPlansView falls back
+				// to copy, so importLegacyPlans won't detect a symlink
+				return;
+			}
+
 			const runId = "run_2024-01-27_12-30-45";
 			setupActiveRun(tempDir, runId);
 			writePlanFile(tempDir, "plan.md", "content");

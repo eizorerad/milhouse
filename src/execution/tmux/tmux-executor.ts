@@ -17,19 +17,19 @@
  */
 
 import {
-	TmuxSessionManager,
-	ensureTmuxInstalled,
-	getInstallationInstructions,
-} from "../../engines/tmux/index.ts";
-import {
 	OpencodeServerExecutor,
 	PortManager,
+	type ServerInfo,
 	displayAttachInstructions,
 	displayTmuxCompletionSummary,
 	displayTmuxModeHeader,
 	getMessageOptionsForPhase,
-	type ServerInfo,
 } from "../../engines/opencode/index.ts";
+import {
+	TmuxSessionManager,
+	ensureTmuxInstalled,
+	getInstallationInstructions,
+} from "../../engines/tmux/index.ts";
 import { logDebug, logInfo, logSuccess, logWarn } from "../../ui/logger.ts";
 import type { IssueGroup } from "../issue-executor.ts";
 
@@ -196,7 +196,9 @@ export function showCompletionSummary(
 	servers: TmuxServerInfo[],
 	getStatus: (server: TmuxServerInfo) => ServerInfo["status"],
 ): void {
-	const serverInfos: ServerInfo[] = servers.map((server) => toServerInfo(server, getStatus(server)));
+	const serverInfos: ServerInfo[] = servers.map((server) =>
+		toServerInfo(server, getStatus(server)),
+	);
 	displayTmuxCompletionSummary(serverInfos);
 }
 

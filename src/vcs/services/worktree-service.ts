@@ -401,7 +401,9 @@ export async function cleanupAllWorktrees(workDir: string): Promise<VcsResult<vo
  * Clean up legacy worktree directories
  * @see WorktreeService.cleanupLegacyWorktreeDirectories
  */
-export async function cleanupLegacyWorktreeDirectories(workDir: string): Promise<VcsResult<number>> {
+export async function cleanupLegacyWorktreeDirectories(
+	workDir: string,
+): Promise<VcsResult<number>> {
 	return defaultService.cleanupLegacyWorktreeDirectories(workDir);
 }
 

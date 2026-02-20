@@ -218,7 +218,7 @@ export class MarkdownFolderTaskSource implements IMilhouseTaskSource, ITaskSourc
 		this.discoveredFiles = absolutePaths.map((absPath) => ({
 			path: absPath,
 			name: basename(absPath, ".md"),
-			relativePath: absPath.replace(resolve(this.folderPath) + "/", ""),
+			relativePath: absPath.replace(`${resolve(this.folderPath)}/`, ""),
 		}));
 
 		// Sort for consistent ordering
@@ -331,7 +331,11 @@ export class MarkdownFolderTaskSource implements IMilhouseTaskSource, ITaskSourc
 			...collection,
 			tasks,
 			collectionMetadata: {
-				...collection.collectionMetadata!,
+				...(collection.collectionMetadata ?? {
+					totalDiscovered: 0,
+					filteredCount: 0,
+					schemaVersion: "",
+				}),
 				filteredCount: collection.tasks.length - tasks.length,
 				filterCriteria: this.getFilterCriteria(options),
 			},

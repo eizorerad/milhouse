@@ -21,13 +21,18 @@ import { copyFileSync, cpSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import pLimit from "p-limit";
 import { MILHOUSE_DIR, PROGRESS_FILE } from "../../domain/config/directories.ts";
-import { logTaskProgress } from "../../services/config/index.ts";
 import type { AIEngine } from "../../engines/types.ts";
 import { bus } from "../../events/index.ts";
+import { logTaskProgress } from "../../services/config/index.ts";
+import type { Task as StateTask } from "../../state/types.ts";
+import type { LegacyTask as Task } from "../../tasks/index.ts";
+import { YamlTaskSource } from "../../tasks/sources/yaml.ts";
+import { logDebug, logError, logInfo, logSuccess, logWarn } from "../../ui/logger.ts";
+import { notifyTaskComplete, notifyTaskFailed } from "../../ui/notify.ts";
 import {
+	deleteLocalBranch,
 	getCurrentBranch,
 	returnToBaseBranch,
-	deleteLocalBranch,
 } from "../../vcs/services/branch-service.ts";
 import { abortMerge, mergeAgentBranch } from "../../vcs/services/merge-service.ts";
 import {
@@ -35,14 +40,12 @@ import {
 	createWorktree,
 	getWorktreeBase,
 } from "../../vcs/services/worktree-service.ts";
-import type { Task as StateTask } from "../../state/types.ts";
-import { YamlTaskSource } from "../../tasks/sources/yaml.ts";
-import type { LegacyTask as Task } from "../../tasks/index.ts";
-import { logDebug, logError, logInfo, logSuccess, logWarn } from "../../ui/logger.ts";
-import { notifyTaskComplete, notifyTaskFailed } from "../../ui/notify.ts";
-import { createMergeConflictInfo, resolveConflictsWithEngine } from "../runtime/conflict-resolution.ts";
-import { buildParallelExecutionPrompt, type ParallelPromptOptions } from "../runtime/prompt.ts";
 import { legacyFlagToBrowserMode } from "../runtime/browser.ts";
+import {
+	createMergeConflictInfo,
+	resolveConflictsWithEngine,
+} from "../runtime/conflict-resolution.ts";
+import { buildParallelExecutionPrompt } from "../runtime/prompt.ts";
 import { executeWithRetry, isRetryableError } from "../runtime/retry.ts";
 import { DEFAULT_RETRY_CONFIG, type MilhouseRetryConfig } from "../runtime/types.ts";
 import type {
@@ -66,7 +69,7 @@ async function runAgentInWorktree(
 	task: Task,
 	agentNum: number,
 	baseBranch: string,
-	worktreeBase: string,
+	_worktreeBase: string,
 	originalDir: string,
 	prdSource: string,
 	prdFile: string,
@@ -153,16 +156,13 @@ async function runAgentInWorktree(
 			baseDelayMs: retryDelay,
 			retryOnAnyFailure,
 		};
-		const retryResult = await executeWithRetry(
-			async () => {
-				const res = await engine.execute(prompt, worktreeDir, engineOptions);
-				if (!res.success && res.error && isRetryableError(res.error)) {
-					throw new Error(res.error);
-				}
-				return res;
-			},
-			retryConfig,
-		);
+		const retryResult = await executeWithRetry(async () => {
+			const res = await engine.execute(prompt, worktreeDir, engineOptions);
+			if (!res.success && res.error && isRetryableError(res.error)) {
+				throw new Error(res.error);
+			}
+			return res;
+		}, retryConfig);
 
 		// Handle retry result
 		if (!retryResult.success || !retryResult.value) {
@@ -255,7 +255,12 @@ async function mergeCompletedBranches(
 			});
 
 			const conflicts = createMergeConflictInfo(merge.conflictedFiles, branch, targetBranch);
-			const resolutionResult = await resolveConflictsWithEngine(engine, conflicts, workDir, modelOverride);
+			const resolutionResult = await resolveConflictsWithEngine(
+				engine,
+				conflicts,
+				workDir,
+				modelOverride,
+			);
 
 			if (resolutionResult.success) {
 				logSuccess(`Resolved conflicts and merged ${branch}`);
@@ -739,7 +744,7 @@ export async function runParallelGroup(
 	const { engine, workDir, baseBranch, maxConcurrent, maxRetries, retryDelay, modelOverride } =
 		options;
 
-	const worktreeBase = getWorktreeBase(workDir);
+	const _worktreeBase = getWorktreeBase(workDir);
 	const limit = pLimit(maxConcurrent);
 	const completedTasks: string[] = [];
 	const failedTasks: string[] = [];
@@ -821,16 +826,13 @@ export async function runParallelGroup(
 					baseDelayMs: retryDelay,
 					retryOnAnyFailure: options.retryOnAnyFailure,
 				};
-				const retryResult = await executeWithRetry(
-					async () => {
-						const res = await engine.execute(prompt, worktreeDir, engineOptions);
-						if (!res.success && res.error && isRetryableError(res.error)) {
-							throw new Error(res.error);
-						}
-						return res;
-					},
-					retryConfig,
-				);
+				const retryResult = await executeWithRetry(async () => {
+					const res = await engine.execute(prompt, worktreeDir, engineOptions);
+					if (!res.success && res.error && isRetryableError(res.error)) {
+						throw new Error(res.error);
+					}
+					return res;
+				}, retryConfig);
 
 				// Handle retry result
 				if (!retryResult.success || !retryResult.value) {

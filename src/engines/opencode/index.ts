@@ -110,7 +110,11 @@ export { PortManager } from "./port-manager";
 // Server Executor
 // ============================================================================
 
-export { OpencodeServerExecutor, createOpencodeExecutor, parseModelString } from "./server-executor";
+export {
+	OpencodeServerExecutor,
+	createOpencodeExecutor,
+	parseModelString,
+} from "./server-executor";
 
 export type { OpencodeServerConfig } from "./server-executor";
 

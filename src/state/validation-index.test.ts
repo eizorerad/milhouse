@@ -7,25 +7,25 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createRun } from "./runs.ts";
 import {
-	getValidationIndexPath,
-	getValidationReportsDir,
-	loadValidationIndex,
-	saveValidationIndex,
 	addValidationReportToIndex,
-	updateValidationIndex,
-	getValidationReportsForRun,
-	getValidationReportsByIssue,
-	getLatestValidationReport,
-	getValidationReportsByStatus,
-	countValidationReportsByStatus,
-	isIssueValidated,
-	getUnvalidatedIssueIds,
-	removeValidationReportFromIndex,
 	clearValidationIndex,
+	countValidationReportsByStatus,
+	getLatestValidationReport,
+	getUnvalidatedIssueIds,
+	getValidationIndexPath,
+	getValidationReportsByIssue,
+	getValidationReportsByStatus,
+	getValidationReportsDir,
+	getValidationReportsForRun,
+	isIssueValidated,
+	loadValidationIndex,
 	rebuildValidationIndex,
+	removeValidationReportFromIndex,
+	saveValidationIndex,
+	updateValidationIndex,
 } from "./validation-index.ts";
-import { createRun, getRunDir } from "./runs.ts";
 
 describe("Validation Index Module Tests", () => {
 	const testDir = join(process.cwd(), ".test-validation-index");
@@ -80,7 +80,7 @@ describe("Validation Index Module Tests", () => {
 					reports: [],
 					updated_at: new Date().toISOString(),
 				},
-				testDir
+				testDir,
 			);
 
 			const indexPath = getValidationIndexPath(run.id, testDir);
@@ -97,7 +97,7 @@ describe("Validation Index Module Tests", () => {
 					reports: [],
 					updated_at: oldTimestamp,
 				},
-				testDir
+				testDir,
 			);
 
 			const loaded = loadValidationIndex(run.id, testDir);
@@ -114,7 +114,7 @@ describe("Validation Index Module Tests", () => {
 					report_path: "reports/issue-1.json",
 					status: "valid",
 				},
-				testDir
+				testDir,
 			);
 
 			const index = loadValidationIndex(run.id, testDir);
@@ -135,7 +135,7 @@ describe("Validation Index Module Tests", () => {
 					report_path: "reports/issue-1.json",
 					status: "partial",
 				},
-				testDir
+				testDir,
 			);
 
 			// Update same report
@@ -146,7 +146,7 @@ describe("Validation Index Module Tests", () => {
 					report_path: "reports/issue-1.json",
 					status: "valid",
 				},
-				testDir
+				testDir,
 			);
 
 			const index = loadValidationIndex(run.id, testDir);
@@ -202,7 +202,7 @@ describe("Validation Index Module Tests", () => {
 					status: "partial",
 					created_at: "2024-01-01T00:00:00Z",
 				},
-				testDir
+				testDir,
 			);
 
 			addValidationReportToIndex(
@@ -213,13 +213,13 @@ describe("Validation Index Module Tests", () => {
 					status: "valid",
 					created_at: "2024-01-15T00:00:00Z",
 				},
-				testDir
+				testDir,
 			);
 
 			const latest = getLatestValidationReport(run.id, "ISSUE-1", testDir);
 			expect(latest).not.toBeNull();
-			expect(latest!.report_path).toBe("r1-v2.json");
-			expect(latest!.status).toBe("valid");
+			expect(latest?.report_path).toBe("r1-v2.json");
+			expect(latest?.status).toBe("valid");
 		});
 
 		test("getLatestValidationReport should return null when no reports", () => {
@@ -344,7 +344,7 @@ describe("Validation Index Module Tests", () => {
 					issue_id: "ISSUE-1",
 					verdict: "CONFIRMED",
 					created_at: "2024-01-15T00:00:00Z",
-				})
+				}),
 			);
 
 			writeFileSync(
@@ -353,7 +353,7 @@ describe("Validation Index Module Tests", () => {
 					issue_id: "ISSUE-2",
 					verdict: "FALSE",
 					timestamp: "2024-01-16T00:00:00Z",
-				})
+				}),
 			);
 
 			const count = rebuildValidationIndex(run.id, testDir);
@@ -364,10 +364,10 @@ describe("Validation Index Module Tests", () => {
 
 			// Check status mapping
 			const issue1Report = index.reports.find((r) => r.issue_id === "ISSUE-1");
-			expect(issue1Report!.status).toBe("valid");
+			expect(issue1Report?.status).toBe("valid");
 
 			const issue2Report = index.reports.find((r) => r.issue_id === "ISSUE-2");
-			expect(issue2Report!.status).toBe("invalid");
+			expect(issue2Report?.status).toBe("invalid");
 		});
 
 		test("rebuildValidationIndex should handle invalid report files", () => {
@@ -378,7 +378,7 @@ describe("Validation Index Module Tests", () => {
 			// Create valid report
 			writeFileSync(
 				join(reportsDir, "ISSUE-1.json"),
-				JSON.stringify({ issue_id: "ISSUE-1", verdict: "CONFIRMED" })
+				JSON.stringify({ issue_id: "ISSUE-1", verdict: "CONFIRMED" }),
 			);
 
 			// Create invalid report
@@ -394,10 +394,7 @@ describe("Validation Index Module Tests", () => {
 			mkdirSync(reportsDir, { recursive: true });
 
 			// Create report without issue_id in content
-			writeFileSync(
-				join(reportsDir, "ISSUE-123.json"),
-				JSON.stringify({ verdict: "CONFIRMED" })
-			);
+			writeFileSync(join(reportsDir, "ISSUE-123.json"), JSON.stringify({ verdict: "CONFIRMED" }));
 
 			rebuildValidationIndex(run.id, testDir);
 

@@ -6,7 +6,12 @@
  */
 
 import type { PhaseContext } from "../../runner/types.ts";
-import { AGENT_ROLES, type Issue, getWorkItemTitle, getWorkItemRationale } from "../../state/types.ts";
+import {
+	AGENT_ROLES,
+	type Issue,
+	getWorkItemRationale,
+	getWorkItemTitle,
+} from "../../state/types.ts";
 
 /**
  * Build the planner prompt for a single issue.
@@ -15,7 +20,7 @@ import { AGENT_ROLES, type Issue, getWorkItemTitle, getWorkItemRationale } from 
  * @param ctx - Phase context
  * @returns Full prompt string
  */
-export function buildPlanPrompt(issue: Issue, ctx: PhaseContext): string {
+export function buildPlanPrompt(issue: Issue, _ctx: PhaseContext): string {
 	const parts: string[] = [];
 	const itemType = issue.type ?? "bug";
 
@@ -34,7 +39,8 @@ You are creating a Work Breakdown Structure (WBS) for a validated work item (typ
 		`**Rationale**: ${getWorkItemRationale(issue)}`,
 	];
 
-	if (issue.corrected_description) issueDetails.push(`**Corrected Description**: ${issue.corrected_description}`);
+	if (issue.corrected_description)
+		issueDetails.push(`**Corrected Description**: ${issue.corrected_description}`);
 	issueDetails.push(`**Severity**: ${issue.severity}`);
 	if (issue.scope_impact) issueDetails.push(`**Scope Impact**: ${issue.scope_impact}`);
 	if (issue.frequency) issueDetails.push(`**Frequency**: ${issue.frequency}`);

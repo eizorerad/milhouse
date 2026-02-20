@@ -49,7 +49,6 @@ export {
 	createIssue,
 	readIssue,
 	updateIssue,
-	batchUpdateIssues,
 	deleteIssue,
 	filterIssuesByStatus,
 	filterIssuesByStatuses,
@@ -234,16 +233,6 @@ export {
 	getProbeResultsBySeverity,
 } from "./probes.ts";
 
-// Compat module - Export to external formats
-export {
-	getCompatDir,
-	exportToCompat,
-	exportToMarkdown,
-	exportToCsv,
-	exportIssuesToCompat,
-	exportStateSnapshot,
-} from "./compat.ts";
-
 // Migration module - Legacy state migration
 export {
 	migrateLegacyToRun,
@@ -274,7 +263,6 @@ export {
 	DEFAULT_HISTORY_CONFIG,
 } from "./history.ts";
 export type { StateType, SnapshotMeta, Snapshot, HistoryConfig } from "./history.ts";
-
 
 // Validation Index module - Track validation reports
 export {

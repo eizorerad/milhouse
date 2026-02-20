@@ -1,18 +1,13 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import pc from "picocolors";
-import type { RuntimeOptions } from "../runtime-options.ts";
 import { loadExecutions } from "../../state/executions.ts";
 import { loadGraph } from "../../state/graph.ts";
 import { loadIssues } from "../../state/issues.ts";
-import {
-	getMilhouseDir,
-	initializeDir,
-	updateProgress,
-} from "../../state/manager.ts";
+import { getMilhouseDir, initializeDir, updateProgress } from "../../state/manager.ts";
+import { getCurrentPlansDir, planFileExists } from "../../state/plan-store.ts";
 import { getCurrentRun } from "../../state/runs.ts";
 import { loadTasks } from "../../state/tasks.ts";
-import { getCurrentPlansDir, planFileExists } from "../../state/plan-store.ts";
 import {
 	type ExecutionRecord,
 	type GraphNode,
@@ -21,8 +16,8 @@ import {
 	type RunMeta,
 	type RunState,
 	type Task,
-	getWorkItemTitle,
 	getWorkItemRationale,
+	getWorkItemTitle,
 } from "../../state/types.ts";
 import {
 	formatDuration,
@@ -33,6 +28,7 @@ import {
 	logWarn,
 	setVerbose,
 } from "../../ui/logger.ts";
+import type { RuntimeOptions } from "../runtime-options.ts";
 
 /**
  * Supported export formats

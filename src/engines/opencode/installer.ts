@@ -286,8 +286,7 @@ export class OpencodeInstaller {
 					return {
 						success: false,
 						method: "docker",
-						error:
-							"Docker installation is not supported for CLI usage. Use another method.",
+						error: "Docker installation is not supported for CLI usage. Use another method.",
 					};
 				default:
 					return {
@@ -626,10 +625,7 @@ export class OpencodeInstaller {
 	private async isMethodAvailable(method: InstallMethod): Promise<boolean> {
 		switch (method) {
 			case "curl":
-				return (
-					(await this.isCommandAvailable("curl")) &&
-					(await this.isCommandAvailable("bash"))
-				);
+				return (await this.isCommandAvailable("curl")) && (await this.isCommandAvailable("bash"));
 			case "npm":
 				return await this.isCommandAvailable("npm");
 			case "bun":
@@ -641,10 +637,7 @@ export class OpencodeInstaller {
 			case "homebrew":
 				return await this.isCommandAvailable("brew");
 			case "aur":
-				return (
-					(await this.isCommandAvailable("paru")) ||
-					(await this.isCommandAvailable("yay"))
-				);
+				return (await this.isCommandAvailable("paru")) || (await this.isCommandAvailable("yay"));
 			case "scoop":
 				return await this.isCommandAvailable("scoop");
 			case "choco":

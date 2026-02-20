@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ProbeTypeSchema, type ProbeResult, type ProbeType } from "../probes/types.ts";
+import { type ProbeResult, type ProbeType, ProbeTypeSchema } from "../probes/types.ts";
 import { getCurrentRunId, getRunDir } from "../state/paths.ts";
-import { type Issue, IssueSchema, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
+import { type Issue, IssueSchema, getWorkItemRationale, getWorkItemTitle } from "../state/types.ts";
 import { logDebug, logInfo } from "../ui/logger.ts";
 
 /** Resolve a path relative to the current run dir, falling back to .milhouse/ */
@@ -216,7 +216,7 @@ export function detectEnvComponents(
  */
 export function getRequiredProbes(
 	components: EnvComponentType[],
-	requireAllProbes: boolean,
+	_requireAllProbes: boolean,
 ): ProbeType[] {
 	const probeSet = new Set<ProbeType>();
 
@@ -235,7 +235,9 @@ export function getRequiredProbes(
  */
 export function loadIssues(workDir: string, issuesPath?: string): Issue[] {
 	const fullPath = issuesPath
-		? (path.isAbsolute(issuesPath) ? issuesPath : path.join(workDir, issuesPath))
+		? path.isAbsolute(issuesPath)
+			? issuesPath
+			: path.join(workDir, issuesPath)
 		: resolveRunAwarePath(workDir, "state", "issues.json");
 
 	if (!fs.existsSync(fullPath)) {
@@ -247,7 +249,11 @@ export function loadIssues(workDir: string, issuesPath?: string): Issue[] {
 		const data = JSON.parse(content);
 
 		// Handle both array format and object with issues array
-		const raw = Array.isArray(data) ? data : (data?.issues && Array.isArray(data.issues) ? data.issues : []);
+		const raw = Array.isArray(data)
+			? data
+			: data?.issues && Array.isArray(data.issues)
+				? data.issues
+				: [];
 		return raw.flatMap((item: unknown) => {
 			const result = IssueSchema.safeParse(item);
 			return result.success ? [result.data] : [];
@@ -265,7 +271,9 @@ export function getProbeResults(
 	probesPath?: string,
 ): Map<ProbeType, ProbeResult[]> {
 	const fullPath = probesPath
-		? (path.isAbsolute(probesPath) ? probesPath : path.join(workDir, probesPath))
+		? path.isAbsolute(probesPath)
+			? probesPath
+			: path.join(workDir, probesPath)
 		: resolveRunAwarePath(workDir, "probes");
 	const results = new Map<ProbeType, ProbeResult[]>();
 

@@ -6,25 +6,17 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-	migrateLegacyToRun,
-	hasLegacyState,
-	getLegacyStateFiles,
 	cleanupLegacyState,
 	cloneRunState,
+	getLegacyStateFiles,
 	getMigrationStatus,
+	hasLegacyState,
+	migrateLegacyToRun,
 } from "./migration.ts";
-import {
-	createRun,
-	loadRunMeta,
-	loadRunsIndex,
-	getRunStateDir,
-	getRunDir,
-} from "./runs.ts";
-import { loadTasks } from "./tasks.ts";
-import { loadIssues } from "./issues.ts";
+import { createRun, getRunDir, getRunStateDir, loadRunsIndex } from "./runs.ts";
 import type { Issue, Task } from "./types.ts";
 
 describe("Migration Tests", () => {
@@ -148,11 +140,11 @@ describe("Migration Tests", () => {
 
 			// Verify run was created
 			expect(run).not.toBeNull();
-			expect(run!.scope).toBe("migrated scope");
-			expect(run!.name).toBe("migrated run");
+			expect(run?.scope).toBe("migrated scope");
+			expect(run?.name).toBe("migrated run");
 
 			// Verify state files were copied
-			const runStateDir = getRunStateDir(run!.id, testDir);
+			const runStateDir = getRunStateDir(run?.id ?? "", testDir);
 			expect(existsSync(join(runStateDir, "issues.json"))).toBe(true);
 			expect(existsSync(join(runStateDir, "tasks.json"))).toBe(true);
 
@@ -179,7 +171,7 @@ describe("Migration Tests", () => {
 			const run = migrateLegacyToRun({ workDir: testDir });
 
 			// Verify plans were copied
-			const runPlansDir = join(getRunDir(run!.id, testDir), "plans");
+			const runPlansDir = join(getRunDir(run?.id ?? "", testDir), "plans");
 			expect(existsSync(join(runPlansDir, "problem_brief.md"))).toBe(true);
 			expect(existsSync(join(runPlansDir, "execution_plan.md"))).toBe(true);
 
@@ -196,14 +188,14 @@ describe("Migration Tests", () => {
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 			writeFileSync(
 				join(legacyProbesDir, "validation", "probe-1.json"),
-				JSON.stringify({ probe_id: "probe-1", success: true })
+				JSON.stringify({ probe_id: "probe-1", success: true }),
 			);
 
 			// Migrate
 			const run = migrateLegacyToRun({ workDir: testDir });
 
 			// Verify probes were copied
-			const runProbesDir = join(getRunDir(run!.id, testDir), "probes", "validation");
+			const runProbesDir = join(getRunDir(run?.id ?? "", testDir), "probes", "validation");
 			expect(existsSync(join(runProbesDir, "probe-1.json"))).toBe(true);
 		});
 
@@ -215,7 +207,7 @@ describe("Migration Tests", () => {
 
 			const index = loadRunsIndex(testDir);
 			// The migrated run should be the last (latest) in the runs list
-			expect(index.runs[index.runs.length - 1].id).toBe(run!.id);
+			expect(index.runs[index.runs.length - 1].id).toBe(run?.id ?? "");
 		});
 	});
 
@@ -270,17 +262,17 @@ describe("Migration Tests", () => {
 			const clonedRun = cloneRunState(
 				sourceRun.id,
 				{ scope: "cloned run", name: "clone" },
-				testDir
+				testDir,
 			);
 
 			// Verify clone was created
 			expect(clonedRun).not.toBeNull();
-			expect(clonedRun!.id).not.toBe(sourceRun.id);
-			expect(clonedRun!.scope).toBe("cloned run");
-			expect(clonedRun!.name).toBe("clone");
+			expect(clonedRun?.id).not.toBe(sourceRun.id);
+			expect(clonedRun?.scope).toBe("cloned run");
+			expect(clonedRun?.name).toBe("clone");
 
 			// Verify state was copied
-			const clonedStateDir = getRunStateDir(clonedRun!.id, testDir);
+			const clonedStateDir = getRunStateDir(clonedRun?.id ?? "", testDir);
 			expect(existsSync(join(clonedStateDir, "issues.json"))).toBe(true);
 
 			// Verify content was preserved
@@ -300,7 +292,7 @@ describe("Migration Tests", () => {
 			const clonedRun = cloneRunState(sourceRun.id, {}, testDir);
 
 			// Verify plans were copied
-			const clonedPlansDir = join(getRunDir(clonedRun!.id, testDir), "plans");
+			const clonedPlansDir = join(getRunDir(clonedRun?.id ?? "", testDir), "plans");
 			expect(existsSync(join(clonedPlansDir, "problem_brief.md"))).toBe(true);
 
 			const content = readFileSync(join(clonedPlansDir, "problem_brief.md"), "utf-8");
@@ -330,7 +322,7 @@ describe("Migration Tests", () => {
 
 			// Clone
 			const clonedRun = cloneRunState(sourceRun.id, {}, testDir);
-			const clonedStateDir = getRunStateDir(clonedRun!.id, testDir);
+			const clonedStateDir = getRunStateDir(clonedRun?.id ?? "", testDir);
 
 			// Modify cloned state
 			const modifiedIssues: Issue[] = [
@@ -472,7 +464,7 @@ describe("Migration Tests", () => {
 			expect(postMigrationStatus.hasRuns).toBe(true);
 
 			// Verify data integrity
-			const runStateDir = getRunStateDir(run!.id, testDir);
+			const runStateDir = getRunStateDir(run?.id ?? "", testDir);
 			const migratedIssues = JSON.parse(readFileSync(join(runStateDir, "issues.json"), "utf-8"));
 			expect(migratedIssues[0].id).toBe("LEGACY-ISSUE-1");
 			expect(migratedIssues[0].status).toBe("CONFIRMED");

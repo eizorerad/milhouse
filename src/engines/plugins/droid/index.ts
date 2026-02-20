@@ -308,10 +308,10 @@ export class DroidPlugin implements IEnginePlugin {
 		const lines = output.trim().split("\n");
 		const messages: string[] = [];
 		const steps: ExecutionStep[] = [];
-		let sessionId: string | undefined;
+		let _sessionId: string | undefined;
 		let durationMs = 0;
 		const isError = false;
-		let model: string | undefined;
+		let _model: string | undefined;
 
 		for (const line of lines) {
 			if (!line.trim()) continue;
@@ -325,8 +325,8 @@ export class DroidPlugin implements IEnginePlugin {
 				switch (event.type) {
 					case "system":
 						if (event.subtype === "init") {
-							sessionId = event.session_id;
-							model = event.model;
+							_sessionId = event.session_id;
+							_model = event.model;
 							steps.push({
 								type: "thinking",
 								content: `Session initialized with model: ${event.model || "unknown"}`,
@@ -380,7 +380,7 @@ export class DroidPlugin implements IEnginePlugin {
 						break;
 
 					case "completion":
-						sessionId = event.session_id;
+						_sessionId = event.session_id;
 						durationMs = event.durationMs || 0;
 						if (event.finalText) {
 							messages.push(event.finalText);

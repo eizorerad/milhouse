@@ -469,17 +469,19 @@ export type RunMeta = z.infer<typeof RunMetaSchema>;
  * Runs index - stored in .milhouse/runs-index.json
  * Tracks all runs and which one is currently active
  */
-export const RunsIndexSchema = z.object({
-	runs: z.array(
-		z.object({
-			id: z.string(),
-			name: z.string().optional(),
-			scope: z.string().optional(),
-			created_at: z.string(),
-			phase: RunPhaseSchema,
-		}),
-	),
-}).passthrough(); // passthrough so old files with current_run don't fail
+export const RunsIndexSchema = z
+	.object({
+		runs: z.array(
+			z.object({
+				id: z.string(),
+				name: z.string().optional(),
+				scope: z.string().optional(),
+				created_at: z.string(),
+				phase: RunPhaseSchema,
+			}),
+		),
+	})
+	.passthrough(); // passthrough so old files with current_run don't fail
 
 export type RunsIndex = z.infer<typeof RunsIndexSchema>;
 
@@ -491,7 +493,6 @@ export const RUNS_FILES = {
 	meta: "meta.json",
 	runsDir: "runs",
 } as const;
-
 
 // ============================================================================
 // VALIDATION INDEX TYPES

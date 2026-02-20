@@ -133,7 +133,7 @@ function executeDev(
 	const runtimeArgs = runtime === "bun" ? ["run", entryPath] : [entryPath];
 	const fullArgs = [...runtimeArgs, ...argv];
 
-	let result;
+	let result: ReturnType<typeof spawnSync>;
 	if (isWindows) {
 		// On Windows, use cmd.exe /c to run .cmd files
 		result = spawnSync("cmd.exe", ["/c", runtime, ...fullArgs], {
@@ -188,7 +188,7 @@ export function runCli(options: RunnerOptions): RunnerResult {
 			exitCode: 1,
 			success: false,
 			runner: "none",
-			error: `Neither compiled binary nor source entry found`,
+			error: "Neither compiled binary nor source entry found",
 		};
 	}
 

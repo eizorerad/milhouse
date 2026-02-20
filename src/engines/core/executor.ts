@@ -151,9 +151,7 @@ export class EngineExecutor implements IEngineExecutor {
 		if (isWindows) {
 			const command = plugin.config.command;
 			const needsCmdShell = command.endsWith(".cmd") || command.endsWith(".bat");
-			spawnArgs = needsCmdShell
-				? ["cmd.exe", "/c", command, ...args]
-				: [command, ...args];
+			spawnArgs = needsCmdShell ? ["cmd.exe", "/c", command, ...args] : [command, ...args];
 		} else {
 			spawnArgs = [plugin.config.command, ...args];
 		}

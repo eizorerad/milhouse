@@ -21,7 +21,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { logStateError, StateParseError } from "./errors.ts";
+import { loadJsonFile, saveJsonFile } from "./json-io.ts";
 import {
 	type ExecutionRecord,
 	type GateResult,
@@ -32,10 +32,7 @@ import {
 } from "./types.ts";
 
 // Import task functions for internal use
-import {
-	loadTasks as _loadTasks,
-	updateTask as _updateTask,
-} from "./tasks.ts";
+import { updateTask as _updateTask } from "./tasks.ts";
 
 // Import execution functions for internal use
 import { loadExecutions as _loadExecutions } from "./executions.ts";
@@ -148,49 +145,8 @@ export function generateId(prefix = ""): string {
 }
 
 // ============================================================================
-// INTERNAL FILE UTILITIES
+// INTERNAL FILE UTILITIES (using shared json-io module)
 // ============================================================================
-
-/**
- * Load JSON file with schema validation
- */
-function loadJsonFile<T>(
-	filePath: string,
-	schema: { parse: (data: unknown) => T },
-	defaultValue: T,
-): T {
-	if (!existsSync(filePath)) {
-		return defaultValue;
-	}
-
-	try {
-		const content = readFileSync(filePath, "utf-8");
-		const parsed = JSON.parse(content);
-		return schema.parse(parsed);
-	} catch (error) {
-		// Log the error with context instead of silently swallowing
-		const stateError = new StateParseError(
-			`Failed to load or parse state file: ${filePath}`,
-			{
-				filePath,
-				cause: error instanceof Error ? error : new Error(String(error)),
-			},
-		);
-		logStateError(stateError, "debug");
-		return defaultValue;
-	}
-}
-
-/**
- * Save JSON file
- */
-function saveJsonFile(filePath: string, data: unknown): void {
-	const dir = join(filePath, "..");
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-	writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
 
 // ============================================================================
 // LEGACY RUN STATE MANAGEMENT

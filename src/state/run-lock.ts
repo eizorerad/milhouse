@@ -48,7 +48,7 @@ export function acquireRunLock(
 
 			if (isPidAlive(lock.pid)) {
 				throw new Error(
-					`Run ${runId} phase "${phase}" is locked by PID ${lock.pid} since ${lock.startedAt}`
+					`Run ${runId} phase "${phase}" is locked by PID ${lock.pid} since ${lock.startedAt}`,
 				);
 			}
 			// Stale lock — process is dead, overwrite

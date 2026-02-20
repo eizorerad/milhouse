@@ -9,13 +9,12 @@
  */
 
 import { logger } from "../../observability/logger";
+import { type TmuxInstallerOptions, ensureTmuxInstalled } from "./installer";
 import {
-	DEFAULT_TMUX_CONFIG,
-	TmuxError,
-	TmuxErrorCodes,
 	type CreateSessionOptions,
 	type CreateSessionResult,
 	type CreateWindowOptions,
+	DEFAULT_TMUX_CONFIG,
 	type SendKeysOptions,
 	type SplitWindowOptions,
 	type TmuxConfig,
@@ -24,7 +23,6 @@ import {
 	type TmuxSession,
 	type TmuxWindow,
 } from "./types";
-import { ensureTmuxInstalled, getInstallationInstructions, type TmuxInstallerOptions } from "./installer";
 
 // ============================================================================
 // TmuxSessionManager Class
@@ -56,8 +54,7 @@ import { ensureTmuxInstalled, getInstallationInstructions, type TmuxInstallerOpt
  * ```
  */
 export class TmuxSessionManager {
-	private config: Required<Omit<TmuxConfig, "defaultWorkDir">> &
-		Pick<TmuxConfig, "defaultWorkDir">;
+	private config: Required<Omit<TmuxConfig, "defaultWorkDir">> & Pick<TmuxConfig, "defaultWorkDir">;
 
 	/**
 	 * Create a new TmuxSessionManager.
@@ -323,7 +320,8 @@ export class TmuxSessionManager {
 	 * ```
 	 */
 	async listSessions(filterPrefix = false): Promise<TmuxSession[]> {
-		const format = "#{session_name}|#{session_id}|#{session_windows}|#{session_attached}|#{session_created}|#{session_width}|#{session_height}";
+		const format =
+			"#{session_name}|#{session_id}|#{session_windows}|#{session_attached}|#{session_created}|#{session_width}|#{session_height}";
 		const result = await this.runTmuxCommand(["list-sessions", "-F", format]);
 
 		if (!result.success || !result.data) {
@@ -456,7 +454,8 @@ export class TmuxSessionManager {
 	 * @returns Array of window information
 	 */
 	async listWindows(session: string): Promise<TmuxWindow[]> {
-		const format = "#{window_name}|#{window_index}|#{window_active}|#{window_panes}|#{window_layout}";
+		const format =
+			"#{window_name}|#{window_index}|#{window_active}|#{window_panes}|#{window_layout}";
 		const result = await this.runTmuxCommand(["list-windows", "-t", session, "-F", format]);
 
 		if (!result.success || !result.data) {
@@ -489,7 +488,8 @@ export class TmuxSessionManager {
 	 */
 	async listPanes(session: string, windowIndex?: number): Promise<TmuxPane[]> {
 		const target = windowIndex !== undefined ? `${session}:${windowIndex}` : session;
-		const format = "#{pane_index}|#{pane_active}|#{pane_width}|#{pane_height}|#{pane_current_path}|#{pane_current_command}";
+		const format =
+			"#{pane_index}|#{pane_active}|#{pane_width}|#{pane_height}|#{pane_current_path}|#{pane_current_command}";
 		const result = await this.runTmuxCommand(["list-panes", "-t", target, "-F", format]);
 
 		if (!result.success || !result.data) {

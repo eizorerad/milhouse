@@ -114,7 +114,7 @@ export class PipelineAwareStrategy implements IExecutionStrategy {
 	/**
 	 * Select the best strategy based on analysis.
 	 */
-	private selectStrategy(analysis: TaskAnalysis, options: ExecutionOptions): IExecutionStrategy {
+	private selectStrategy(analysis: TaskAnalysis, _options: ExecutionOptions): IExecutionStrategy {
 		// If parallel is disabled, use sequential
 		if (!analysis.parallelEnabled) {
 			loggers.task.debug("Using sequential: parallel disabled");

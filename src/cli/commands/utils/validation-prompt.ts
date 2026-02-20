@@ -9,7 +9,12 @@
  */
 
 import { getConfigService } from "../../../services/config/ConfigService.ts";
-import { AGENT_ROLES, type Issue, getWorkItemTitle, getWorkItemRationale } from "../../../state/types.ts";
+import {
+	AGENT_ROLES,
+	type Issue,
+	getWorkItemRationale,
+	getWorkItemTitle,
+} from "../../../state/types.ts";
 
 /**
  * Build the Deep Issue Validator prompt for thorough investigation
@@ -42,14 +47,14 @@ Your task is to perform a DEEP, THOROUGH investigation and produce a comprehensi
 	// Add project context if available
 	const configService = getConfigService(workDir);
 	const config = configService.getConfig();
-	
+
 	if (config) {
 		const contextParts: string[] = [];
 		if (config.project.name) contextParts.push(`Project: ${config.project.name}`);
 		if (config.project.language) contextParts.push(`Language: ${config.project.language}`);
 		if (config.project.framework) contextParts.push(`Framework: ${config.project.framework}`);
 		if (config.project.description) contextParts.push(`Description: ${config.project.description}`);
-		
+
 		if (contextParts.length > 0) {
 			parts.push(`## Project Context
 ${contextParts.join("\n")}`);
@@ -87,7 +92,9 @@ ${issue.strategy ? `| **Suggested Strategy** | ${issue.strategy} |` : ""}
 ${issue.evidence.length > 0 ? issue.evidence.map((e) => `- ${e.type}: ${e.file || e.command || e.probe_id || "N/A"}`).join("\n") : "No previous evidence collected"}`);
 
 	// Deep investigation instructions - type-aware
-	const investigationInstructions = itemType === "bug" ? `## Deep Investigation Protocol
+	const investigationInstructions =
+		itemType === "bug"
+			? `## Deep Investigation Protocol
 
 ### Phase 1: Code Exploration
 1. Read the files mentioned in the title/rationale completely
@@ -115,7 +122,8 @@ ${issue.evidence.length > 0 ? issue.evidence.map((e) => `- ${e.type}: ${e.file |
 ### Phase 5: Recommendations
 1. Propose a fix approach if confirmed
 2. Estimate complexity of the fix
-3. Suggest test strategy to prevent regression` : `## Deep Investigation Protocol
+3. Suggest test strategy to prevent regression`
+			: `## Deep Investigation Protocol
 
 ### Phase 1: Code Exploration
 1. Read the files and modules relevant to this ${itemType}

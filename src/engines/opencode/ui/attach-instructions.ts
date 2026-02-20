@@ -10,6 +10,7 @@
 
 import pc from "picocolors";
 
+// ANSI escape code pattern for stripping color codes
 // ============================================================================
 // Types
 // ============================================================================
@@ -93,7 +94,8 @@ function horizontalLine(char: string, width: number): string {
  * Center text within a given width
  */
 function centerText(text: string, width: number): string {
-	const textLength = text.replace(/\x1b\[[0-9;]*m/g, "").length; // Strip ANSI codes for length
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes use control characters by definition
+	const textLength = text.replace(/[[0-9;]*m/g, "").length; // Strip ANSI codes for length
 	const padding = Math.max(0, Math.floor((width - textLength) / 2));
 	return " ".repeat(padding) + text;
 }
@@ -131,7 +133,9 @@ export function displayTmuxModeHeader(): void {
 	const coloredTitle = supportsColor() ? pc.bold(pc.cyan(title)) : title;
 
 	console.log("");
-	console.log(pc.cyan(`${BOX.topLeft}${horizontalLine(BOX.horizontal, innerWidth)}${BOX.topRight}`));
+	console.log(
+		pc.cyan(`${BOX.topLeft}${horizontalLine(BOX.horizontal, innerWidth)}${BOX.topRight}`),
+	);
 	console.log(pc.cyan(`${BOX.vertical}${centerText(coloredTitle, innerWidth)}${BOX.vertical}`));
 	console.log(
 		pc.cyan(`${BOX.bottomLeft}${horizontalLine(BOX.horizontal, innerWidth)}${BOX.bottomRight}`),

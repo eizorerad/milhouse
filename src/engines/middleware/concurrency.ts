@@ -130,14 +130,14 @@ const engineLimiters = new Map<string, LimitFunction>();
  * @returns The p-limit instance for the specified engine
  */
 export function getEngineConcurrencyLimiter(engineName: string, maxConcurrent = 2): LimitFunction {
-	if (!engineLimiters.has(engineName)) {
-		engineLimiters.set(engineName, pLimit(maxConcurrent));
-		loggers.engine.info(
-			{ engineName, maxConcurrent },
-			"Per-engine concurrency limiter initialized",
-		);
+	const existing = engineLimiters.get(engineName);
+	if (existing) {
+		return existing;
 	}
-	return engineLimiters.get(engineName)!;
+	const limiter = pLimit(maxConcurrent);
+	engineLimiters.set(engineName, limiter);
+	loggers.engine.info({ engineName, maxConcurrent }, "Per-engine concurrency limiter initialized");
+	return limiter;
 }
 
 /**

@@ -16,8 +16,8 @@
 
 import type { AIEngine } from "../../engines/types.ts";
 import { bus } from "../../events/index.ts";
-import { completeMerge, getConflictedFiles } from "../../vcs/services/merge-service.ts";
 import { logDebug, logError, logInfo } from "../../ui/logger.ts";
+import { completeMerge, getConflictedFiles } from "../../vcs/services/merge-service.ts";
 import type {
 	ConflictResolutionResult,
 	MergeConflict,

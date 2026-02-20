@@ -212,7 +212,7 @@ export class MergeService implements IMergeService {
 	 * Abort an in-progress merge
 	 */
 	async abortMerge(workDir: string): Promise<VcsResult<void>> {
-		const result = await runGitCommand(["merge", "--abort"], workDir);
+		const _result = await runGitCommand(["merge", "--abort"], workDir);
 		// Ignore errors - there may be no merge in progress
 		return ok(undefined);
 	}
@@ -437,7 +437,7 @@ export class MergeService implements IMergeService {
 	 * Abort an in-progress rebase
 	 */
 	async abortRebase(workDir: string): Promise<VcsResult<void>> {
-		const result = await runGitCommand(["rebase", "--abort"], workDir);
+		const _result = await runGitCommand(["rebase", "--abort"], workDir);
 		// Ignore errors - there may be no rebase in progress
 		return ok(undefined);
 	}

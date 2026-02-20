@@ -264,13 +264,13 @@ export type { DroidPluginOptions } from "./plugins/droid";
  * @param engineName - Name of the engine to create
  * @returns AIEngine adapter instance
  */
-export async function createEngine(engineName: string): Promise<AIEngine> {
+export async function createEngine(
+	engineName: string,
+	options?: { maxConcurrent?: number },
+): Promise<AIEngine> {
 	const { createEngineAdapter } = await import("./adapter");
-	return createEngineAdapter(engineName);
+	return createEngineAdapter(engineName, options);
 }
-
-// Import types for legacy compatibility
-import type { ExecutionResult } from "../schemas/engine.schema";
 
 // Import AIEngine type for createEngine return type
 import type { AIEngine } from "./types";

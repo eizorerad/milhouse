@@ -6,16 +6,14 @@
  * @module cli/commands/report
  */
 
-import type { RuntimeOptions } from "../runtime-options.ts";
-import { loadResolvedConfig } from "../../runner/config-loader.ts";
 import { generateReport } from "../../report/generator.ts";
-import { loadRunsIndex, loadRunMeta } from "../../state/runs.ts";
+import { loadResolvedConfig } from "../../runner/config-loader.ts";
 import { createRunCost } from "../../runner/cost.ts";
+import { loadRunMeta, loadRunsIndex } from "../../state/runs.ts";
 import { logError, logInfo } from "../../ui/logger.ts";
+import type { RuntimeOptions } from "../runtime-options.ts";
 
-export async function runReport(
-	options: RuntimeOptions & { format?: string },
-): Promise<void> {
+export async function runReport(options: RuntimeOptions & { format?: string }): Promise<void> {
 	const workDir = process.cwd();
 	const config = loadResolvedConfig(workDir, options);
 
@@ -36,8 +34,7 @@ export async function runReport(
 		return;
 	}
 
-	const format =
-		(options.format as "json" | "markdown" | "both") ?? config.report.format;
+	const format = (options.format as "json" | "markdown" | "both") ?? config.report.format;
 
 	const result = generateReport({
 		runId,

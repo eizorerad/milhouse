@@ -1,4 +1,4 @@
-import { createSpinner } from "nanospinner";
+import type { createSpinner } from "nanospinner";
 import ora, { type Ora, type Color } from "ora";
 import { bus } from "../events";
 import { formatPhase, theme } from "./theme";
@@ -239,11 +239,7 @@ export type { Ora };
  * This is the recommended way to create spinners in new code.
  * It uses the new ora-based spinner system with proper theming.
  */
-export function createThemedSpinner(
-	id: string,
-	text: string,
-	type: SpinnerType = "task",
-): Ora {
+export function createThemedSpinner(id: string, text: string, type: SpinnerType = "task"): Ora {
 	return spinners.start(id, text, type);
 }
 

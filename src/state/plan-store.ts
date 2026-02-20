@@ -75,10 +75,7 @@ export function createPlanMetadataHeader(
 	const runId = getCurrentRunId(workDir) || "no-run";
 	const generated = new Date().toISOString();
 
-	const lines: string[] = [
-		`<!-- Run ID: ${runId} -->`,
-		`<!-- Generated: ${generated} -->`,
-	];
+	const lines: string[] = [`<!-- Run ID: ${runId} -->`, `<!-- Generated: ${generated} -->`];
 
 	if (options?.issueId) {
 		lines.push(`<!-- Issue: ${options.issueId} -->`);
@@ -88,7 +85,7 @@ export function createPlanMetadataHeader(
 		lines.push(`<!-- Scope: ${options.scope} -->`);
 	}
 
-	return lines.join("\n") + "\n\n";
+	return `${lines.join("\n")}\n\n`;
 }
 
 // Create a logger for plan store operations
@@ -387,7 +384,12 @@ function ensurePlansDirExistsForRun(workDir: string, runId: string): void {
  * @returns Full path to the written file
  * @throws StateWriteError if write fails
  */
-function writePlanFileForRun(workDir: string, runId: string, filename: string, content: string): string {
+function writePlanFileForRun(
+	workDir: string,
+	runId: string,
+	filename: string,
+	content: string,
+): string {
 	ensurePlansDirExistsForRun(workDir, runId);
 	const plansDir = getPlansDirForRun(workDir, runId);
 	const filePath = join(plansDir, filename);
@@ -446,7 +448,12 @@ function readPlanFileForRun(workDir: string, runId: string, filename: string): s
  * @param markdown - Markdown content
  * @returns Full path to the written file
  */
-export function writeIssueWbsPlanForRun(workDir: string, runId: string, issueId: string, markdown: string): string {
+export function writeIssueWbsPlanForRun(
+	workDir: string,
+	runId: string,
+	issueId: string,
+	markdown: string,
+): string {
 	const filename = `plan_${issueId}.md`;
 	return writePlanFileForRun(workDir, runId, filename, markdown);
 }
@@ -462,7 +469,11 @@ export function writeIssueWbsPlanForRun(workDir: string, runId: string, issueId:
  * @param issueId - Issue identifier
  * @returns Markdown content or null if not found
  */
-export function readIssueWbsPlanForRun(workDir: string, runId: string, issueId: string): string | null {
+export function readIssueWbsPlanForRun(
+	workDir: string,
+	runId: string,
+	issueId: string,
+): string | null {
 	const filename = `plan_${issueId}.md`;
 	return readPlanFileForRun(workDir, runId, filename);
 }
@@ -479,7 +490,12 @@ export function readIssueWbsPlanForRun(workDir: string, runId: string, issueId: 
  * @param json - JSON object to write
  * @returns Full path to the written file
  */
-export function writeIssueWbsJsonForRun(workDir: string, runId: string, issueId: string, json: object): string {
+export function writeIssueWbsJsonForRun(
+	workDir: string,
+	runId: string,
+	issueId: string,
+	json: object,
+): string {
 	const filename = `wbs_${issueId}.json`;
 	const content = JSON.stringify(json, null, 2);
 	return writePlanFileForRun(workDir, runId, filename, content);
@@ -496,7 +512,11 @@ export function writeIssueWbsJsonForRun(workDir: string, runId: string, issueId:
  * @param issueId - Issue identifier
  * @returns Parsed JSON object or null if not found
  */
-export function readIssueWbsJsonForRun(workDir: string, runId: string, issueId: string): object | null {
+export function readIssueWbsJsonForRun(
+	workDir: string,
+	runId: string,
+	issueId: string,
+): object | null {
 	const filename = `wbs_${issueId}.json`;
 	const content = readPlanFileForRun(workDir, runId, filename);
 	if (!content) {

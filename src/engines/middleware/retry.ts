@@ -246,7 +246,7 @@ export class CircuitBreaker {
 	 * Create a middleware that implements circuit breaker pattern.
 	 */
 	createMiddleware(): MiddlewareFn {
-		return async (request, next) => {
+		return async (_request, next) => {
 			// Check if circuit is open
 			if (this.state === "open") {
 				const timeSinceOpen = Date.now() - this.lastStateChange;

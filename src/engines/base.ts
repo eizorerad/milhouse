@@ -60,7 +60,7 @@ export function formatStepForDisplay(
 /**
  * Get a short version of a file path (just the filename)
  */
-function getShortPath(filePath: string): string {
+function _getShortPath(filePath: string): string {
 	if (!filePath) return "";
 	return basename(filePath);
 }
@@ -68,7 +68,7 @@ function getShortPath(filePath: string): string {
 /**
  * Get a short version of a command (first 30 chars)
  */
-function getShortCommand(command: string): string {
+function _getShortCommand(command: string): string {
 	if (!command) return "";
 	const short = command.slice(0, 30);
 	return command.length > 30 ? `${short}...` : short;
@@ -285,7 +285,7 @@ export async function execCommandStreaming(
 		let stdoutBuffer = "";
 		let stderrBuffer = "";
 
-		const processBuffer = (buffer: string, isStderr = false) => {
+		const processBuffer = (buffer: string, _isStderr = false) => {
 			const lines = buffer.split("\n");
 			const remaining = lines.pop() || "";
 			for (const line of lines) {

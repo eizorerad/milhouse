@@ -6,15 +6,15 @@
  * and acceptance criteria.
  */
 
-import type { PhaseConfig, PhaseContext, PhaseItemResult } from "../types.ts";
-import type { DoDCriteria, Issue, RunPhase } from "../../state/types.ts";
 import { buildPlanPrompt } from "../../agents/prompts/plan.ts";
 import { PLAN_SCHEMA } from "../../agents/schemas/plan.ts";
 import { loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
-import { createTaskForRun, loadTasksForRun } from "../../state/tasks.ts";
+import { writeIssueWbsJsonForRun, writeIssueWbsPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
-import { writeIssueWbsPlanForRun, writeIssueWbsJsonForRun } from "../../state/plan-store.ts";
+import { createTaskForRun, loadTasksForRun } from "../../state/tasks.ts";
+import type { DoDCriteria, Issue, RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import type { PhaseConfig } from "../types.ts";
 
 /** Parsed WBS task from AI response */
 interface ParsedWBSTask {
@@ -66,13 +66,22 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 			}
 
 			const tasks: ParsedWBSTask[] = parsed.tasks
-				.filter((t: unknown) => typeof t === "object" && t !== null && typeof (t as Record<string, unknown>).title === "string")
+				.filter(
+					(t: unknown) =>
+						typeof t === "object" &&
+						t !== null &&
+						typeof (t as Record<string, unknown>).title === "string",
+				)
 				.map((t: Record<string, unknown>) => ({
 					title: t.title as string,
 					description: typeof t.description === "string" ? t.description : undefined,
-					files: Array.isArray(t.files) ? (t.files as string[]).filter((f) => typeof f === "string") : [],
+					files: Array.isArray(t.files)
+						? (t.files as string[]).filter((f) => typeof f === "string")
+						: [],
 					depends_on: Array.isArray(t.depends_on) ? (t.depends_on as string[]).map(String) : [],
-					checks: Array.isArray(t.checks) ? (t.checks as string[]).filter((c) => typeof c === "string") : [],
+					checks: Array.isArray(t.checks)
+						? (t.checks as string[]).filter((c) => typeof c === "string")
+						: [],
 					acceptance: Array.isArray(t.acceptance)
 						? (t.acceptance as Array<Record<string, unknown>>).map((a) => ({
 								description: typeof a.description === "string" ? a.description : "Unknown",
@@ -116,7 +125,9 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 				const dependsOn = wbsTask.depends_on
 					.map((dep) => {
 						const depIndex = typeof dep === "string" ? Number.parseInt(dep, 10) : Number(dep);
-						return depIndex >= 0 && depIndex < createdTaskIds.length ? createdTaskIds[depIndex] : null;
+						return depIndex >= 0 && depIndex < createdTaskIds.length
+							? createdTaskIds[depIndex]
+							: null;
 					})
 					.filter((id): id is string => id !== null);
 

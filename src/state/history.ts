@@ -20,8 +20,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { logStateError, StateParseError } from "./errors.ts";
-import { getRunDir, getRunStateDir } from "./runs.ts";
+import { StateParseError, logStateError } from "./errors.ts";
+import { getRunStateDir } from "./runs.ts";
 
 // ============================================================================
 // TYPES AND SCHEMAS
@@ -103,7 +103,11 @@ export function getStateHistoryDir(
 /**
  * Ensure history directory structure exists
  */
-export function ensureHistoryDir(runId: string, stateType: StateType, workDir = process.cwd()): string {
+export function ensureHistoryDir(
+	runId: string,
+	stateType: StateType,
+	workDir = process.cwd(),
+): string {
 	const dir = getStateHistoryDir(runId, stateType, workDir);
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
@@ -128,8 +132,10 @@ export function generateSnapshotId(timestamp = new Date()): string {
  */
 export function parseSnapshotId(snapshotId: string): Date {
 	// Convert back from filesystem-safe format
-	const isoString = snapshotId
-		.replace(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/, "$1-$2-$3T$4:$5:$6.$7Z");
+	const isoString = snapshotId.replace(
+		/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/,
+		"$1-$2-$3T$4:$5:$6.$7Z",
+	);
 	return new Date(isoString);
 }
 
@@ -232,17 +238,17 @@ export function listSnapshots(
 			}
 		} catch (error) {
 			// Log but continue - corrupted snapshot shouldn't break listing
-			const stateError = new StateParseError(
-				`Failed to parse snapshot: ${file}`,
-				{ filePath: join(historyDir, file), cause: error instanceof Error ? error : new Error(String(error)) },
-			);
+			const stateError = new StateParseError(`Failed to parse snapshot: ${file}`, {
+				filePath: join(historyDir, file),
+				cause: error instanceof Error ? error : new Error(String(error)),
+			});
 			logStateError(stateError, "debug");
 		}
 	}
 
 	// Sort by creation time, newest first
-	return snapshots.sort((a, b) =>
-		new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+	return snapshots.sort(
+		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
 	);
 }
 
@@ -272,10 +278,10 @@ export function loadSnapshot<T>(
 		const content = readFileSync(snapshotPath, "utf-8");
 		return JSON.parse(content) as Snapshot<T>;
 	} catch (error) {
-		const stateError = new StateParseError(
-			`Failed to load snapshot: ${snapshotId}`,
-			{ filePath: snapshotPath, cause: error instanceof Error ? error : new Error(String(error)) },
-		);
+		const stateError = new StateParseError(`Failed to load snapshot: ${snapshotId}`, {
+			filePath: snapshotPath,
+			cause: error instanceof Error ? error : new Error(String(error)),
+		});
 		logStateError(stateError, "warn");
 		return null;
 	}
@@ -357,10 +363,10 @@ export function rollbackState<T>(
 			});
 		} catch (error) {
 			// Log but continue - backup failure shouldn't prevent rollback
-			const stateError = new StateParseError(
-				"Failed to create pre-rollback backup",
-				{ filePath: statePath, cause: error instanceof Error ? error : new Error(String(error)) },
-			);
+			const stateError = new StateParseError("Failed to create pre-rollback backup", {
+				filePath: statePath,
+				cause: error instanceof Error ? error : new Error(String(error)),
+			});
 			logStateError(stateError, "warn");
 		}
 	}
@@ -427,10 +433,10 @@ export function enforceSnapshotLimit(
 			}
 		} catch (error) {
 			// Log but continue
-			const stateError = new StateParseError(
-				`Failed to remove old snapshot: ${snapshot.id}`,
-				{ filePath: snapshotPath, cause: error instanceof Error ? error : new Error(String(error)) },
-			);
+			const stateError = new StateParseError(`Failed to remove old snapshot: ${snapshot.id}`, {
+				filePath: snapshotPath,
+				cause: error instanceof Error ? error : new Error(String(error)),
+			});
 			logStateError(stateError, "warn");
 		}
 	}

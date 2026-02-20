@@ -8,7 +8,7 @@
  */
 
 import { bus } from "../events/bus.ts";
-import type { RunPhase, TaskStatus, IssueStatus } from "./types.ts";
+import type { IssueStatus, RunPhase, TaskStatus } from "./types.ts";
 
 // ============================================================================
 // STATE EVENT TYPES
@@ -24,13 +24,30 @@ export type StateEvent =
 	| { type: "run:stats:updated"; runId: string; stats: RunStatsPayload }
 	| { type: "run:created"; runId: string; scope?: string; name?: string }
 	| { type: "run:deleted"; runId: string }
-	| { type: "task:status:changed"; taskId: string; status: TaskStatus; previousStatus?: TaskStatus; issueId?: string }
+	| {
+			type: "task:status:changed";
+			taskId: string;
+			status: TaskStatus;
+			previousStatus?: TaskStatus;
+			issueId?: string;
+	  }
 	| { type: "task:created"; taskId: string; issueId?: string; title: string }
 	| { type: "task:updated"; taskId: string; fields: string[] }
-	| { type: "issue:status:changed"; issueId: string; status: IssueStatus; previousStatus?: IssueStatus }
+	| {
+			type: "issue:status:changed";
+			issueId: string;
+			status: IssueStatus;
+			previousStatus?: IssueStatus;
+	  }
 	| { type: "issue:created"; issueId: string; symptom: string }
 	| { type: "issue:updated"; issueId: string; fields: string[] }
-	| { type: "validation:report:created"; runId: string; reportId: string; issueId: string; status: IssueStatus };
+	| {
+			type: "validation:report:created";
+			runId: string;
+			reportId: string;
+			issueId: string;
+			status: IssueStatus;
+	  };
 
 /**
  * Run statistics payload
@@ -63,7 +80,9 @@ export const stateEvents = {
 
 		// Log for debugging
 		if (process.env.DEBUG_STATE_EVENTS) {
-			console.debug(`[STATE EVENT] run:phase:changed - runId=${runId}, phase=${phase}, prev=${previousPhase}`);
+			console.debug(
+				`[STATE EVENT] run:phase:changed - runId=${runId}, phase=${phase}, prev=${previousPhase}`,
+			);
 		}
 	},
 
@@ -72,7 +91,9 @@ export const stateEvents = {
 	 */
 	emitRunStatsUpdated(runId: string, stats: RunStatsPayload): void {
 		if (process.env.DEBUG_STATE_EVENTS) {
-			console.debug(`[STATE EVENT] run:stats:updated - runId=${runId}, stats=${JSON.stringify(stats)}`);
+			console.debug(
+				`[STATE EVENT] run:stats:updated - runId=${runId}, stats=${JSON.stringify(stats)}`,
+			);
 		}
 	},
 
@@ -103,7 +124,7 @@ export const stateEvents = {
 		taskId: string,
 		status: TaskStatus,
 		previousStatus?: TaskStatus,
-		issueId?: string,
+		_issueId?: string,
 	): void {
 		// Map to main bus task events
 		if (status === "running") {
@@ -115,7 +136,9 @@ export const stateEvents = {
 		}
 
 		if (process.env.DEBUG_STATE_EVENTS) {
-			console.debug(`[STATE EVENT] task:status:changed - taskId=${taskId}, status=${status}, prev=${previousStatus}`);
+			console.debug(
+				`[STATE EVENT] task:status:changed - taskId=${taskId}, status=${status}, prev=${previousStatus}`,
+			);
 		}
 	},
 
@@ -124,7 +147,9 @@ export const stateEvents = {
 	 */
 	emitTaskCreated(taskId: string, title: string, issueId?: string): void {
 		if (process.env.DEBUG_STATE_EVENTS) {
-			console.debug(`[STATE EVENT] task:created - taskId=${taskId}, title=${title}, issueId=${issueId}`);
+			console.debug(
+				`[STATE EVENT] task:created - taskId=${taskId}, title=${title}, issueId=${issueId}`,
+			);
 		}
 	},
 
@@ -140,13 +165,11 @@ export const stateEvents = {
 	/**
 	 * Emit an issue status change event
 	 */
-	emitIssueStatusChanged(
-		issueId: string,
-		status: IssueStatus,
-		previousStatus?: IssueStatus,
-	): void {
+	emitIssueStatusChanged(issueId: string, status: IssueStatus, previousStatus?: IssueStatus): void {
 		if (process.env.DEBUG_STATE_EVENTS) {
-			console.debug(`[STATE EVENT] issue:status:changed - issueId=${issueId}, status=${status}, prev=${previousStatus}`);
+			console.debug(
+				`[STATE EVENT] issue:status:changed - issueId=${issueId}, status=${status}, prev=${previousStatus}`,
+			);
 		}
 	},
 
@@ -155,7 +178,9 @@ export const stateEvents = {
 	 */
 	emitIssueCreated(issueId: string, symptom: string): void {
 		if (process.env.DEBUG_STATE_EVENTS) {
-			console.debug(`[STATE EVENT] issue:created - issueId=${issueId}, symptom=${symptom.slice(0, 50)}`);
+			console.debug(
+				`[STATE EVENT] issue:created - issueId=${issueId}, symptom=${symptom.slice(0, 50)}`,
+			);
 		}
 	},
 
@@ -178,7 +203,9 @@ export const stateEvents = {
 		status: IssueStatus,
 	): void {
 		if (process.env.DEBUG_STATE_EVENTS) {
-			console.debug(`[STATE EVENT] validation:report:created - runId=${runId}, reportId=${reportId}, issueId=${issueId}, status=${status}`);
+			console.debug(
+				`[STATE EVENT] validation:report:created - runId=${runId}, reportId=${reportId}, issueId=${issueId}, status=${status}`,
+			);
 		}
 	},
 };

@@ -5,12 +5,16 @@
  * gates and checking for regressions. Determines overall pass/fail.
  */
 
-import type { PhaseConfig, PhaseContext, PhaseItemResult } from "../types.ts";
-import type { RunPhase, Task } from "../../state/types.ts";
-import { buildVerifyPrompt, type VerifyInput, type VerifyPreCheckIssue } from "../../agents/prompts/verify.ts";
+import {
+	type VerifyInput,
+	type VerifyPreCheckIssue,
+	buildVerifyPrompt,
+} from "../../agents/prompts/verify.ts";
 import { VERIFY_SCHEMA } from "../../agents/schemas/verify.ts";
 import { loadTasksForRun } from "../../state/tasks.ts";
+import type { RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import type { PhaseConfig } from "../types.ts";
 
 /** Parsed verification result */
 interface VerifyResult {
@@ -64,7 +68,8 @@ export const verifyPhaseConfig: PhaseConfig<VerifyInput, VerifyResult> = {
 				overall_pass: typeof parsed.overall_pass === "boolean" ? parsed.overall_pass : false,
 				gates: Array.isArray(parsed.gates) ? parsed.gates : [],
 				recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
-				regressions_found: typeof parsed.regressions_found === "boolean" ? parsed.regressions_found : false,
+				regressions_found:
+					typeof parsed.regressions_found === "boolean" ? parsed.regressions_found : false,
 				summary: typeof parsed.summary === "string" ? parsed.summary : "",
 			};
 		} catch {

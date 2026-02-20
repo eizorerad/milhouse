@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { stateEvents } from "./events.ts";
-import { withFileLock } from "./file-lock.ts";
+import { AsyncMutex, withFileLock } from "./file-lock.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
-import { type Task, TaskSchema, type TaskStatus, STATE_FILES } from "./types.ts";
+import { STATE_FILES, type Task, TaskSchema, type TaskStatus } from "./types.ts";
 
 /**
  * Get path to tasks state file
@@ -851,7 +851,12 @@ export function updateTaskStatus(
 		for (const dependent of dependents) {
 			if (dependent.status === "pending") {
 				updateTask(dependent.id, { status: "blocked" }, workDir);
-				stateEvents.emitTaskStatusChanged(dependent.id, "blocked", dependent.status, dependent.issue_id);
+				stateEvents.emitTaskStatusChanged(
+					dependent.id,
+					"blocked",
+					dependent.status,
+					dependent.issue_id,
+				);
 			}
 		}
 	}
@@ -882,56 +887,23 @@ export function getExecutionOrder(workDir = process.cwd()): Task[][] {
 // CONCURRENT-SAFE UPDATE WITH SIMPLE QUEUE LOCKING
 // ============================================================================
 
-/**
- * Simple queue-based lock for concurrent task updates
- * Used when multiple agents may complete around the same time
- */
-let lockPromise: Promise<void> | null = null;
+/** In-process mutex for task updates */
+const taskMutex = new AsyncMutex();
 
 /**
- * Update a single task with simple locking
- * This ensures atomic read-modify-write even when called concurrently
- *
- * Note: This uses in-memory queue locking which is safe for single-process
- * concurrent operations (like p-limit based parallel execution)
+ * Update a single task with mutex locking.
+ * Ensures atomic read-modify-write even when called concurrently.
  */
 export async function updateTaskWithLock(
 	id: string,
 	update: Partial<Omit<Task, "id" | "created_at">>,
 	workDir = process.cwd(),
 ): Promise<Task | null> {
-	// Queue this update behind any pending updates
-	const waitForLock = async (): Promise<void> => {
-		while (lockPromise) {
-			await lockPromise;
-		}
-	};
-
-	await waitForLock();
-
-	// Acquire lock
-	let releaseLock!: () => void;
-	lockPromise = new Promise<void>((resolve) => {
-		releaseLock = resolve;
-	});
-
-	try {
-		// Perform the update atomically
-		const result = updateTask(id, update, workDir);
-		return result;
-	} finally {
-		// Release lock
-		lockPromise = null;
-		releaseLock?.();
-	}
+	return taskMutex.run(() => updateTask(id, update, workDir));
 }
 
 /**
- * Update task status with locking and handle dependent task blocking
- * This is the concurrent-safe version of updateTaskStatus()
- *
- * Note: This uses in-memory queue locking which is safe for single-process
- * concurrent operations (like p-limit based parallel execution)
+ * Update task status with locking and handle dependent task blocking.
  */
 export async function updateTaskStatusWithLock(
 	taskId: string,
@@ -939,22 +911,7 @@ export async function updateTaskStatusWithLock(
 	error?: string,
 	workDir = process.cwd(),
 ): Promise<Task | null> {
-	// Queue this update behind any pending updates
-	const waitForLock = async (): Promise<void> => {
-		while (lockPromise) {
-			await lockPromise;
-		}
-	};
-
-	await waitForLock();
-
-	// Acquire lock
-	let releaseLock!: () => void;
-	lockPromise = new Promise<void>((resolve) => {
-		releaseLock = resolve;
-	});
-
-	try {
+	return taskMutex.run(() => {
 		const update: Partial<Task> = { status };
 
 		if (status === "done") {
@@ -966,12 +923,9 @@ export async function updateTaskStatusWithLock(
 		}
 
 		const updated = updateTask(taskId, update, workDir);
+		if (!updated) return null;
 
-		if (!updated) {
-			return null;
-		}
-
-		// If task failed, mark dependent tasks as blocked (atomically within the same lock)
+		// If task failed, mark dependent tasks as blocked
 		if (status === "failed") {
 			const dependents = getDependentTasks(taskId, workDir);
 			for (const dependent of dependents) {
@@ -982,11 +936,7 @@ export async function updateTaskStatusWithLock(
 		}
 
 		return updated;
-	} finally {
-		// Release lock
-		lockPromise = null;
-		releaseLock?.();
-	}
+	});
 }
 
 // ============================================================================

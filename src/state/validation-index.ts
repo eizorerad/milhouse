@@ -11,13 +11,9 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { logStateError, StateParseError } from "./errors.ts";
+import { StateParseError, logStateError } from "./errors.ts";
 import { getRunDir } from "./runs.ts";
-import {
-	type ValidationIndex,
-	ValidationIndexSchema,
-	type ValidationReportRef,
-} from "./types.ts";
+import { type ValidationIndex, ValidationIndexSchema, type ValidationReportRef } from "./types.ts";
 
 // ============================================================================
 // CONSTANTS
@@ -67,10 +63,10 @@ export function loadValidationIndex(runId: string, workDir = process.cwd()): Val
 		const parsed = JSON.parse(content);
 		return ValidationIndexSchema.parse(parsed);
 	} catch (error) {
-		const stateError = new StateParseError(
-			`Failed to load validation index: ${indexPath}`,
-			{ filePath: indexPath, cause: error instanceof Error ? error : new Error(String(error)) },
-		);
+		const stateError = new StateParseError(`Failed to load validation index: ${indexPath}`, {
+			filePath: indexPath,
+			cause: error instanceof Error ? error : new Error(String(error)),
+		});
 		logStateError(stateError, "warn");
 		return {
 			run_id: runId,
@@ -111,7 +107,7 @@ export function addValidationReportToIndex(
 
 	// Check if report already exists (by issue_id and report_path)
 	const existingIndex = index.reports.findIndex(
-		(r) => r.issue_id === reportRef.issue_id && r.report_path === reportRef.report_path
+		(r) => r.issue_id === reportRef.issue_id && r.report_path === reportRef.report_path,
 	);
 
 	const fullRef: ValidationReportRef = {
@@ -217,7 +213,7 @@ export function getLatestValidationReport(
 
 	// Sort by created_at descending and return first
 	return reports.sort(
-		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
 	)[0];
 }
 
@@ -273,11 +269,7 @@ export function countValidationReportsByStatus(
  * @param workDir - Working directory
  * @returns true if the issue has at least one validation report
  */
-export function isIssueValidated(
-	runId: string,
-	issueId: string,
-	workDir = process.cwd(),
-): boolean {
+export function isIssueValidated(runId: string, issueId: string, workDir = process.cwd()): boolean {
 	const reports = getValidationReportsByIssue(runId, issueId, workDir);
 	return reports.length > 0;
 }
@@ -324,7 +316,7 @@ export function removeValidationReportFromIndex(
 
 	const initialLength = index.reports.length;
 	index.reports = index.reports.filter(
-		(r) => !(r.issue_id === issueId && r.report_path === reportPath)
+		(r) => !(r.issue_id === issueId && r.report_path === reportPath),
 	);
 
 	if (index.reports.length < initialLength) {
@@ -404,10 +396,10 @@ export function rebuildValidationIndex(runId: string, workDir = process.cwd()): 
 			});
 		} catch (error) {
 			// Skip invalid files
-			const stateError = new StateParseError(
-				`Failed to parse validation report: ${file}`,
-				{ filePath: join(reportsDir, file), cause: error instanceof Error ? error : new Error(String(error)) },
-			);
+			const stateError = new StateParseError(`Failed to parse validation report: ${file}`, {
+				filePath: join(reportsDir, file),
+				cause: error instanceof Error ? error : new Error(String(error)),
+			});
 			logStateError(stateError, "debug");
 		}
 	}

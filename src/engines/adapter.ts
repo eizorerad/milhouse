@@ -19,8 +19,12 @@ import type {
 } from "../schemas/engine.schema.ts";
 import { logDebug, logWarn } from "../ui/logger.ts";
 import type { DetailedStep } from "./base.ts";
-import { type EngineExecutor, createDefaultExecutor } from "./core/executor.ts";
-import { extractFinalResult } from "./core/parsers/stream-json.ts";
+import {
+	type EngineExecutor,
+	createConfiguredExecutor,
+	createDefaultExecutor,
+} from "./core/executor.ts";
+import { extractFinalResult, parseStreamJson } from "./core/parsers/stream-json.ts";
 import type { IEnginePlugin } from "./core/types.ts";
 import { extractRoleFromPrompt, validatePrompt } from "./prompt-validation.ts";
 import type { AIEngine, AIResult, EngineOptions, ProgressCallback } from "./types.ts";
@@ -175,11 +179,18 @@ export function translateResultToAIResult(
 ): AIResult {
 	// Extract the final text response from steps
 	// The raw output contains stream-json format, but we need the actual text response
-	const finalResponse = extractFinalResult(result.steps) || result.output;
+	let finalResponse = extractFinalResult(result.steps);
+
+	// Fallback: if extractFinalResult found nothing, try re-parsing the raw output
+	// This handles cases where the realtime stream processor missed steps
+	if (!finalResponse && result.output) {
+		const reparsed = parseStreamJson(result.output);
+		finalResponse = extractFinalResult(reparsed.steps) ?? result.output;
+	}
 
 	return {
 		success: result.success,
-		response: finalResponse,
+		response: finalResponse ?? "",
 		// Use actual token values when available, fallback to 0 when not
 		inputTokens: result.tokens?.input ?? 0,
 		outputTokens: result.tokens?.output ?? 0,
@@ -377,7 +388,10 @@ export class PluginAdapter implements AIEngine {
  * @returns AIEngine adapter instance
  * @throws Error if the plugin module cannot be loaded or the engine is not found
  */
-export async function createEngineAdapter(engineName: string): Promise<AIEngine> {
+export async function createEngineAdapter(
+	engineName: string,
+	options?: { maxConcurrent?: number },
+): Promise<AIEngine> {
 	try {
 		const pluginModule = await import("./plugins/types.ts");
 
@@ -391,12 +405,20 @@ export async function createEngineAdapter(engineName: string): Promise<AIEngine>
 			throw new Error(`Engine plugin '${engineName}' not found`);
 		}
 
-		return new PluginAdapter(plugin);
+		// Create executor with configurable concurrency (defaults to 2 if not specified)
+		const executor = options?.maxConcurrent
+			? createConfiguredExecutor({
+					logging: true,
+					retry: { maxRetries: 3 },
+					concurrency: options.maxConcurrent,
+				})
+			: createDefaultExecutor();
+
+		return new PluginAdapter(plugin, executor);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(
-			`Failed to create engine adapter for '${engineName}': ${message}. ` +
-				`Ensure the engine is installed and available in your PATH.`,
+			`Failed to create engine adapter for '${engineName}': ${message}. Ensure the engine is installed and available in your PATH.`,
 		);
 	}
 }

@@ -5,14 +5,14 @@
  * refactoring, improvements, tasks). Produces Work Brief v0 (UNVALIDATED).
  */
 
-import type { PhaseConfig, PhaseContext, PhaseItemResult } from "../types.ts";
-import type { RunPhase, Issue } from "../../state/types.ts";
 import { buildScanPrompt } from "../../agents/prompts/scan.ts";
 import { SCAN_SCHEMA } from "../../agents/schemas/scan.ts";
 import { saveIssuesForRun } from "../../state/issues.ts";
-import { updateRunStatsWithLock } from "../../state/runs.ts";
 import { writeProblemBriefForRun } from "../../state/plan-store.ts";
+import { updateRunStatsWithLock } from "../../state/runs.ts";
+import type { Issue, RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import type { PhaseConfig } from "../types.ts";
 
 /** Scan input — scope and workDir */
 interface ScanInput {
@@ -61,7 +61,12 @@ export const scanPhaseConfig: PhaseConfig<ScanInput, ScanResult> = {
 		try {
 			const parsed = JSON.parse(jsonStr);
 			// Handle --json-schema wrapper: {"items": [...]}
-			if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && Array.isArray(parsed.items)) {
+			if (
+				parsed &&
+				typeof parsed === "object" &&
+				!Array.isArray(parsed) &&
+				Array.isArray(parsed.items)
+			) {
 				return { issues: parsed.items.filter(isValidIssue) };
 			}
 			if (Array.isArray(parsed)) {
@@ -134,7 +139,8 @@ function isValidIssue(issue: unknown): issue is ScanIssue {
 	if (!hasTitle && !hasSymptom) return false;
 
 	const hasRationale = typeof obj.rationale === "string" && obj.rationale.trim() !== "";
-	const hasHypothesis = typeof obj.hypothesis === "string" && (obj.hypothesis as string).trim() !== "";
+	const hasHypothesis =
+		typeof obj.hypothesis === "string" && (obj.hypothesis as string).trim() !== "";
 	if (!hasRationale && !hasHypothesis) return false;
 
 	// Default severity if missing

@@ -110,9 +110,7 @@ function loadYamlConfig(workDir: string): Record<string, unknown> | null {
 /**
  * Map YAML config keys to ResolvedConfig structure
  */
-function mapYamlToResolved(
-	yaml: Record<string, unknown>,
-): Partial<ResolvedConfig> {
+function mapYamlToResolved(yaml: Record<string, unknown>): Partial<ResolvedConfig> {
 	const result: Partial<ResolvedConfig> = {};
 
 	if (yaml.engine) result.engine = String(yaml.engine);
@@ -122,9 +120,7 @@ function mapYamlToResolved(
 	// Per-phase model overrides
 	if (yaml.phases && typeof yaml.phases === "object") {
 		result.phases = {};
-		for (const [phase, config] of Object.entries(
-			yaml.phases as Record<string, unknown>,
-		)) {
+		for (const [phase, config] of Object.entries(yaml.phases as Record<string, unknown>)) {
 			if (typeof config === "object" && config !== null) {
 				const phaseConfig = config as Record<string, unknown>;
 				result.phases[phase] = {};
@@ -143,19 +139,13 @@ function mapYamlToResolved(
 		const costYaml = yaml.cost as Record<string, unknown>;
 		result.cost = {
 			inputPerMillion: Number(
-				costYaml.input_per_million ??
-					costYaml.inputPerMillion ??
-					DEFAULT_COST.inputPerMillion,
+				costYaml.input_per_million ?? costYaml.inputPerMillion ?? DEFAULT_COST.inputPerMillion,
 			),
 			outputPerMillion: Number(
-				costYaml.output_per_million ??
-					costYaml.outputPerMillion ??
-					DEFAULT_COST.outputPerMillion,
+				costYaml.output_per_million ?? costYaml.outputPerMillion ?? DEFAULT_COST.outputPerMillion,
 			),
 			budgetLimit: Number(
-				costYaml.budget_limit ??
-					costYaml.budgetLimit ??
-					DEFAULT_COST.budgetLimit,
+				costYaml.budget_limit ?? costYaml.budgetLimit ?? DEFAULT_COST.budgetLimit,
 			),
 		};
 	}
@@ -165,33 +155,23 @@ function mapYamlToResolved(
 		const reportYaml = yaml.report as Record<string, unknown>;
 		result.report = {
 			enabled: reportYaml.enabled !== false,
-			format:
-				(reportYaml.format as ReportConfig["format"]) ??
-				DEFAULT_REPORT.format,
-			autoGenerate:
-				reportYaml.auto_generate !== false &&
-				reportYaml.autoGenerate !== false,
+			format: (reportYaml.format as ReportConfig["format"]) ?? DEFAULT_REPORT.format,
+			autoGenerate: reportYaml.auto_generate !== false && reportYaml.autoGenerate !== false,
 		};
 	}
 
 	// Skip options
-	if (yaml.skip_tests !== undefined)
-		result.skipTests = Boolean(yaml.skip_tests);
+	if (yaml.skip_tests !== undefined) result.skipTests = Boolean(yaml.skip_tests);
 	if (yaml.skip_lint !== undefined) result.skipLint = Boolean(yaml.skip_lint);
-	if (yaml.skip_probes !== undefined)
-		result.skipProbes = Boolean(yaml.skip_probes);
+	if (yaml.skip_probes !== undefined) result.skipProbes = Boolean(yaml.skip_probes);
 
 	// Exec options
 	if (yaml.exec && typeof yaml.exec === "object") {
 		const execYaml = yaml.exec as Record<string, unknown>;
-		if (execYaml.auto_commit !== undefined)
-			result.autoCommit = Boolean(execYaml.auto_commit);
-		if (execYaml.create_pr !== undefined)
-			result.createPr = Boolean(execYaml.create_pr);
-		if (execYaml.isolate !== undefined)
-			result.isolate = Boolean(execYaml.isolate);
-		if (execYaml.skip_merge !== undefined)
-			result.skipMerge = Boolean(execYaml.skip_merge);
+		if (execYaml.auto_commit !== undefined) result.autoCommit = Boolean(execYaml.auto_commit);
+		if (execYaml.create_pr !== undefined) result.createPr = Boolean(execYaml.create_pr);
+		if (execYaml.isolate !== undefined) result.isolate = Boolean(execYaml.isolate);
+		if (execYaml.skip_merge !== undefined) result.skipMerge = Boolean(execYaml.skip_merge);
 	}
 
 	return result;
@@ -200,51 +180,45 @@ function mapYamlToResolved(
 /**
  * Apply CLI options as overrides (highest precedence)
  */
-function applyCLIOverrides(
-	config: ResolvedConfig,
-	cli: RuntimeOptions,
-): ResolvedConfig {
+function applyCLIOverrides(config: ResolvedConfig, cli: RuntimeOptions): ResolvedConfig {
 	const result = { ...config };
 
+	// String/number overrides — only apply when explicitly set
 	if (cli.aiEngine && cli.aiEngine !== "claude") result.engine = cli.aiEngine;
 	if (cli.modelOverride) result.model = cli.modelOverride;
 	if (cli.workers !== undefined) result.workers = cli.workers;
-	else if (cli.maxParallel !== undefined && cli.maxParallel !== 4)
-		result.workers = cli.maxParallel;
+	else if (cli.maxParallel !== undefined && cli.maxParallel !== 4) result.workers = cli.maxParallel;
 
+	// Boolean overrides — always apply (CLI defaults are meaningful)
 	result.skipTests = cli.skipTests;
 	result.skipLint = cli.skipLint;
-	if (cli.skipProbes !== undefined) result.skipProbes = cli.skipProbes;
-
 	result.verbose = cli.verbose;
 	result.dryRun = cli.dryRun;
-	if (cli.failFast !== undefined) result.failFast = cli.failFast;
 	result.maxRetries = cli.maxRetries;
-
 	result.autoCommit = cli.autoCommit;
 	result.createPr = cli.createPr;
 	result.draftPr = cli.draftPr;
 	result.baseBranch = cli.baseBranch;
+
+	// Conditional overrides — only apply when explicitly provided
+	if (cli.skipProbes !== undefined) result.skipProbes = cli.skipProbes;
+	if (cli.failFast !== undefined) result.failFast = cli.failFast;
 	if (cli.isolate !== undefined) result.isolate = cli.isolate;
 	else if (cli.branchPerTask) result.isolate = true;
 	if (cli.skipMerge !== undefined) result.skipMerge = cli.skipMerge;
+	if (cli.maxValidationRetries !== undefined)
+		result.maxValidationRetries = cli.maxValidationRetries;
+	if (cli.retryUnvalidated !== undefined) result.retryUnvalidated = cli.retryUnvalidated;
+	if (cli.tmux !== undefined) result.tmux = cli.tmux;
+	if (cli.tmuxAutoAttach !== undefined) result.tmuxAutoAttach = cli.tmuxAutoAttach;
+	if (cli.autoInstall !== undefined) result.autoInstall = cli.autoInstall;
+	if (cli.unsafeDoDChecks !== undefined) result.unsafeDoDChecks = cli.unsafeDoDChecks;
 
+	// Optional values — only set when present
 	if (cli.runId) result.runId = cli.runId;
 	if (cli.scanFocus) result.scanFocus = cli.scanFocus;
 	if (cli.issueIds) result.issueIds = cli.issueIds;
 	if (cli.excludeIssueIds) result.excludeIssueIds = cli.excludeIssueIds;
-
-	if (cli.maxValidationRetries !== undefined)
-		result.maxValidationRetries = cli.maxValidationRetries;
-	if (cli.retryUnvalidated !== undefined)
-		result.retryUnvalidated = cli.retryUnvalidated;
-
-	if (cli.tmux !== undefined) result.tmux = cli.tmux;
-	if (cli.tmuxAutoAttach !== undefined)
-		result.tmuxAutoAttach = cli.tmuxAutoAttach;
-	if (cli.autoInstall !== undefined) result.autoInstall = cli.autoInstall;
-	if (cli.unsafeDoDChecks !== undefined)
-		result.unsafeDoDChecks = cli.unsafeDoDChecks;
 
 	return result;
 }
@@ -259,10 +233,7 @@ function applyCLIOverrides(
  * @param cliOptions - CLI runtime options
  * @returns Fully resolved configuration
  */
-export function loadResolvedConfig(
-	workDir: string,
-	cliOptions: RuntimeOptions,
-): ResolvedConfig {
+export function loadResolvedConfig(workDir: string, cliOptions: RuntimeOptions): ResolvedConfig {
 	// Start with defaults
 	let config: ResolvedConfig = {
 		...DEFAULTS,
@@ -276,7 +247,7 @@ export function loadResolvedConfig(
 		const yamlConfig = mapYamlToResolved(yaml);
 		config = deepMerge(config, yamlConfig);
 	} else {
-		logInfo("No .milhouse/config.yaml found, using defaults. Run \"milhouse --init\" to configure.");
+		logInfo('No .milhouse/config.yaml found, using defaults. Run "milhouse --init" to configure.');
 	}
 
 	// CLI flags override everything

@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { RuntimeOptions } from "../cli/runtime-options.ts";
 import { logError, logWarn } from "../ui/logger.ts";
-import { withFileLock } from "./file-lock.ts";
+import { AsyncMutex, withFileLock } from "./file-lock.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
-import { type Issue, IssueSchema, type IssueStatus, type Severity, STATE_FILES } from "./types.ts";
+import { type Issue, IssueSchema, type IssueStatus, STATE_FILES, type Severity } from "./types.ts";
 
 /**
  * Get path to issues state file
@@ -35,185 +35,107 @@ export function generateIssueId(): string {
 	return `P-${timestamp}-${random}`;
 }
 
+// ============================================================================
+// INTERNAL HELPERS (deduplicated load/save)
+// ============================================================================
+
+/** Load issues from a given file path with per-item validation */
+function loadIssuesFromPath(path: string): Issue[] {
+	if (!existsSync(path)) return [];
+
+	try {
+		const content = readFileSync(path, "utf-8");
+		const parsed = JSON.parse(content);
+		if (!Array.isArray(parsed)) return [];
+
+		const valid: Issue[] = [];
+		for (const item of parsed) {
+			const result = IssueSchema.safeParse(item);
+			if (result.success) {
+				valid.push(result.data);
+			} else {
+				logWarn(`Skipping invalid issue ${item?.id || "unknown"}:`, result.error.message);
+			}
+		}
+		return valid;
+	} catch (error) {
+		logError(`Failed to load issues from ${path}:`, error);
+		return [];
+	}
+}
+
+/** Save issues array to a given file path */
+function saveIssuesToPath(path: string, issues: Issue[]): void {
+	const dir = dirname(path);
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+	writeFileSync(path, JSON.stringify(issues, null, 2));
+}
+
+/** Update a single issue in the file at path */
+function updateIssueAtPath(
+	path: string,
+	issueId: string,
+	update: Partial<Omit<Issue, "id" | "created_at">>,
+): Issue | null {
+	const issues = loadIssuesFromPath(path);
+	const index = issues.findIndex((i) => i.id === issueId);
+	if (index === -1) return null;
+
+	const updated: Issue = { ...issues[index], ...update, updated_at: new Date().toISOString() };
+	const newIssues = [...issues.slice(0, index), updated, ...issues.slice(index + 1)];
+	saveIssuesToPath(path, newIssues);
+	return updated;
+}
+
+/** Create a new issue at a given file path */
+function createIssueAtPath(
+	path: string,
+	issue: Omit<Issue, "id" | "created_at" | "updated_at">,
+): Issue {
+	const issues = loadIssuesFromPath(path);
+	const now = new Date().toISOString();
+	const newIssue: Issue = { ...issue, id: generateIssueId(), created_at: now, updated_at: now };
+	saveIssuesToPath(path, [...issues, newIssue]);
+	return newIssue;
+}
+
+// ============================================================================
+// PUBLIC API
+// ============================================================================
+
 /**
- * Load all issues from state file
- * Uses safeParse to handle invalid issues gracefully instead of losing all data
- *
- * @deprecated Use loadIssuesForRun() with explicit runId to avoid race conditions
- * when multiple milhouse processes run in parallel. This function relies on
- * getCurrentRunId() which can return the wrong run in concurrent scenarios.
+ * @deprecated Use loadIssuesForRun() with explicit runId.
  */
 export function loadIssues(workDir = process.cwd()): Issue[] {
-	const path = getIssuesPath(workDir);
-
-	if (!existsSync(path)) {
-		return [];
-	}
-
-	try {
-		const content = readFileSync(path, "utf-8");
-		const parsed = JSON.parse(content);
-
-		if (!Array.isArray(parsed)) {
-			return [];
-		}
-
-		// Parse each issue individually to avoid losing all data if one is invalid
-		const validIssues: Issue[] = [];
-		for (const item of parsed) {
-			const result = IssueSchema.safeParse(item);
-			if (result.success) {
-				validIssues.push(result.data);
-			} else {
-				// Log but don't fail - preserve other issues
-				logWarn(
-					`Skipping invalid issue ${item?.id || "unknown"}:`,
-					result.error.message,
-				);
-			}
-		}
-		return validIssues;
-	} catch (error) {
-		logError(`Failed to load issues from ${path}:`, error);
-		return [];
-	}
+	return loadIssuesFromPath(getIssuesPath(workDir));
 }
 
-/**
- * Load all issues from state file for a specific run
- * Uses safeParse to handle invalid issues gracefully instead of losing all data
- *
- * This is the run-aware version that accepts an explicit runId parameter,
- * avoiding race conditions when multiple milhouse processes run in parallel.
- *
- * @param runId - The run ID to load issues from
- * @param workDir - Working directory (defaults to process.cwd())
- * @returns Array of valid issues from the specified run
- */
 export function loadIssuesForRun(runId: string, workDir = process.cwd()): Issue[] {
-	const path = getIssuesPathForRun(runId, workDir);
-
-	if (!existsSync(path)) {
-		return [];
-	}
-
-	try {
-		const content = readFileSync(path, "utf-8");
-		const parsed = JSON.parse(content);
-
-		if (!Array.isArray(parsed)) {
-			return [];
-		}
-
-		// Parse each issue individually to avoid losing all data if one is invalid
-		const validIssues: Issue[] = [];
-		for (const item of parsed) {
-			const result = IssueSchema.safeParse(item);
-			if (result.success) {
-				validIssues.push(result.data);
-			} else {
-				// Log but don't fail - preserve other issues
-				logWarn(
-					`Skipping invalid issue ${item?.id || "unknown"}:`,
-					result.error.message,
-				);
-			}
-		}
-		return validIssues;
-	} catch (error) {
-		logError(`Failed to load issues from ${path}:`, error);
-		return [];
-	}
+	return loadIssuesFromPath(getIssuesPathForRun(runId, workDir));
 }
 
-/**
- * Save issues array to state file
- *
- * @deprecated Use saveIssuesForRun() with explicit runId to avoid race conditions
- * when multiple milhouse processes run in parallel. This function relies on
- * getCurrentRunId() which can return the wrong run in concurrent scenarios.
- */
+/** @deprecated Use saveIssuesForRun() with explicit runId. */
 export function saveIssues(issues: Issue[], workDir = process.cwd()): void {
-	const path = getIssuesPath(workDir);
-	const dir = join(path, "..");
-
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-
-	writeFileSync(path, JSON.stringify(issues, null, 2));
+	saveIssuesToPath(getIssuesPath(workDir), issues);
 }
 
-/**
- * Save issues array to state file for a specific run
- *
- * This is the run-aware version that accepts an explicit runId parameter,
- * avoiding race conditions when multiple milhouse processes run in parallel.
- *
- * @param runId - The run ID to save issues to
- * @param issues - Array of issues to save
- * @param workDir - Working directory (defaults to process.cwd())
- */
 export function saveIssuesForRun(runId: string, issues: Issue[], workDir = process.cwd()): void {
-	const path = getIssuesPathForRun(runId, workDir);
-	const dir = dirname(path);
-
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-
-	writeFileSync(path, JSON.stringify(issues, null, 2));
+	saveIssuesToPath(getIssuesPathForRun(runId, workDir), issues);
 }
 
-/**
- * Create a new issue
- */
 export function createIssue(
 	issue: Omit<Issue, "id" | "created_at" | "updated_at">,
 	workDir = process.cwd(),
 ): Issue {
-	const issues = loadIssues(workDir);
-	const now = new Date().toISOString();
-
-	const newIssue: Issue = {
-		...issue,
-		id: generateIssueId(),
-		created_at: now,
-		updated_at: now,
-	};
-
-	saveIssues([...issues, newIssue], workDir);
-	return newIssue;
+	return createIssueAtPath(getIssuesPath(workDir), issue);
 }
 
-/**
- * Create a new issue in a specific run
- *
- * This is the run-aware version that accepts an explicit runId parameter,
- * avoiding race conditions when multiple milhouse processes run in parallel.
- *
- * @param runId - The run ID to create the issue in
- * @param issue - Issue data without id and timestamps
- * @param workDir - Working directory (defaults to process.cwd())
- * @returns The created issue with generated id and timestamps
- */
 export function createIssueForRun(
 	runId: string,
 	issue: Omit<Issue, "id" | "created_at" | "updated_at">,
 	workDir = process.cwd(),
 ): Issue {
-	const issues = loadIssuesForRun(runId, workDir);
-	const now = new Date().toISOString();
-
-	const newIssue: Issue = {
-		...issue,
-		id: generateIssueId(),
-		created_at: now,
-		updated_at: now,
-	};
-
-	saveIssuesForRun(runId, [...issues, newIssue], workDir);
-	return newIssue;
+	return createIssueAtPath(getIssuesPathForRun(runId, workDir), issue);
 }
 
 /**
@@ -224,144 +146,22 @@ export function readIssue(id: string, workDir = process.cwd()): Issue | null {
 	return issues.find((i) => i.id === id) || null;
 }
 
-/**
- * Update an existing issue
- *
- * @deprecated Use updateIssueForRun() with explicit runId to avoid race conditions
- * when multiple milhouse processes run in parallel. This function relies on
- * getCurrentRunId() which can return the wrong run in concurrent scenarios.
- */
+/** @deprecated Use updateIssueForRun() with explicit runId. */
 export function updateIssue(
 	id: string,
 	update: Partial<Omit<Issue, "id" | "created_at">>,
 	workDir = process.cwd(),
 ): Issue | null {
-	const issues = loadIssues(workDir);
-	const index = issues.findIndex((i) => i.id === id);
-
-	if (index === -1) {
-		return null;
-	}
-
-	const updated: Issue = {
-		...issues[index],
-		...update,
-		updated_at: new Date().toISOString(),
-	};
-
-	const newIssues = [...issues.slice(0, index), updated, ...issues.slice(index + 1)];
-	saveIssues(newIssues, workDir);
-	return updated;
+	return updateIssueAtPath(getIssuesPath(workDir), id, update);
 }
 
-/**
- * Update an existing issue in a specific run
- *
- * This is the run-aware version that accepts an explicit runId parameter,
- * avoiding race conditions when multiple milhouse processes run in parallel.
- *
- * @param runId - The run ID containing the issue
- * @param issueId - The ID of the issue to update
- * @param update - Partial issue data to update
- * @param workDir - Working directory (defaults to process.cwd())
- * @returns The updated issue or null if not found
- */
 export function updateIssueForRun(
 	runId: string,
 	issueId: string,
 	update: Partial<Omit<Issue, "id" | "created_at">>,
 	workDir = process.cwd(),
 ): Issue | null {
-	const issues = loadIssuesForRun(runId, workDir);
-	const index = issues.findIndex((i) => i.id === issueId);
-
-	if (index === -1) {
-		return null;
-	}
-
-	const updated: Issue = {
-		...issues[index],
-		...update,
-		updated_at: new Date().toISOString(),
-	};
-
-	const newIssues = [...issues.slice(0, index), updated, ...issues.slice(index + 1)];
-	saveIssuesForRun(runId, newIssues, workDir);
-	return updated;
-}
-
-/**
- * Load raw issues from file without schema validation
- * Used for checking if file has data when loadIssues returns empty
- */
-function loadRawIssues(workDir = process.cwd()): unknown[] {
-	const path = getIssuesPath(workDir);
-	if (!existsSync(path)) {
-		return [];
-	}
-	try {
-		const content = readFileSync(path, "utf-8");
-		const parsed = JSON.parse(content);
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
-	}
-}
-
-/**
- * Batch update multiple issues atomically
- * This prevents race conditions when updating multiple issues in parallel
- *
- * IMPORTANT: This function includes safeguards to prevent data loss:
- * - If loadIssues returns empty but file has data, it won't overwrite
- * - Updates are validated before being applied
- */
-export function batchUpdateIssues(
-	updates: Map<string, Partial<Omit<Issue, "id" | "created_at">>>,
-	workDir = process.cwd(),
-): Issue[] {
-	if (updates.size === 0) {
-		return [];
-	}
-
-	const issues = loadIssues(workDir);
-	const now = new Date().toISOString();
-	const updatedIssues: Issue[] = [];
-
-	// CRITICAL: Check if we got empty issues but file actually has data
-	// This can happen if Zod parsing failed for all issues
-	if (issues.length === 0) {
-		const rawIssues = loadRawIssues(workDir);
-		if (rawIssues.length > 0) {
-			logError(
-				`batchUpdateIssues: loadIssues returned empty but file has ${rawIssues.length} raw entries`,
-			);
-			logError(
-				"This indicates schema validation failures. Aborting to prevent data loss.",
-			);
-			logError("Fix the schema issues and re-run validation.");
-			return [];
-		}
-	}
-
-	// Create a new array with all updates applied
-	const newIssues = issues.map((issue) => {
-		const update = updates.get(issue.id);
-		if (update) {
-			const updated: Issue = {
-				...issue,
-				...update,
-				updated_at: now,
-			};
-			updatedIssues.push(updated);
-			return updated;
-		}
-		return issue;
-	});
-
-	// Single atomic write with all updates
-	saveIssues(newIssues, workDir);
-	return updatedIssues;
+	return updateIssueAtPath(getIssuesPathForRun(runId, workDir), issueId, update);
 }
 
 /**
@@ -449,48 +249,19 @@ export function countIssues(workDir = process.cwd()): number {
 // CONCURRENT-SAFE UPDATE WITH SIMPLE FILE LOCKING
 // ============================================================================
 
-/**
- * Simple file-based lock for concurrent issue updates
- * Used when multiple agents may complete around the same time
- */
-let lockPromise: Promise<void> | null = null;
+/** In-process mutex for issue updates */
+const issueMutex = new AsyncMutex();
 
 /**
- * Update a single issue with simple locking
- * This ensures atomic read-modify-write even when called concurrently
- *
- * Note: This uses in-memory queue locking which is safe for single-process
- * concurrent operations (like p-limit based parallel validation)
+ * Update a single issue with mutex locking.
+ * Ensures atomic read-modify-write even when called concurrently.
  */
 export async function updateIssueWithLock(
 	id: string,
 	update: Partial<Omit<Issue, "id" | "created_at">>,
 	workDir = process.cwd(),
 ): Promise<Issue | null> {
-	// Queue this update behind any pending updates
-	const waitForLock = async (): Promise<void> => {
-		while (lockPromise) {
-			await lockPromise;
-		}
-	};
-
-	await waitForLock();
-
-	// Acquire lock
-	let releaseLock!: () => void;
-	lockPromise = new Promise<void>((resolve) => {
-		releaseLock = resolve;
-	});
-
-	try {
-		// Perform the update atomically
-		const result = updateIssue(id, update, workDir);
-		return result;
-	} finally {
-		// Release lock
-		lockPromise = null;
-		releaseLock?.();
-	}
+	return issueMutex.run(() => updateIssue(id, update, workDir));
 }
 
 /**
@@ -724,8 +495,6 @@ export async function batchUpdateIssuesForRunSafe(
 	const issuesPath = getIssuesPathForRun(runId, workDir);
 
 	return withFileLock(issuesPath, () => {
-		return updates.map(({ issueId, update }) =>
-			updateIssueForRun(runId, issueId, update, workDir),
-		);
+		return updates.map(({ issueId, update }) => updateIssueForRun(runId, issueId, update, workDir));
 	});
 }

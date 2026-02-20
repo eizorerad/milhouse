@@ -12,11 +12,15 @@
 import pLimit from "p-limit";
 import { createDefaultExecutor, getPlugin } from "../../engines";
 import { bus } from "../../events";
-import { deleteLocalBranch, slugify } from "../../vcs/services/branch-service.ts";
-import { abortMerge, mergeAgentBranch } from "../../vcs/services/merge-service.ts";
-import { cleanupWorktree, createWorktree, getWorktreeBase } from "../../vcs/services/worktree-service.ts";
 import { loggers } from "../../observability";
 import type { Task } from "../../schemas/tasks.schema";
+import { deleteLocalBranch, slugify } from "../../vcs/services/branch-service.ts";
+import { abortMerge, mergeAgentBranch } from "../../vcs/services/merge-service.ts";
+import {
+	cleanupWorktree,
+	createWorktree,
+	getWorktreeBase,
+} from "../../vcs/services/worktree-service.ts";
 import type {
 	ExecutionContext,
 	ExecutionOptions,
@@ -35,7 +39,7 @@ export class ParallelWorktreeStrategy implements IExecutionStrategy {
 	 * Check if this strategy can handle the given tasks.
 	 * Handles parallel execution with branch-per-task.
 	 */
-	canHandle(tasks: Task[], options: ExecutionOptions): boolean {
+	canHandle(_tasks: Task[], options: ExecutionOptions): boolean {
 		return options.parallel && options.branchPerTask;
 	}
 
@@ -103,10 +107,12 @@ export class ParallelWorktreeStrategy implements IExecutionStrategy {
 
 			// Collect successful branches and worktrees for merge and cleanup
 			const successfulResults = groupResults.filter((r) => r.success && r.branch);
-			const successfulBranches = successfulResults.map((r) => r.branch!);
+			const successfulBranches = successfulResults
+				.map((r) => r.branch)
+				.filter((b): b is string => b !== undefined);
 			const worktreesToCleanup = groupResults
-				.filter((r) => r.worktree)
-				.map((r) => r.worktree!);
+				.map((r) => r.worktree)
+				.filter((w): w is string => w !== undefined);
 
 			completedBranches.push(...successfulBranches);
 
@@ -169,7 +175,7 @@ export class ParallelWorktreeStrategy implements IExecutionStrategy {
 		baseBranch: string,
 	): Promise<TaskExecutionResult> {
 		const startTime = Date.now();
-		const { hooks, options } = context;
+		const { hooks } = context;
 		const branchName = `milhouse/${slugify(task.title)}-${Date.now()}`;
 		let worktreePath: string | undefined;
 		let actualBranchName: string | undefined;

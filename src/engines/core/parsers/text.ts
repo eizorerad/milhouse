@@ -125,7 +125,7 @@ function detectStepType(line: string): ExecutionStep["type"] | null {
 /**
  * Extract content after a step marker.
  */
-function extractContentAfterMarker(line: string, stepType: ExecutionStep["type"]): string | null {
+function extractContentAfterMarker(line: string, _stepType: ExecutionStep["type"]): string | null {
 	const trimmed = line.trim();
 
 	// Try to extract content after colon

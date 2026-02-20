@@ -4,9 +4,9 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatCost, formatTokens } from "../runner/cost.ts";
 import { getRunDir } from "../state/runs.ts";
 import type { JsonRunReport } from "./json-report.ts";
-import { formatCost, formatTokens } from "../runner/cost.ts";
 
 /**
  * Generate markdown report from JSON report data
@@ -33,7 +33,9 @@ export function generateMarkdownReport(report: JsonRunReport): string {
 	lines.push(`| Total | ${formatCost(report.cost.total)} |`);
 
 	for (const [phase, pc] of Object.entries(report.cost.by_phase)) {
-		lines.push(`| ${phase} | ${formatCost(pc.cost)} (${formatTokens(pc.input_tokens)} in / ${formatTokens(pc.output_tokens)} out) |`);
+		lines.push(
+			`| ${phase} | ${formatCost(pc.cost)} (${formatTokens(pc.input_tokens)} in / ${formatTokens(pc.output_tokens)} out) |`,
+		);
 	}
 	lines.push("");
 
@@ -58,7 +60,9 @@ export function generateMarkdownReport(report: JsonRunReport): string {
 		lines.push("| ID | Type | Title | Severity | Status |");
 		lines.push("|------|------|-------|----------|--------|");
 		for (const item of report.items) {
-			lines.push(`| ${item.id} | ${item.type ?? "bug"} | ${item.title} | ${item.severity} | ${item.status} |`);
+			lines.push(
+				`| ${item.id} | ${item.type ?? "bug"} | ${item.title} | ${item.severity} | ${item.status} |`,
+			);
 		}
 		lines.push("");
 	}

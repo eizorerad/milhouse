@@ -10,19 +10,19 @@
  * @module execution/issue-executor.test
  */
 
-import { describe, expect, it, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { execSync } from "node:child_process";
-import type { Issue, Task } from "../state/types.ts";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AIEngine, AIResult } from "../engines/types.ts";
+import type { Issue, Task } from "../state/types.ts";
 import {
-	groupTasksByIssue,
-	buildIssueExecutorPrompt,
-	displayBranchStatusSummary,
-	type IssueGroup,
 	type BranchStatus,
 	type IssueBasedExecutionOptions,
+	type IssueGroup,
+	buildIssueExecutorPrompt,
+	displayBranchStatusSummary,
+	groupTasksByIssue,
 	runParallelByIssue,
 } from "./issue-executor.ts";
 
@@ -116,10 +116,10 @@ describe("groupTasksByIssue", () => {
 		const existingGroup = groups.find((g) => g.issueId === "P-issue1");
 		const syntheticGroup = groups.find((g) => g.issueId === "P-missing");
 		expect(existingGroup).toBeDefined();
-		expect(existingGroup!.tasks.length).toBe(1);
+		expect(existingGroup?.tasks.length).toBe(1);
 		expect(syntheticGroup).toBeDefined();
-		expect(syntheticGroup!.tasks.length).toBe(1);
-		expect(syntheticGroup!.issue.status).toBe("CONFIRMED");
+		expect(syntheticGroup?.tasks.length).toBe(1);
+		expect(syntheticGroup?.issue.status).toBe("CONFIRMED");
 	});
 
 	it("should sort groups by severity (CRITICAL > HIGH > MEDIUM > LOW)", () => {
@@ -284,7 +284,7 @@ describe("Issue Executor Error Scenarios", () => {
 
 	beforeEach(() => {
 		// Create a temporary test directory
-		testDir = join(process.cwd(), ".test-issue-executor-" + Date.now());
+		testDir = join(process.cwd(), `.test-issue-executor-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 
 		// Initialize git repo
@@ -371,7 +371,7 @@ describe("Issue Executor Error Scenarios", () => {
 				skipMerge: true,
 			};
 
-			const result = await runParallelByIssue(tasks, [issue], options);
+			const _result = await runParallelByIssue(tasks, [issue], options);
 
 			// Should have retried and succeeded
 			expect(attempts).toBeGreaterThan(1);
@@ -394,11 +394,11 @@ describe("Issue Executor Error Scenarios", () => {
 			expect(groups.length).toBe(3);
 			const existingGroup = groups.find((g) => g.issueId === "P-exists");
 			expect(existingGroup).toBeDefined();
-			expect(existingGroup!.tasks.length).toBe(1);
+			expect(existingGroup?.tasks.length).toBe(1);
 
 			const missingGroup = groups.find((g) => g.issueId === "P-missing");
 			expect(missingGroup).toBeDefined();
-			expect(missingGroup!.issue.status).toBe("CONFIRMED");
+			expect(missingGroup?.issue.status).toBe("CONFIRMED");
 
 			const alsoMissingGroup = groups.find((g) => g.issueId === "P-also-missing");
 			expect(alsoMissingGroup).toBeDefined();
@@ -435,7 +435,7 @@ describe("Issue Executor Error Scenarios", () => {
 				}),
 			});
 
-			let mergeAttempted = false;
+			let _mergeAttempted = false;
 			const options: IssueBasedExecutionOptions = {
 				engine: successEngine,
 				workDir: testDir,
@@ -448,7 +448,7 @@ describe("Issue Executor Error Scenarios", () => {
 				browserEnabled: "false",
 				skipMerge: false, // Enable merge to test dirty worktree handling
 				onMergeComplete: async () => {
-					mergeAttempted = true;
+					_mergeAttempted = true;
 				},
 			};
 
@@ -559,16 +559,14 @@ describe("Issue Executor Error Scenarios", () => {
 				skipMerge: true,
 			};
 
-			const result = await runParallelByIssue(tasks, [issue1, issue2, issue3], options);
+			const _result = await runParallelByIssue(tasks, [issue1, issue2, issue3], options);
 
 			// All 3 issues should have been processed
 			expect(executionOrder.length).toBe(3);
 		});
 
 		it("should respect maxConcurrent limit", async () => {
-			const issues = Array.from({ length: 5 }, (_, i) =>
-				createMockIssue({ id: `P-limit${i}` }),
-			);
+			const issues = Array.from({ length: 5 }, (_, i) => createMockIssue({ id: `P-limit${i}` }));
 
 			const tasks = issues.map((issue) =>
 				createMockTask({ id: `${issue.id}-T1`, issue_id: issue.id }),

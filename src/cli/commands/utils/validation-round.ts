@@ -15,25 +15,30 @@ import pLimit from "p-limit";
 import pc from "picocolors";
 import type { RuntimeOptions } from "../../../config/index.ts";
 import { createEngine } from "../../../engines/index.ts";
-import type { AIEngineName } from "../../../engines/types.ts";
 import {
 	OpencodeServerExecutor,
 	PortManager,
-	displayTmuxModeHeader,
+	type ServerInfo,
 	displayAttachInstructions,
 	displayTmuxCompletionSummary,
+	displayTmuxModeHeader,
 	getMessageOptionsForPhase,
-	type ServerInfo,
 } from "../../../engines/opencode/index.ts";
 import type { TmuxSessionManager } from "../../../engines/tmux/index.ts";
-import { buildFilterOptionsFromRuntime, filterIssues, loadIssues, updateIssueFromValidation } from "../../../state/issues.ts";
+import type { AIEngineName } from "../../../engines/types.ts";
+import {
+	buildFilterOptionsFromRuntime,
+	filterIssues,
+	loadIssues,
+	updateIssueFromValidation,
+} from "../../../state/issues.ts";
 import type { Evidence, Issue, IssueStatus } from "../../../state/types.ts";
 import { logDebug, logInfo, logWarn } from "../../../ui/logger.ts";
 import { DynamicAgentSpinner, ProgressSpinner } from "../../../ui/spinners.ts";
-import type { DeepValidationReport, ValidationRoundResult } from "./validation-types.ts";
-import { generateMarkdownReport, saveValidationReport } from "./validation-report.ts";
-import { buildDeepIssueValidatorPrompt } from "./validation-prompt.ts";
 import { extractJsonFromResponse } from "../../../utils/json-extractor.ts";
+import { buildDeepIssueValidatorPrompt } from "./validation-prompt.ts";
+import { generateMarkdownReport, saveValidationReport } from "./validation-report.ts";
+import type { DeepValidationReport, ValidationRoundResult } from "./validation-types.ts";
 
 /**
  * Sleep utility for retry delays
@@ -381,7 +386,7 @@ export async function executeValidationRoundTmux(
 	round: number,
 	maxParallel: number,
 	tmuxManager: TmuxSessionManager,
-	runId: string,
+	_runId: string,
 ): Promise<ValidationRoundResult> {
 	let inputTokens = 0;
 	let outputTokens = 0;
@@ -476,7 +481,7 @@ export async function executeValidationRoundTmux(
 		// Create a work queue - issues waiting to be processed
 		const workQueue = [...issues];
 		let workQueueIndex = 0;
-		const workQueueLock = { locked: false };
+		const _workQueueLock = { locked: false };
 
 		// Helper to get next issue from queue (thread-safe)
 		const getNextIssue = (): Issue | null => {
@@ -509,7 +514,7 @@ export async function executeValidationRoundTmux(
 				const response = await executor.sendMessage(
 					sessionId,
 					prompt,
-					getMessageOptionsForPhase("validate", options.modelOverride)
+					getMessageOptionsForPhase("validate", options.modelOverride),
 				);
 
 				// Update spinner to show we're processing the response
@@ -625,13 +630,12 @@ export async function executeValidationRoundTmux(
 
 					logDebug(`  Report saved: ${reportPath}`);
 					return { success: true, issue, report };
-				} else {
-					errors.push(`IV-${agentNum} (${issue.id}): Failed to parse validation response`);
-					console.log(
-						`  ${pc.red("✗")} IV-${agentNum}: ${issue.id} - ${pc.red("Failed to parse response")}`,
-					);
-					return { success: false, issue };
 				}
+				errors.push(`IV-${agentNum} (${issue.id}): Failed to parse validation response`);
+				console.log(
+					`  ${pc.red("✗")} IV-${agentNum}: ${issue.id} - ${pc.red("Failed to parse response")}`,
+				);
+				return { success: false, issue };
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error);
 				errors.push(`IV-${agentNum} (${issue.id}): ${errorMsg}`);
@@ -666,8 +670,7 @@ export async function executeValidationRoundTmux(
 		displayTmuxCompletionSummary(completedServerInfos);
 
 		// Mark spinner as successful
-		spinner.success(`Validation complete`);
-
+		spinner.success("Validation complete");
 	} finally {
 		// Cleanup: Stop all servers but keep tmux sessions for inspection
 		logInfo("Stopping OpenCode servers (tmux sessions preserved for inspection)");

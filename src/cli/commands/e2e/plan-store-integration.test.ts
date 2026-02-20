@@ -20,17 +20,18 @@ import {
 	readdirSync,
 	readlinkSync,
 	rmSync,
+	symlinkSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
 import {
 	createRun,
 	getCurrentPlansDir,
 	getCurrentRunId,
 	getLegacyPlansDir,
-	getRunDir,
 	hasLegacyPlansToImport,
 	importLegacyPlans,
 	listPlanFiles,
@@ -123,7 +124,7 @@ function setupLegacyPlans(workDir: string, files: Record<string, string>): void 
 /**
  * Creates a run and sets it as current
  */
-function setupRun(workDir: string, runId?: string): string {
+function setupRun(workDir: string, _runId?: string): string {
 	const run = createRun({ workDir, scope: "test scope" });
 	return run.id;
 }
@@ -281,7 +282,7 @@ describe("Plan Store Integration", () => {
 		});
 
 		test("legacy view reflects current run plans", () => {
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 
 			// Write plans
 			writeProblemBrief(tempDir, "# Problem Brief from Run");
@@ -306,7 +307,7 @@ describe("Plan Store Integration", () => {
 			syncLegacyPlansView(tempDir);
 
 			// Create second run
-			const run2 = createRun({ workDir: tempDir, scope: "run 2" });
+			const _run2 = createRun({ workDir: tempDir, scope: "run 2" });
 			writeProblemBrief(tempDir, "# Problem Brief from Run 2");
 			syncLegacyPlansView(tempDir);
 
@@ -325,7 +326,7 @@ describe("Plan Store Integration", () => {
 		});
 
 		test("sync is idempotent", () => {
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 			writeProblemBrief(tempDir, "# Problem Brief");
 
 			// Sync multiple times
@@ -346,7 +347,7 @@ describe("Plan Store Integration", () => {
 			});
 
 			// Now create a run
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 			writeProblemBrief(tempDir, "# New Problem Brief");
 
 			// Sync should replace the directory
@@ -390,7 +391,7 @@ describe("Plan Store Integration", () => {
 		});
 
 		test("hasLegacyPlansToImport returns false when no legacy plans", () => {
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 
 			// No legacy plans exist
 			expect(hasLegacyPlansToImport(tempDir)).toBe(false);
@@ -485,8 +486,25 @@ describe("Plan Store Integration", () => {
 		});
 
 		test("importLegacyPlans returns 0 when legacy dir is already a symlink", () => {
+			// Symlinks may not be supported on Windows without elevated permissions
+			const canSymlink = (() => {
+				try {
+					const testTarget = join(tempDir, ".symtest-target");
+					const testLink = join(tempDir, ".symtest-link");
+					mkdirSync(testTarget, { recursive: true });
+					symlinkSync(testTarget, testLink, "dir");
+					unlinkSync(testLink);
+					rmSync(testTarget, { recursive: true, force: true });
+					return true;
+				} catch {
+					return false;
+				}
+			})();
+
+			if (!canSymlink) return;
+
 			// Create run and write plans
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 			writeProblemBrief(tempDir, "# Run Brief");
 
 			// Sync creates symlink
@@ -551,7 +569,7 @@ describe("Plan Store Integration", () => {
 		});
 
 		test("listPlanFiles returns files from run-scoped directory", () => {
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 
 			// Write multiple plans
 			writeProblemBrief(tempDir, "# Brief");
@@ -569,7 +587,7 @@ describe("Plan Store Integration", () => {
 		});
 
 		test("executor reads correct WBS for each issue", () => {
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 
 			// Write different WBS plans for different issues
 			writeIssueWbsPlan(tempDir, "ISS-001", "# WBS for Issue 1\n\nFix authentication bug");
@@ -699,7 +717,7 @@ describe("Plan Store Integration", () => {
 		});
 
 		test("read returns null for non-existent plan files", () => {
-			const runId = setupRun(tempDir);
+			const _runId = setupRun(tempDir);
 
 			// Try to read non-existent files
 			expect(readProblemBrief(tempDir)).toBeNull();

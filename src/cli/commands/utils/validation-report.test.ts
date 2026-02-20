@@ -174,7 +174,9 @@ describe("validation-report", () => {
 		});
 
 		it("should include corrected description when present", () => {
-			const report = createMockReport({ corrected_description: "This is the corrected description." });
+			const report = createMockReport({
+				corrected_description: "This is the corrected description.",
+			});
 			const markdown = generateMarkdownReport(report);
 
 			expect(markdown).toContain("## Corrected Description");

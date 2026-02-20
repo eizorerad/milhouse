@@ -235,7 +235,7 @@ export class QwenPlugin implements IEnginePlugin {
 			const messages = JSON.parse(output);
 			const steps: ExecutionStep[] = [];
 			const assistantMessages: string[] = [];
-			let sessionId: string | undefined;
+			let _sessionId: string | undefined;
 			let durationMs = 0;
 			let isError = false;
 
@@ -245,7 +245,7 @@ export class QwenPlugin implements IEnginePlugin {
 				switch (msg.type) {
 					case "system":
 						if (msg.subtype === "session_start") {
-							sessionId = msg.session_id;
+							_sessionId = msg.session_id;
 							steps.push({
 								type: "thinking",
 								content: `Session started with model: ${msg.model || "unknown"}`,
@@ -274,7 +274,7 @@ export class QwenPlugin implements IEnginePlugin {
 						break;
 
 					case "result":
-						sessionId = msg.session_id;
+						_sessionId = msg.session_id;
 						durationMs = msg.duration_ms || 0;
 						isError = msg.is_error || false;
 						if (msg.result && !assistantMessages.length) {
@@ -361,7 +361,7 @@ export class QwenPlugin implements IEnginePlugin {
 		const lines = output.trim().split("\n");
 		const messages: string[] = [];
 		const steps: ExecutionStep[] = [];
-		let sessionId: string | undefined;
+		let _sessionId: string | undefined;
 		let durationMs = 0;
 		let isError = false;
 
@@ -375,7 +375,7 @@ export class QwenPlugin implements IEnginePlugin {
 				switch (event.type) {
 					case "system":
 						if (event.subtype === "session_start") {
-							sessionId = event.session_id;
+							_sessionId = event.session_id;
 							steps.push({
 								type: "thinking",
 								content: `Session started with model: ${event.model || "unknown"}`,
@@ -404,7 +404,7 @@ export class QwenPlugin implements IEnginePlugin {
 						break;
 
 					case "result":
-						sessionId = event.session_id;
+						_sessionId = event.session_id;
 						durationMs = event.duration_ms || 0;
 						isError = event.is_error || false;
 						if (event.result && !messages.length) {

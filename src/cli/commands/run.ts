@@ -1,20 +1,10 @@
 import { existsSync } from "node:fs";
-import type { RuntimeOptions } from "../runtime-options.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName } from "../../engines/types.ts";
-import {
-	type PipelineConfig,
-	type PipelinePhase,
-	type PipelineResult,
-	getPipelineStatus,
-	resumePipeline,
-	runPipeline,
-} from "../../execution/pipeline.ts";
-import { shouldEnableBrowser, legacyFlagToBrowserMode } from "../../execution/runtime/browser.ts";
+import { legacyFlagToBrowserMode, shouldEnableBrowser } from "../../execution/runtime/browser.ts";
 import { runParallel } from "../../execution/steps/parallel.ts";
 import { runSequential } from "../../execution/steps/sequential.ts";
 import type { MilhouseStepBatchResult } from "../../execution/steps/types.ts";
-import { getDefaultBaseBranch } from "../../vcs/services/branch-service.ts";
 import { createLegacyTaskSource } from "../../tasks/index.ts";
 import {
 	formatDuration,
@@ -22,129 +12,22 @@ import {
 	logError,
 	logInfo,
 	logSuccess,
-	logWarn,
 	setVerbose,
 } from "../../ui/logger.ts";
 import { notifyAllComplete } from "../../ui/notify.ts";
 import { buildActiveSettings } from "../../ui/settings.ts";
+import { getDefaultBaseBranch } from "../../vcs/services/branch-service.ts";
+import type { RuntimeOptions } from "../runtime-options.ts";
 
-// New runner-based imports
+import { runPipeline as runPipelineImpl } from "../../pipeline/orchestrator.ts";
+import type { PipelineResult } from "../../pipeline/orchestrator.ts";
+// Runner-based imports
 import { loadResolvedConfig } from "../../runner/config-loader.ts";
-import { runPipeline as runPipelineV2Impl } from "../../pipeline/orchestrator.ts";
-import type { PipelineResult as PipelineResultV2 } from "../../pipeline/orchestrator.ts";
 
 /**
- * Options for the new pipeline-based run
+ * Options for the pipeline run
  */
 export interface PipelineRunOptions {
-	/** Start from this phase */
-	startPhase?: PipelinePhase;
-	/** Stop after this phase */
-	endPhase?: PipelinePhase;
-	/** Resume from where it left off */
-	resume?: boolean;
-	/** Force run even if phases already completed */
-	force?: boolean;
-	/** Stop on first phase failure */
-	failFast?: boolean;
-}
-
-/**
- * Run the full Milhouse pipeline (scan → validate → plan → consolidate → exec → verify)
- *
- * This is the new agent-based pipeline execution mode that:
- * 1. Scans the repository for issues with the Lead Investigator agent
- * 2. Validates issues with Issue Validator agents
- * 3. Plans fixes with Planner agents
- * 4. Consolidates plans into an Execution Plan
- * 5. Executes tasks with Executor agents
- * 6. Verifies results with Verifier gates
- */
-export async function runPipelineMode(
-	options: RuntimeOptions,
-	pipelineOptions: PipelineRunOptions = {},
-): Promise<PipelineResult> {
-	const workDir = process.cwd();
-	setVerbose(options.verbose);
-
-	// Check engine availability
-	const engine = await createEngine(options.aiEngine as AIEngineName);
-	let available = false;
-	try {
-		const plugin = getPlugin(options.aiEngine as AIEngineName);
-		available = await plugin.isAvailable();
-	} catch {
-		available = false;
-	}
-
-	if (!available) {
-		logError(`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`);
-		process.exit(1);
-	}
-
-	logInfo(`Starting Milhouse Pipeline with ${engine.name}`);
-	if (options.tmux) {
-		logInfo("Tmux mode enabled - OpenCode servers will be started with TUI attachment");
-	}
-
-	// Check current pipeline status
-	const status = getPipelineStatus(workDir);
-
-	if (status.isComplete && !pipelineOptions.force) {
-		logInfo("Pipeline already completed. Use --force to re-run.");
-		return {
-			success: true,
-			phasesCompleted: [],
-			phaseResults: [],
-			totalInputTokens: 0,
-			totalOutputTokens: 0,
-			totalDurationMs: 0,
-		};
-	}
-
-	if (status.isFailed && !pipelineOptions.resume && !pipelineOptions.force) {
-		logWarn("Previous pipeline run failed.");
-		logInfo("Use --resume to continue from where it left off, or --force to start fresh.");
-	}
-
-	// Build pipeline config
-	const pipelineConfig: PipelineConfig = {
-		startPhase: pipelineOptions.startPhase,
-		endPhase: pipelineOptions.endPhase,
-		failFast: pipelineOptions.failFast ?? true,
-		skipCompleted: !pipelineOptions.force,
-		force: pipelineOptions.force,
-	};
-
-	// Run pipeline
-	let result: PipelineResult;
-
-	if (pipelineOptions.resume) {
-		result = await resumePipeline(options, pipelineConfig);
-	} else {
-		result = await runPipeline(options, pipelineConfig);
-	}
-
-	// Notify completion
-	if (result.success) {
-		const tasksCompleted = result.phaseResults.find((p) => p.phase === "exec")?.data
-			?.tasksCompleted as number | undefined;
-		if (tasksCompleted && tasksCompleted > 0) {
-			notifyAllComplete(tasksCompleted);
-		}
-	}
-
-	if (!result.success) {
-		process.exit(1);
-	}
-
-	return result;
-}
-
-/**
- * Options for the new runner-based pipeline
- */
-export interface PipelineRunOptionsV2 {
 	/** Start from this phase */
 	startPhase?: string;
 	/** Stop after this phase */
@@ -156,22 +39,21 @@ export interface PipelineRunOptionsV2 {
 }
 
 /**
- * Run the full Milhouse pipeline using the new PhaseRunner-based orchestrator.
+ * Run the full Milhouse pipeline using the PhaseRunner-based orchestrator.
  *
- * This replaces runPipelineMode with the unified runner:
  * 1. loadResolvedConfig() merges defaults + config.yml + CLI flags
  * 2. runPipeline() loops over phases using PhaseRunner
  */
 export async function runPipelineV2(
 	options: RuntimeOptions,
-	pipelineOptions: PipelineRunOptionsV2 = {},
-): Promise<PipelineResultV2> {
+	pipelineOptions: PipelineRunOptions = {},
+): Promise<PipelineResult> {
 	const workDir = process.cwd();
 	setVerbose(options.verbose);
 
 	const config = loadResolvedConfig(workDir, options);
 
-	const result = await runPipelineV2Impl({
+	const result = await runPipelineImpl({
 		workDir,
 		config,
 		scope: options.scanFocus,
@@ -183,7 +65,9 @@ export async function runPipelineV2(
 	});
 
 	if (!result.success) {
-		logError(`Pipeline failed${result.stoppedAt ? ` at phase "${result.stoppedAt}"` : ""}: ${result.error ?? "unknown error"}`);
+		logError(
+			`Pipeline failed${result.stoppedAt ? ` at phase "${result.stoppedAt}"` : ""}: ${result.error ?? "unknown error"}`,
+		);
 		process.exit(1);
 	}
 
@@ -192,9 +76,6 @@ export async function runPipelineV2(
 
 /**
  * Run the PRD loop (multiple tasks from file/GitHub)
- *
- * @deprecated Use runPipelineMode for the new agent-based execution.
- * This function is kept for backward compatibility with PRD-based workflows.
  */
 export async function runLoop(options: RuntimeOptions): Promise<void> {
 	const workDir = process.cwd();
@@ -225,15 +106,15 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 
 	// Check engine availability
 	const engine = await createEngine(options.aiEngine as AIEngineName);
-	let available2 = false;
+	let available = false;
 	try {
 		const plugin = getPlugin(options.aiEngine as AIEngineName);
-		available2 = await plugin.isAvailable();
+		available = await plugin.isAvailable();
 	} catch {
-		available2 = false;
+		available = false;
 	}
 
-	if (!available2) {
+	if (!available) {
 		logError(`${engine.name} CLI not found. Make sure '${engine.cliCommand}' is in your PATH.`);
 		process.exit(1);
 	}

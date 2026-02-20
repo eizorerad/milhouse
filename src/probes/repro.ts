@@ -14,7 +14,7 @@ import {
 /**
  * Log file patterns to search for
  */
-const LOG_FILE_PATTERNS = [
+const _LOG_FILE_PATTERNS = [
 	"*.log",
 	"logs/*.log",
 	"log/*.log",
@@ -109,7 +109,7 @@ const REPRO_FILE_PATTERNS = [
 /**
  * Test command patterns
  */
-const TEST_COMMANDS: Record<string, string[]> = {
+const _TEST_COMMANDS: Record<string, string[]> = {
 	npm: ["npm test", "npm run test"],
 	yarn: ["yarn test"],
 	pnpm: ["pnpm test"],
@@ -698,7 +698,7 @@ export class ReproProbe extends BaseProbe<ReproProbeOutput> {
 	 */
 	findArtifacts(workDir: string): string[] {
 		const artifacts: string[] = [];
-		const artifactPatterns = [
+		const _artifactPatterns = [
 			"screenshots/*.png",
 			"screenshots/*.jpg",
 			"*.screenshot.png",

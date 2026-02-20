@@ -43,6 +43,25 @@ import {
 // ============================================================================
 
 /**
+ * Minimal shape of a GitHub issue from Octokit (avoids explicit any)
+ */
+interface GitHubIssueData {
+	number: number;
+	title: string;
+	body?: string | null;
+	state: string;
+	labels?: Array<string | { name?: string }>;
+	assignee?: { login?: string } | null;
+	milestone?: { title?: string } | null;
+	reactions?: { total_count?: number };
+	pull_request?: unknown;
+	html_url?: string;
+	created_at?: string;
+	updated_at?: string;
+	closed_at?: string | null;
+}
+
+/**
  * GitHub-specific configuration options
  */
 interface GitHubOptions {
@@ -222,9 +241,7 @@ function extractArtifacts(body: string | null): ExpectedArtifact[] {
 
 	// Pattern: <!-- artifact: type:pattern -->
 	const artifactPattern = /<!--\s*artifact:\s*(\w+):([^>]+)\s*-->/g;
-	let match: RegExpExecArray | null;
-
-	while ((match = artifactPattern.exec(body)) !== null) {
+	for (const match of body.matchAll(artifactPattern)) {
 		artifacts.push({
 			type: match[1] as ExpectedArtifact["type"],
 			pattern: match[2].trim(),
@@ -234,7 +251,7 @@ function extractArtifacts(body: string | null): ExpectedArtifact[] {
 
 	// Also check for file references in code blocks
 	const filePattern = /```(?:diff|patch)?\s*\n(?:---|\+\+\+)\s+([^\n]+)/g;
-	while ((match = filePattern.exec(body)) !== null) {
+	for (const match of body.matchAll(filePattern)) {
 		const filePath = match[1].replace(/^[ab]\//, "").trim();
 		if (filePath && !artifacts.some((a) => a.pattern === filePath)) {
 			artifacts.push({
@@ -408,8 +425,11 @@ export class GitHubTaskSource implements IMilhouseTaskSource, ITaskSource {
 	/**
 	 * Convert GitHub issue to Milhouse task
 	 */
-	private issueToTask(issue: any): MilhouseTask {
-		const labels = issue.labels?.map((l: any) => (typeof l === "string" ? l : l.name)) || [];
+	private issueToTask(issue: GitHubIssueData): MilhouseTask {
+		const labels =
+			issue.labels
+				?.map((l: string | { name?: string }) => (typeof l === "string" ? l : l.name))
+				.filter((name): name is string => name !== undefined) || [];
 		const discoveredAt = new Date().toISOString();
 
 		// Extract priority from labels
@@ -440,7 +460,7 @@ export class GitHubTaskSource implements IMilhouseTaskSource, ITaskSource {
 
 		// Build complexity estimate
 		const complexity: ComplexityEstimate | undefined = this.config.estimateComplexity
-			? estimateComplexityFromIssue(issue.title, issue.body, labels)
+			? estimateComplexityFromIssue(issue.title, issue.body ?? null, labels)
 			: undefined;
 
 		// Build engine hints
@@ -449,7 +469,7 @@ export class GitHubTaskSource implements IMilhouseTaskSource, ITaskSource {
 			: this.config.defaultEngineHints;
 
 		// Extract expected artifacts
-		const expectedArtifacts = extractArtifacts(issue.body);
+		const expectedArtifacts = extractArtifacts(issue.body ?? null);
 
 		// Filter out metadata labels from display labels
 		const displayLabels = labels.filter(
@@ -539,8 +559,7 @@ export class GitHubTaskSource implements IMilhouseTaskSource, ITaskSource {
 		];
 
 		for (const pattern of patterns) {
-			let match: RegExpExecArray | null;
-			while ((match = pattern.exec(body)) !== null) {
+			for (const match of body.matchAll(pattern)) {
 				deps.push(`gh-${match[1]}`);
 			}
 		}
@@ -647,7 +666,11 @@ export class GitHubTaskSource implements IMilhouseTaskSource, ITaskSource {
 			...collection,
 			tasks,
 			collectionMetadata: {
-				...collection.collectionMetadata!,
+				...(collection.collectionMetadata ?? {
+					totalDiscovered: 0,
+					filteredCount: 0,
+					schemaVersion: "",
+				}),
 				filteredCount: collection.tasks.length - tasks.length,
 				filterCriteria: this.getFilterCriteria(options),
 			},

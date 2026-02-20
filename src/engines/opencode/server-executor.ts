@@ -12,25 +12,24 @@ import { logger } from "../../observability/logger";
 import { ensureOpencodeInstalled } from "./installer";
 import { PortManager } from "./port-manager";
 import type {
-	Session,
 	CreateSessionOptions,
-	UpdateSessionOptions,
+	ExecuteCommandOptions,
+	FileDiff,
+	ForkSessionOptions,
+	HealthResponse,
+	InitSessionOptions,
+	MessageResponse,
+	ModelSpec,
+	Part,
+	RevertMessageOptions,
+	RunShellOptions,
+	SendMessageOptions,
+	Session,
 	SessionStatus,
 	SessionStatusMap,
-	MessageResponse,
-	SendMessageOptions,
-	Part,
-	FileDiff,
-	Todo,
-	HealthResponse,
-	ForkSessionOptions,
-	RevertMessageOptions,
 	SummarizeOptions,
-	InitSessionOptions,
-	ExecuteCommandOptions,
-	RunShellOptions,
-	OpencodeServerError,
-	ModelSpec,
+	Todo,
+	UpdateSessionOptions,
 } from "./types";
 
 // ============================================================================
@@ -71,10 +70,10 @@ export interface OpencodeServerConfig {
 	 * Enable YOLO mode (auto-approve all permission prompts).
 	 * When enabled, OpenCode will not ask for permission to execute commands,
 	 * read/write files, or perform other operations.
-	 * 
+	 *
 	 * WARNING: This is dangerous and should only be used in trusted environments
 	 * or automated pipelines where you trust the AI's actions.
-	 * 
+	 *
 	 * @default true - Enabled by default for automated pipeline usage
 	 */
 	yolo?: boolean;
@@ -101,12 +100,12 @@ const DEFAULT_CONFIG: Required<Omit<OpencodeServerConfig, "port" | "password" | 
 
 /**
  * Parse a model string into a ModelSpec object.
- * 
+ *
  * The model string format is "providerID/modelID", e.g.:
  * - "anthropic/claude-sonnet-4-5"
  * - "amazon-bedrock/anthropic.claude-opus-4-5-20251101-v1:0"
  * - "openai/gpt-4o"
- * 
+ *
  * @param modelString - The model string in "providerID/modelID" format
  * @returns ModelSpec object with providerID and modelID
  * @throws Error if the model string is invalid
@@ -115,19 +114,19 @@ export function parseModelString(modelString: string): ModelSpec {
 	const slashIndex = modelString.indexOf("/");
 	if (slashIndex === -1) {
 		throw new Error(
-			`Invalid model format: "${modelString}". Expected format: "providerID/modelID" (e.g., "anthropic/claude-sonnet-4-5")`
+			`Invalid model format: "${modelString}". Expected format: "providerID/modelID" (e.g., "anthropic/claude-sonnet-4-5")`,
 		);
 	}
-	
+
 	const providerID = modelString.substring(0, slashIndex);
 	const modelID = modelString.substring(slashIndex + 1);
-	
+
 	if (!providerID || !modelID) {
 		throw new Error(
-			`Invalid model format: "${modelString}". Both providerID and modelID must be non-empty.`
+			`Invalid model format: "${modelString}". Both providerID and modelID must be non-empty.`,
 		);
 	}
-	
+
 	return { providerID, modelID };
 }
 
@@ -420,9 +419,7 @@ export class OpencodeServerExecutor {
 
 			// Check timeout
 			if (Date.now() - startTime > this.config.startupTimeout) {
-				throw new Error(
-					`OpenCode server failed to start within ${this.config.startupTimeout}ms`,
-				);
+				throw new Error(`OpenCode server failed to start within ${this.config.startupTimeout}ms`);
 			}
 
 			// Wait before retrying
@@ -430,9 +427,7 @@ export class OpencodeServerExecutor {
 			retries++;
 		}
 
-		throw new Error(
-			`OpenCode server failed to become healthy after ${retries} retries`,
-		);
+		throw new Error(`OpenCode server failed to become healthy after ${retries} retries`);
 	}
 
 	// ============================================================================
@@ -556,7 +551,7 @@ export class OpencodeServerExecutor {
 	 * ```typescript
 	 * // Without model override (uses session default)
 	 * const response = await executor.sendMessage(sessionId, 'Explain async/await');
-	 * 
+	 *
 	 * // With model override
 	 * const response = await executor.sendMessage(sessionId, 'Explain async/await', {
 	 *   model: 'anthropic/claude-sonnet-4-5'
@@ -579,19 +574,19 @@ export class OpencodeServerExecutor {
 		},
 	): Promise<MessageResponse> {
 		const parts: Part[] = [{ type: "text", text: prompt }];
-		
+
 		// Build the request body, converting model string to object if provided
 		const body: Record<string, unknown> = { parts };
-		
+
 		if (options) {
 			const { model, ...rest } = options;
 			Object.assign(body, rest);
-			
+
 			if (model) {
 				body.model = parseModelString(model);
 			}
 		}
-		
+
 		return this.post<MessageResponse>(`/session/${sessionId}/message`, body);
 	}
 
@@ -638,19 +633,19 @@ export class OpencodeServerExecutor {
 		},
 	): Promise<void> {
 		const parts: Part[] = [{ type: "text", text: prompt }];
-		
+
 		// Build the request body, converting model string to object if provided
 		const body: Record<string, unknown> = { parts };
-		
+
 		if (options) {
 			const { model, ...rest } = options;
 			Object.assign(body, rest);
-			
+
 			if (model) {
 				body.model = parseModelString(model);
 			}
 		}
-		
+
 		await this.post<void>(`/session/${sessionId}/prompt_async`, body);
 	}
 
@@ -695,7 +690,10 @@ export class OpencodeServerExecutor {
 	 * @param options - Command execution options
 	 * @returns The command response
 	 */
-	async executeCommand(sessionId: string, options: ExecuteCommandOptions): Promise<MessageResponse> {
+	async executeCommand(
+		sessionId: string,
+		options: ExecuteCommandOptions,
+	): Promise<MessageResponse> {
 		return this.post<MessageResponse>(`/session/${sessionId}/command`, options);
 	}
 
@@ -962,7 +960,7 @@ export class OpencodeServerExecutor {
 			if (!response.ok) {
 				const errorText = await response.text();
 				let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-				
+
 				try {
 					const errorJson = JSON.parse(errorText);
 					errorMessage = errorJson.message ?? errorMessage;
@@ -988,7 +986,7 @@ export class OpencodeServerExecutor {
 		} catch (error) {
 			// Handle abort/timeout errors
 			if (error instanceof Error && error.name === "AbortError") {
-				throw new Error(`The operation timed out.`);
+				throw new Error("The operation timed out.");
 			}
 			throw error;
 		} finally {

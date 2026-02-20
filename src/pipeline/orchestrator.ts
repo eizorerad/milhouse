@@ -7,17 +7,26 @@
  * Supports smart resume with --resume --run-id <id>.
  */
 
-import type { PhaseConfig, PhaseRunResult, ResolvedConfig } from "../runner/types.ts";
+import { select } from "@inquirer/prompts";
+import pc from "picocolors";
+import { autoGenerateReport } from "../report/generator.ts";
+import {
+	BudgetExceededError,
+	type RunCost,
+	createRunCost,
+	formatCost,
+	formatTokens,
+} from "../runner/cost.ts";
 import { runPhase } from "../runner/phase-runner.ts";
-import { BudgetExceededError, createRunCost, formatCost, formatTokens, type RunCost } from "../runner/cost.ts";
+import { consolidatePhaseConfig } from "../runner/phases/consolidate.ts";
+import { planPhaseConfig } from "../runner/phases/plan.ts";
 import { scanPhaseConfig } from "../runner/phases/scan.ts";
 import { validatePhaseConfig } from "../runner/phases/validate.ts";
-import { planPhaseConfig } from "../runner/phases/plan.ts";
-import { consolidatePhaseConfig } from "../runner/phases/consolidate.ts";
 import { verifyPhaseConfig } from "../runner/phases/verify.ts";
+import type { PhaseConfig, PhaseRunResult, ResolvedConfig } from "../runner/types.ts";
 import { loadRunMeta, loadRunsIndex } from "../state/runs.ts";
+import type { RunMeta } from "../state/types.ts";
 import { logError, logInfo, logWarn } from "../ui/logger.ts";
-import { autoGenerateReport } from "../report/generator.ts";
 
 /** All phase configs indexed by name */
 const PHASE_CONFIGS: Record<string, PhaseConfig> = {
@@ -74,6 +83,72 @@ function resolvePhases(opts: PipelineOptions): string[] {
 	return phases;
 }
 
+/** Phases that indicate a run is still in progress (not finished). */
+const INCOMPLETE_PHASES = new Set(["scan", "validate", "plan", "consolidate", "exec", "verify"]);
+
+/** Format a run for display in the interactive selector. */
+function formatRunChoice(meta: RunMeta): string {
+	const phase = pc.yellow(`[${meta.phase}]`);
+	const scope = meta.scope ? pc.dim(` — ${meta.scope}`) : "";
+	const age = formatAge(meta.created_at);
+	return `${meta.id} ${phase}${scope} ${pc.dim(age)}`;
+}
+
+/** Format age of a run relative to now. */
+function formatAge(isoDate: string): string {
+	const ms = Date.now() - new Date(isoDate).getTime();
+	const mins = Math.floor(ms / 60000);
+	if (mins < 60) return `${mins}m ago`;
+	const hours = Math.floor(mins / 60);
+	if (hours < 24) return `${hours}h ago`;
+	return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * Check for incomplete runs and prompt the user to resume or start new.
+ * Returns { action: "resume", runId } or { action: "new" }.
+ */
+async function promptResumeOrNew(
+	workDir: string,
+): Promise<{ action: "resume"; runId: string; startPhase: string } | { action: "new" }> {
+	const index = loadRunsIndex(workDir);
+	const incompleteRuns: RunMeta[] = [];
+
+	for (const entry of index.runs) {
+		if (INCOMPLETE_PHASES.has(entry.phase)) {
+			const meta = loadRunMeta(entry.id, workDir);
+			if (meta) incompleteRuns.push(meta);
+		}
+	}
+
+	if (incompleteRuns.length === 0) return { action: "new" };
+
+	// Sort newest first
+	incompleteRuns.sort(
+		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+	);
+
+	const choices = [
+		...incompleteRuns.map((meta) => ({
+			name: `Resume: ${formatRunChoice(meta)}`,
+			value: `resume:${meta.id}`,
+		})),
+		{ name: pc.green("Start new run"), value: "new" },
+	];
+
+	const answer = await select({
+		message: "Incomplete run(s) found. What would you like to do?",
+		choices,
+	});
+
+	if (answer === "new") return { action: "new" };
+
+	const runId = answer.replace("resume:", "");
+	const meta = loadRunMeta(runId, workDir);
+	const startPhase = meta && PHASE_ORDER.includes(meta.phase) ? meta.phase : "scan";
+	return { action: "resume", runId, startPhase };
+}
+
 /** Select or derive a run ID for resume. Picks latest run when none given. */
 function selectRunForResume(workDir: string, runId?: string): string {
 	if (runId) return runId;
@@ -94,8 +169,11 @@ function getResumeStartPhase(runId: string, workDir: string): string {
 
 /** Build a failed PipelineResult. */
 function failResult(
-	runId: string | undefined, cost: RunCost, phasesCompleted: string[],
-	stoppedAt: string, error: string,
+	runId: string | undefined,
+	cost: RunCost,
+	phasesCompleted: string[],
+	stoppedAt: string,
+	error: string,
 ): PipelineResult {
 	return { runId, success: false, cost, phasesCompleted, stoppedAt, error };
 }
@@ -113,11 +191,20 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	const phasesCompleted: string[] = [];
 	let runId = options.runId;
 
-	// Handle resume
+	// Handle explicit --resume flag
 	if (options.resume) {
 		runId = selectRunForResume(workDir, runId);
 		options.startPhase = options.startPhase ?? getResumeStartPhase(runId, workDir);
 		logInfo(`Resuming run ${runId} from phase "${options.startPhase}"`);
+	}
+	// For new runs: check for incomplete runs and offer to resume
+	else if (!runId && !options.startPhase) {
+		const decision = await promptResumeOrNew(workDir);
+		if (decision.action === "resume") {
+			runId = decision.runId;
+			options.startPhase = decision.startPhase;
+			logInfo(`Resuming run ${runId} from phase "${decision.startPhase}"`);
+		}
 	}
 
 	const phases = resolvePhases(options);
@@ -126,7 +213,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	for (const phase of phases) {
 		// Budget gate
 		if (config.cost.budgetLimit > 0 && cost.totalCost >= config.cost.budgetLimit) {
-			logWarn(`Budget limit $${config.cost.budgetLimit} reached (spent: ${formatCost(cost.totalCost)}). Stopping.`);
+			logWarn(
+				`Budget limit $${config.cost.budgetLimit} reached (spent: ${formatCost(cost.totalCost)}). Stopping.`,
+			);
 			return failResult(runId, cost, phasesCompleted, phase, "Budget exceeded");
 		}
 
@@ -139,11 +228,18 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 			}
 
 			const phaseConfig = PHASE_CONFIGS[phase];
-			if (!phaseConfig) { logWarn(`Unknown phase: ${phase}, skipping`); continue; }
+			if (!phaseConfig) {
+				logWarn(`Unknown phase: ${phase}, skipping`);
+				continue;
+			}
 
 			logInfo(`Starting phase: ${phase}`);
 			const result: PhaseRunResult = await runPhase(phaseConfig, {
-				workDir, config, runId, scope: options.scope, runCost: cost,
+				workDir,
+				config,
+				runId,
+				scope: options.scope,
+				runCost: cost,
 			});
 
 			// After scan, capture the runId for subsequent phases
@@ -179,14 +275,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
 /** Display pipeline cost summary. */
 function displaySummary(
-	cost: RunCost, config: ResolvedConfig, completed: string[], total: string[],
+	cost: RunCost,
+	config: ResolvedConfig,
+	completed: string[],
+	total: string[],
 ): void {
 	const log = console.log;
 	log("");
 	log(SEPARATOR);
 	log("Pipeline Summary:");
 	log(`  Phases completed: ${completed.length}/${total.length}`);
-	log(`  Total tokens:     ${formatTokens(cost.inputTokens)} in / ${formatTokens(cost.outputTokens)} out`);
+	log(
+		`  Total tokens:     ${formatTokens(cost.inputTokens)} in / ${formatTokens(cost.outputTokens)} out`,
+	);
 	log(`  Total cost:       ${formatCost(cost.totalCost)}`);
 	if (config.cost.budgetLimit > 0) {
 		const rem = config.cost.budgetLimit - cost.totalCost;
@@ -195,7 +296,9 @@ function displaySummary(
 	log("");
 	log("  Phase breakdown:");
 	for (const [phase, pc] of Object.entries(cost.byPhase)) {
-		log(`    ${phase.padEnd(12)} ${formatCost(pc.cost)}  (${formatTokens(pc.inputTokens)} in / ${formatTokens(pc.outputTokens)} out)`);
+		log(
+			`    ${phase.padEnd(12)} ${formatCost(pc.cost)}  (${formatTokens(pc.inputTokens)} in / ${formatTokens(pc.outputTokens)} out)`,
+		);
 	}
 	log(SEPARATOR);
 	log("");

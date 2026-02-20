@@ -11,11 +11,11 @@ import { join } from "node:path";
 import {
 	createRun,
 	loadRunMeta,
+	loadRunsIndex,
+	saveRunsIndexWithLock,
 	updateRunMetaWithLock,
 	updateRunPhaseInMetaWithLock,
 	updateRunStatsWithLock,
-	saveRunsIndexWithLock,
-	loadRunsIndex,
 } from "./runs.ts";
 import {
 	createTask,
@@ -23,9 +23,9 @@ import {
 	loadTasks,
 	loadTasksForRun,
 	readTaskForRun,
-	updateTaskWithLock,
-	updateTaskStatusWithLock,
 	updateTaskForRunSafe,
+	updateTaskStatusWithLock,
+	updateTaskWithLock,
 } from "./tasks.ts";
 import type { RunPhase } from "./types.ts";
 
@@ -57,7 +57,7 @@ describe("Concurrency Tests", () => {
 
 			// Execute all updates concurrently
 			const results = await Promise.all(
-				updates.map((update) => updateRunMetaWithLock(run.id, update, testDir))
+				updates.map((update) => updateRunMetaWithLock(run.id, update, testDir)),
 			);
 
 			// All updates should succeed (not return null)
@@ -67,8 +67,8 @@ describe("Concurrency Tests", () => {
 			const finalMeta = loadRunMeta(run.id, testDir);
 			expect(finalMeta).not.toBeNull();
 			// One of the updates should have won
-			expect(finalMeta!.issues_found).toBeGreaterThanOrEqual(1);
-			expect(finalMeta!.issues_found).toBeLessThanOrEqual(10);
+			expect(finalMeta?.issues_found).toBeGreaterThanOrEqual(1);
+			expect(finalMeta?.issues_found).toBeLessThanOrEqual(10);
 		});
 
 		test("should serialize rapid sequential updates", async () => {
@@ -81,7 +81,7 @@ describe("Concurrency Tests", () => {
 
 			const finalMeta = loadRunMeta(run.id, testDir);
 			expect(finalMeta).not.toBeNull();
-			expect(finalMeta!.tasks_completed).toBe(4); // Last update wins
+			expect(finalMeta?.tasks_completed).toBe(4); // Last update wins
 		});
 
 		test("should preserve data integrity under concurrent load", async () => {
@@ -101,8 +101,8 @@ describe("Concurrency Tests", () => {
 			// Verify the final state is valid JSON and has expected structure
 			const finalMeta = loadRunMeta(run.id, testDir);
 			expect(finalMeta).not.toBeNull();
-			expect(finalMeta!.id).toBe(run.id);
-			expect(typeof finalMeta!.updated_at).toBe("string");
+			expect(finalMeta?.id).toBe(run.id);
+			expect(typeof finalMeta?.updated_at).toBe("string");
 		});
 
 		test("should return null for non-existent run", async () => {
@@ -118,7 +118,7 @@ describe("Concurrency Tests", () => {
 			// Try to update phase concurrently with valid phases
 			const phases: RunPhase[] = ["validate", "plan", "exec", "verify", "completed"];
 			const results = await Promise.all(
-				phases.map((phase) => updateRunPhaseInMetaWithLock(run.id, phase, testDir))
+				phases.map((phase) => updateRunPhaseInMetaWithLock(run.id, phase, testDir)),
 			);
 
 			// All updates should succeed
@@ -127,7 +127,8 @@ describe("Concurrency Tests", () => {
 			// Final phase should be one of the valid phases
 			const finalMeta = loadRunMeta(run.id, testDir);
 			expect(finalMeta).not.toBeNull();
-			expect(phases).toContain(finalMeta!.phase);
+			expect(finalMeta?.phase).toBeDefined();
+			if (finalMeta?.phase) expect(phases).toContain(finalMeta.phase);
 		});
 
 		test("should update both meta and index atomically", async () => {
@@ -139,9 +140,9 @@ describe("Concurrency Tests", () => {
 			const meta = loadRunMeta(run.id, testDir);
 			const index = loadRunsIndex(testDir);
 
-			expect(meta!.phase).toBe("exec");
+			expect(meta?.phase).toBe("exec");
 			const indexEntry = index.runs.find((r) => r.id === run.id);
-			expect(indexEntry!.phase).toBe("exec");
+			expect(indexEntry?.phase).toBe("exec");
 		});
 	});
 
@@ -159,7 +160,7 @@ describe("Concurrency Tests", () => {
 			];
 
 			const results = await Promise.all(
-				statsUpdates.map((stats) => updateRunStatsWithLock(run.id, stats, testDir))
+				statsUpdates.map((stats) => updateRunStatsWithLock(run.id, stats, testDir)),
 			);
 
 			// All should succeed
@@ -182,8 +183,8 @@ describe("Concurrency Tests", () => {
 					(index) => ({
 						...index,
 					}),
-					testDir
-				)
+					testDir,
+				),
 			);
 
 			await Promise.all(updates);
@@ -195,8 +196,8 @@ describe("Concurrency Tests", () => {
 
 		test("should preserve index integrity with multiple runs", async () => {
 			// Create multiple runs
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+			const _run1 = createRun({ scope: "run 1", workDir: testDir });
+			const _run2 = createRun({ scope: "run 2", workDir: testDir });
 			const run3 = createRun({ scope: "run 3", workDir: testDir });
 
 			// Concurrent no-op updates to the index
@@ -231,7 +232,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Simulate multiple parallel updates to the same task
@@ -240,7 +241,7 @@ describe("Concurrency Tests", () => {
 			}));
 
 			const results = await Promise.all(
-				updates.map((update) => updateTaskWithLock(task.id, update, testDir))
+				updates.map((update) => updateTaskWithLock(task.id, update, testDir)),
 			);
 
 			// All updates should succeed
@@ -250,7 +251,7 @@ describe("Concurrency Tests", () => {
 			const tasks = loadTasks(testDir);
 			const finalTask = tasks.find((t) => t.id === task.id);
 			expect(finalTask).toBeDefined();
-			expect(finalTask!.description).toMatch(/^Updated description \d$/);
+			expect(finalTask?.description).toMatch(/^Updated description \d$/);
 		});
 
 		test("should serialize status transitions correctly", async () => {
@@ -267,7 +268,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Sequential status updates
@@ -276,7 +277,7 @@ describe("Concurrency Tests", () => {
 
 			const tasks = loadTasks(testDir);
 			const finalTask = tasks.find((t) => t.id === task.id);
-			expect(finalTask!.status).toBe("done");
+			expect(finalTask?.status).toBe("done");
 		});
 	});
 
@@ -295,15 +296,20 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Try to update status concurrently
 			const statuses = ["running", "done", "failed"] as const;
 			const results = await Promise.all(
 				statuses.map((status) =>
-					updateTaskStatusWithLock(task.id, status, status === "failed" ? "Test error" : undefined, testDir)
-				)
+					updateTaskStatusWithLock(
+						task.id,
+						status,
+						status === "failed" ? "Test error" : undefined,
+						testDir,
+					),
+				),
 			);
 
 			// All should succeed
@@ -313,7 +319,7 @@ describe("Concurrency Tests", () => {
 			const tasks = loadTasks(testDir);
 			const finalTask = tasks.find((t) => t.id === task.id);
 			expect(finalTask).toBeDefined();
-			expect(["running", "done", "failed"]).toContain(finalTask!.status);
+			expect(["running", "done", "failed"]).toContain(finalTask?.status as string);
 		});
 
 		test("should mark dependent tasks as blocked when task fails", async () => {
@@ -332,7 +338,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Create dependent task
@@ -348,7 +354,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Fail the parent task
@@ -357,7 +363,7 @@ describe("Concurrency Tests", () => {
 			// Dependent task should be blocked
 			const tasks = loadTasks(testDir);
 			const finalDependentTask = tasks.find((t) => t.id === dependentTask.id);
-			expect(finalDependentTask!.status).toBe("blocked");
+			expect(finalDependentTask?.status).toBe("blocked");
 		});
 
 		test("should set completed_at when task is done", async () => {
@@ -374,15 +380,15 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			await updateTaskStatusWithLock(task.id, "done", undefined, testDir);
 
 			const tasks = loadTasks(testDir);
 			const finalTask = tasks.find((t) => t.id === task.id);
-			expect(finalTask!.completed_at).toBeDefined();
-			expect(new Date(finalTask!.completed_at!).getTime()).toBeGreaterThan(0);
+			expect(finalTask?.completed_at).toBeDefined();
+			expect(new Date(finalTask?.completed_at ?? "").getTime()).toBeGreaterThan(0);
 		});
 
 		test("should set error when task fails", async () => {
@@ -399,7 +405,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			const errorMessage = "Task failed due to test error";
@@ -407,7 +413,7 @@ describe("Concurrency Tests", () => {
 
 			const tasks = loadTasks(testDir);
 			const finalTask = tasks.find((t) => t.id === task.id);
-			expect(finalTask!.error).toBe(errorMessage);
+			expect(finalTask?.error).toBe(errorMessage);
 		});
 	});
 
@@ -430,9 +436,9 @@ describe("Concurrency Tests", () => {
 							checks: [],
 							acceptance: [],
 						},
-						testDir
-					)
-				)
+						testDir,
+					),
+				),
 			);
 
 			const tasks = await Promise.all(taskPromises);
@@ -449,15 +455,15 @@ describe("Concurrency Tests", () => {
 							tasks_completed: i,
 							tasks_failed: Math.floor(i / 3),
 						},
-						testDir
-					)
+						testDir,
+					),
 				);
 			}
 
 			// Update tasks concurrently
 			for (const task of tasks) {
 				allUpdates.push(
-					updateTaskWithLock(task.id, { description: "Updated under load" }, testDir)
+					updateTaskWithLock(task.id, { description: "Updated under load" }, testDir),
 				);
 			}
 
@@ -466,7 +472,7 @@ describe("Concurrency Tests", () => {
 			// Verify data integrity
 			const finalMeta = loadRunMeta(run.id, testDir);
 			expect(finalMeta).not.toBeNull();
-			expect(finalMeta!.id).toBe(run.id);
+			expect(finalMeta?.id).toBe(run.id);
 
 			const finalTasks = loadTasks(testDir);
 			expect(finalTasks.length).toBe(5);
@@ -488,8 +494,8 @@ describe("Concurrency Tests", () => {
 						issues_validated: Math.floor(i / 2),
 						tasks_total: i * 2,
 					},
-					testDir
-				)
+					testDir,
+				),
 			);
 
 			await Promise.all(rapidUpdates);
@@ -497,9 +503,9 @@ describe("Concurrency Tests", () => {
 			// File should still be valid JSON
 			const meta = loadRunMeta(run.id, testDir);
 			expect(meta).not.toBeNull();
-			expect(typeof meta!.issues_found).toBe("number");
-			expect(typeof meta!.issues_validated).toBe("number");
-			expect(typeof meta!.tasks_total).toBe("number");
+			expect(typeof meta?.issues_found).toBe("number");
+			expect(typeof meta?.issues_validated).toBe("number");
+			expect(typeof meta?.tasks_total).toBe("number");
 		});
 	});
 
@@ -519,7 +525,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Simulate a few parallel updates (reduced from 10 to avoid timeout)
@@ -528,7 +534,7 @@ describe("Concurrency Tests", () => {
 			}));
 
 			const results = await Promise.all(
-				updates.map((update) => updateTaskForRunSafe(run.id, task.id, update, testDir))
+				updates.map((update) => updateTaskForRunSafe(run.id, task.id, update, testDir)),
 			);
 
 			// All updates should succeed
@@ -537,7 +543,7 @@ describe("Concurrency Tests", () => {
 			// Final task should have one of the descriptions
 			const finalTask = readTaskForRun(run.id, task.id, testDir);
 			expect(finalTask).not.toBeNull();
-			expect(finalTask!.description).toMatch(/^Run-aware update \d$/);
+			expect(finalTask?.description).toMatch(/^Run-aware update \d$/);
 		});
 
 		test("should isolate updates between different runs", async () => {
@@ -559,7 +565,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			const task2 = createTaskForRun(
@@ -575,7 +581,7 @@ describe("Concurrency Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Update task1 in run1
@@ -583,14 +589,19 @@ describe("Concurrency Tests", () => {
 
 			// Verify task1 in run1 is updated
 			const updatedTask1 = readTaskForRun(run1.id, task1.id, testDir);
-			expect(updatedTask1!.status).toBe("done");
+			expect(updatedTask1?.status).toBe("done");
 
 			// Verify task2 in run2 is NOT affected
 			const unchangedTask2 = readTaskForRun(run2.id, task2.id, testDir);
-			expect(unchangedTask2!.status).toBe("pending");
+			expect(unchangedTask2?.status).toBe("pending");
 
 			// Verify cross-run update returns null (task doesn't exist in other run)
-			const crossRunResult = await updateTaskForRunSafe(run2.id, task1.id, { status: "failed" }, testDir);
+			const crossRunResult = await updateTaskForRunSafe(
+				run2.id,
+				task1.id,
+				{ status: "failed" },
+				testDir,
+			);
 			expect(crossRunResult).toBeNull();
 		});
 
@@ -614,8 +625,8 @@ describe("Concurrency Tests", () => {
 						checks: [],
 						acceptance: [],
 					},
-					testDir
-				)
+					testDir,
+				),
 			);
 
 			const run2Tasks = Array.from({ length: 2 }, (_, i) =>
@@ -632,8 +643,8 @@ describe("Concurrency Tests", () => {
 						checks: [],
 						acceptance: [],
 					},
-					testDir
-				)
+					testDir,
+				),
 			);
 
 			// Perform parallel updates to both runs simultaneously
@@ -641,15 +652,18 @@ describe("Concurrency Tests", () => {
 
 			// Update all run1 tasks to "done"
 			for (const task of run1Tasks) {
-				allUpdates.push(
-					updateTaskForRunSafe(run1.id, task.id, { status: "done" }, testDir)
-				);
+				allUpdates.push(updateTaskForRunSafe(run1.id, task.id, { status: "done" }, testDir));
 			}
 
 			// Update all run2 tasks to "failed"
 			for (const task of run2Tasks) {
 				allUpdates.push(
-					updateTaskForRunSafe(run2.id, task.id, { status: "failed", error: "Test failure" }, testDir)
+					updateTaskForRunSafe(
+						run2.id,
+						task.id,
+						{ status: "failed", error: "Test failure" },
+						testDir,
+					),
 				);
 			}
 
@@ -678,7 +692,7 @@ describe("Concurrency Tests", () => {
 				run.id,
 				"NON-EXISTENT-TASK",
 				{ status: "done" },
-				testDir
+				testDir,
 			);
 
 			expect(result).toBeNull();
@@ -689,7 +703,7 @@ describe("Concurrency Tests", () => {
 				"non-existent-run-id",
 				"any-task-id",
 				{ status: "done" },
-				testDir
+				testDir,
 			);
 
 			expect(result).toBeNull();

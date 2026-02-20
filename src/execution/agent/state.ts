@@ -184,7 +184,7 @@ export function getExecutionProgress(state: ExecutionState): number {
 /**
  * Check if a task is ready for execution
  */
-export function isTaskReady(task: Task, allTasks: Task[], completedTaskIds: string[]): boolean {
+export function isTaskReady(task: Task, _allTasks: Task[], completedTaskIds: string[]): boolean {
 	// Task must be pending
 	if (task.status !== "pending") {
 		return false;

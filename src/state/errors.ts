@@ -219,8 +219,7 @@ export function logStateError(
 	error: StateError | Error,
 	level: "debug" | "warn" | "error" = "warn",
 ): void {
-	const message =
-		error instanceof StateError ? error.toDetailedString() : error.message;
+	const message = error instanceof StateError ? error.toDetailedString() : error.message;
 
 	// Use console for now - can be replaced with proper logger
 	switch (level) {

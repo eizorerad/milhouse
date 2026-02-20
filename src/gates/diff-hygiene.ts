@@ -197,7 +197,11 @@ export async function getDiffStatsAgainstRef(workDir: string, ref: string): Prom
 /**
  * Get the actual diff content for a file
  */
-export async function getFileDiff(workDir: string, filePath: string, cached = false): Promise<string> {
+export async function getFileDiff(
+	workDir: string,
+	filePath: string,
+	cached = false,
+): Promise<string> {
 	const result = await getDiffContent(workDir, { cached, file: filePath });
 	return result.ok ? result.value : "";
 }
@@ -310,7 +314,7 @@ export function analyzeHunkForWhitespace(hunk: DiffHunk): {
  * Detect if a file change is a rename with minimal content changes
  */
 export function detectSilentRename(
-	workDir: string,
+	_workDir: string,
 	stats: DiffStats,
 ): { isRename: boolean; similarity: number } {
 	if (!stats.isRenamed || !stats.originalPath) {
@@ -339,7 +343,8 @@ export async function categorizeChange(
 	}
 
 	// Get the diff content for deeper analysis
-	const diffContent = (await getFileDiff(workDir, filePath, true)) || (await getFileDiff(workDir, filePath));
+	const diffContent =
+		(await getFileDiff(workDir, filePath, true)) || (await getFileDiff(workDir, filePath));
 	if (!diffContent) {
 		return "unknown";
 	}

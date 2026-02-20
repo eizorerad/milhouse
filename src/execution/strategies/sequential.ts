@@ -30,7 +30,7 @@ export class SequentialStrategy implements IExecutionStrategy {
 	 * Check if this strategy can handle the given tasks.
 	 * Sequential strategy handles non-parallel execution.
 	 */
-	canHandle(tasks: Task[], options: ExecutionOptions): boolean {
+	canHandle(_tasks: Task[], options: ExecutionOptions): boolean {
 		return !options.parallel;
 	}
 

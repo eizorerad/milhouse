@@ -1,12 +1,51 @@
-import { lock, unlock, check } from "proper-lockfile";
-import { existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { check, lock } from "proper-lockfile";
 
 export interface LockOptions {
 	/** Number of retries when acquiring lock (default: 5) */
 	retries?: number;
 	/** Lock considered stale after this many ms (default: 10000) */
 	stale?: number;
+}
+
+/**
+ * In-process async mutex for serializing concurrent operations.
+ *
+ * Unlike a naive promise-based lock, this uses a proper FIFO queue
+ * that avoids the race condition where multiple awaiters escape
+ * simultaneously after a lock release.
+ */
+export class AsyncMutex {
+	private queue: (() => void)[] = [];
+	private locked = false;
+
+	/** Acquire the mutex. Returns a release function. */
+	async acquire(): Promise<() => void> {
+		if (this.locked) {
+			await new Promise<void>((resolve) => this.queue.push(resolve));
+		}
+		this.locked = true;
+		return () => {
+			const next = this.queue.shift();
+			if (next) {
+				// Transfer ownership to next waiter (keep locked = true)
+				next();
+			} else {
+				this.locked = false;
+			}
+		};
+	}
+
+	/** Run an operation while holding the mutex. */
+	async run<T>(operation: () => T | Promise<T>): Promise<T> {
+		const release = await this.acquire();
+		try {
+			return await operation();
+		} finally {
+			release();
+		}
+	}
 }
 
 /**

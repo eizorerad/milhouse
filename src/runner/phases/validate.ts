@@ -6,13 +6,14 @@
  * Supports automatic retry for issues that remain UNVALIDATED.
  */
 
-import type { PhaseConfig, PhaseContext, PhaseItemResult } from "../types.ts";
-import type { Issue, IssueStatus, RunPhase } from "../../state/types.ts";
 import { buildValidatePrompt } from "../../agents/prompts/validate.ts";
 import { VALIDATE_SCHEMA } from "../../agents/schemas/validate.ts";
 import { loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
+import type { Issue, IssueStatus, RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import { logDebug, logWarn } from "../../ui/logger.ts";
+import type { PhaseConfig } from "../types.ts";
 
 /** Parsed validation result from AI */
 interface ValidationResult {
@@ -54,6 +55,7 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 	parseResponse(response, item) {
 		const jsonStr = extractJsonFromResponse(response);
 		if (!jsonStr) {
+			logWarn(`[validate] Failed to extract JSON for ${item.id}. Response length: ${response?.length ?? 0}, first 200 chars: ${response?.slice(0, 200)}`);
 			return {
 				issue_id: item.id,
 				status: "UNVALIDATED" as IssueStatus,
@@ -67,6 +69,12 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 			const validStatuses: IssueStatus[] = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"];
 			const status = validStatuses.includes(parsed.status) ? parsed.status : "UNVALIDATED";
 
+			if (status === "UNVALIDATED") {
+				logWarn(`[validate] Parsed JSON for ${item.id} but status invalid: "${parsed.status}". Valid: ${validStatuses.join(", ")}`);
+			} else {
+				logDebug(`[validate] ${item.id} → ${status} (confidence: ${parsed.confidence})`);
+			}
+
 			return {
 				issue_id: item.id,
 				status,
@@ -75,7 +83,8 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 				corrected_description: parsed.corrected_description,
 				evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
 			};
-		} catch {
+		} catch (err) {
+			logWarn(`[validate] JSON.parse failed for ${item.id}: ${err}. Raw JSON (first 200): ${jsonStr?.slice(0, 200)}`);
 			return {
 				issue_id: item.id,
 				status: "UNVALIDATED" as IssueStatus,
@@ -97,11 +106,15 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 	async saveResults(results, ctx) {
 		const now = new Date().toISOString();
 		let validated = 0;
+		let skippedUnvalidated = 0;
 
 		for (const r of results) {
 			if (!r.success) continue;
 			const result = r.result;
-			if (result.status === "UNVALIDATED") continue;
+			if (result.status === "UNVALIDATED") {
+				skippedUnvalidated++;
+				continue;
+			}
 
 			const evidence = (result.evidence ?? []).map((ev) => ({
 				...ev,
@@ -123,6 +136,10 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 			);
 
 			validated++;
+		}
+
+		if (skippedUnvalidated > 0) {
+			logWarn(`[validate] ${skippedUnvalidated} items remained UNVALIDATED (parse failure) out of ${results.length} total`);
 		}
 
 		if (validated > 0) {

@@ -12,11 +12,11 @@
  * The "latest run" is derived from the runs index (last entry).
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { logStateError, StateParseError } from "./errors.ts";
 import { stateEvents } from "./events.ts";
-import { withFileLock } from "./file-lock.ts";
+import { AsyncMutex, withFileLock } from "./file-lock.ts";
+import { loadJsonFile, saveJsonFile } from "./json-io.ts";
 import {
 	RUNS_FILES,
 	type RunMeta,
@@ -38,60 +38,6 @@ const MILHOUSE_DIR = ".milhouse";
  */
 function getMilhouseDir(workDir = process.cwd()): string {
 	return join(workDir, MILHOUSE_DIR);
-}
-
-/**
- * Load JSON file with schema validation
- */
-function loadJsonFile<T>(
-	filePath: string,
-	schema: { parse: (data: unknown) => T },
-	defaultValue: T,
-): T {
-	if (!existsSync(filePath)) {
-		return defaultValue;
-	}
-
-	try {
-		const content = readFileSync(filePath, "utf-8");
-		const parsed = JSON.parse(content);
-		return schema.parse(parsed);
-	} catch (error) {
-		// Log the error with context instead of silently swallowing
-		const stateError = new StateParseError(
-			`Failed to load or parse state file: ${filePath}`,
-			{
-				filePath,
-				cause: error instanceof Error ? error : new Error(String(error)),
-			},
-		);
-		logStateError(stateError, "debug");
-		return defaultValue;
-	}
-}
-
-/**
- * Save JSON file atomically where possible.
- * Uses write-to-tmp + rename for atomicity. When combined with
- * withFileLock(), provides both atomic writes and concurrency safety.
- *
- * On systems where rename fails (e.g., Windows with file watchers),
- * falls back to direct write - the file lock still provides safety.
- */
-function saveJsonFile(filePath: string, data: unknown): void {
-	const dir = join(filePath, "..");
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-	const content = JSON.stringify(data, null, 2);
-	try {
-		const tmpPath = filePath + ".tmp";
-		writeFileSync(tmpPath, content);
-		renameSync(tmpPath, filePath);
-	} catch {
-		// Fallback: direct write (rename can fail on Windows or across devices)
-		writeFileSync(filePath, content);
-	}
 }
 
 // ============================================================================
@@ -363,9 +309,7 @@ export function listRuns(workDir = process.cwd()): Array<{
 	is_current: boolean;
 }> {
 	const index = loadRunsIndex(workDir);
-	const latestRunId = index.runs.length > 0
-		? index.runs[index.runs.length - 1].id
-		: null;
+	const latestRunId = index.runs.length > 0 ? index.runs[index.runs.length - 1].id : null;
 
 	return index.runs.map((run) => ({
 		...run,
@@ -436,20 +380,15 @@ export function updateRunStats(
 // CONCURRENT-SAFE UPDATE WITH SIMPLE QUEUE LOCKING
 // ============================================================================
 
-/**
- * Simple queue-based lock for concurrent run meta updates
- * Used when multiple agents may update run state around the same time
- */
-let runMetaLockPromise: Promise<void> | null = null;
+/** In-process mutex for run meta updates */
+const runMetaMutex = new AsyncMutex();
 
-/**
- * Simple queue-based lock for concurrent runs index updates
- */
-let runsIndexLockPromise: Promise<void> | null = null;
+/** In-process mutex for runs index updates */
+const runsIndexMutex = new AsyncMutex();
 
 /**
  * Update run metadata with both in-memory and file-level locking.
- * In-memory lock serializes within this process (p-limit concurrent calls).
+ * In-memory mutex serializes within this process (p-limit concurrent calls).
  * File lock ensures cross-process safety (e.g., two terminals).
  */
 export async function updateRunMetaWithLock(
@@ -457,78 +396,42 @@ export async function updateRunMetaWithLock(
 	update: Partial<Omit<RunMeta, "id" | "created_at">>,
 	workDir = process.cwd(),
 ): Promise<RunMeta | null> {
-	// In-memory lock first — serializes within this process
-	const waitForLock = async (): Promise<void> => {
-		while (runMetaLockPromise) {
-			await runMetaLockPromise;
-		}
-	};
-
-	await waitForLock();
-
-	let releaseLock!: () => void;
-	runMetaLockPromise = new Promise<void>((resolve) => {
-		releaseLock = resolve;
-	});
-
-	try {
-		// File lock second — only needed for cross-process safety
+	return runMetaMutex.run(async () => {
 		const metaPath = getRunMetaPath(runId, workDir);
-		return await withFileLock(metaPath, async () => {
+		return withFileLock(metaPath, () => {
 			const meta = loadRunMeta(runId, workDir);
-			if (!meta) {
-				return null;
-			}
+			if (!meta) return null;
 
 			const updated = { ...meta, ...update, updated_at: new Date().toISOString() };
 			saveRunMeta(updated, workDir);
 			return updated;
 		});
-	} finally {
-		runMetaLockPromise = null;
-		releaseLock?.();
-	}
+	});
 }
 
 /**
  * Update run phase with both in-memory and file-level locking.
- * This is the concurrent-safe version of updateRunPhaseInMeta()
  */
 export async function updateRunPhaseInMetaWithLock(
 	runId: string,
 	phase: RunPhase,
 	workDir = process.cwd(),
 ): Promise<RunMeta | null> {
-	const waitForLock = async (): Promise<void> => {
-		while (runMetaLockPromise) {
-			await runMetaLockPromise;
-		}
-	};
-
-	await waitForLock();
-
-	let releaseLock!: () => void;
-	runMetaLockPromise = new Promise<void>((resolve) => {
-		releaseLock = resolve;
-	});
-
-	try {
+	return runMetaMutex.run(async () => {
 		const metaPath = getRunMetaPath(runId, workDir);
-		return await withFileLock(metaPath, async () => {
+		return withFileLock(metaPath, async () => {
 			const meta = loadRunMeta(runId, workDir);
-			if (!meta) {
-				return null;
-			}
+			if (!meta) return null;
 
 			const updated = { ...meta, phase, updated_at: new Date().toISOString() };
 			saveRunMeta(updated, workDir);
 
-			// Also update in index (with its own lock)
+			// Also update in index
 			await saveRunsIndexWithLock((index) => {
-				const runEntryIndex = index.runs.findIndex((r) => r.id === runId);
-				if (runEntryIndex !== -1) {
+				const idx = index.runs.findIndex((r) => r.id === runId);
+				if (idx !== -1) {
 					const updatedRuns = [...index.runs];
-					updatedRuns[runEntryIndex] = { ...updatedRuns[runEntryIndex], phase };
+					updatedRuns[idx] = { ...updatedRuns[idx], phase };
 					return { ...index, runs: updatedRuns };
 				}
 				return index;
@@ -536,15 +439,11 @@ export async function updateRunPhaseInMetaWithLock(
 
 			return updated;
 		});
-	} finally {
-		runMetaLockPromise = null;
-		releaseLock?.();
-	}
+	});
 }
 
 /**
- * Update run statistics with locking
- * This is the concurrent-safe version of updateRunStats()
+ * Update run statistics with locking.
  */
 export async function updateRunStatsWithLock(
 	runId: string,
@@ -560,37 +459,21 @@ export async function updateRunStatsWithLock(
 }
 
 /**
- * Save runs index with locking
- * Accepts an updater function that receives current index and returns updated index
+ * Save runs index with locking.
+ * Accepts an updater function that receives current index and returns updated index.
  */
 export async function saveRunsIndexWithLock(
 	updater: (index: RunsIndex) => RunsIndex,
 	workDir = process.cwd(),
 ): Promise<void> {
-	const waitForLock = async (): Promise<void> => {
-		while (runsIndexLockPromise) {
-			await runsIndexLockPromise;
-		}
-	};
-
-	await waitForLock();
-
-	let releaseLock!: () => void;
-	runsIndexLockPromise = new Promise<void>((resolve) => {
-		releaseLock = resolve;
-	});
-
-	try {
+	return runsIndexMutex.run(async () => {
 		const indexPath = getRunsIndexPath(workDir);
-		await withFileLock(indexPath, async () => {
+		return withFileLock(indexPath, () => {
 			const index = loadRunsIndex(workDir);
 			const updated = updater(index);
 			saveRunsIndex(updated, workDir);
 		});
-	} finally {
-		runsIndexLockPromise = null;
-		releaseLock?.();
-	}
+	});
 }
 
 // ============================================================================
@@ -717,7 +600,7 @@ export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResu
 
 	// Sort runs by creation date (newest first)
 	const sortedRuns = [...index.runs].sort(
-		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
 	);
 
 	// Determine which runs to keep
@@ -736,7 +619,11 @@ export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResu
 			const keptCount = runsToKeep.length;
 			if (keptCount < options.keepLast) {
 				runsToKeep.push(run);
-				result.kept.push({ id: run.id, created_at: run.created_at, reason: `within keepLast (${keptCount + 1}/${options.keepLast})` });
+				result.kept.push({
+					id: run.id,
+					created_at: run.created_at,
+					reason: `within keepLast (${keptCount + 1}/${options.keepLast})`,
+				});
 				continue;
 			}
 		}
@@ -760,7 +647,11 @@ export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResu
 			result.deleted.push({ id: run.id, created_at: run.created_at, reason });
 		} else {
 			runsToKeep.push(run);
-			result.kept.push({ id: run.id, created_at: run.created_at, reason: "no cleanup criteria matched" });
+			result.kept.push({
+				id: run.id,
+				created_at: run.created_at,
+				reason: "no cleanup criteria matched",
+			});
 		}
 	}
 
@@ -789,10 +680,12 @@ export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResu
 export function parseDuration(duration: string): number {
 	const match = duration.match(/^(\d+)([dwhmDWHM])$/);
 	if (!match) {
-		throw new Error(`Invalid duration format: ${duration}. Use format like "30d", "2w", "6h", "30m"`);
+		throw new Error(
+			`Invalid duration format: ${duration}. Use format like "30d", "2w", "6h", "30m"`,
+		);
 	}
 
-	const value = parseInt(match[1], 10);
+	const value = Number.parseInt(match[1], 10);
 	const unit = match[2].toLowerCase();
 
 	const multipliers: Record<string, number> = {

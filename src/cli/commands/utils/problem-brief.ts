@@ -8,7 +8,7 @@
  * @module cli/commands/utils/problem-brief
  */
 
-import { type Issue, getWorkItemTitle, getWorkItemRationale } from "../../../state/types.ts";
+import { type Issue, getWorkItemRationale, getWorkItemTitle } from "../../../state/types.ts";
 
 /**
  * Generate updated Problem Brief markdown after validation

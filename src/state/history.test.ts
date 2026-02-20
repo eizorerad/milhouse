@@ -5,28 +5,27 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-	getHistoryDir,
-	getStateHistoryDir,
+	DEFAULT_HISTORY_CONFIG,
+	clearAllHistory,
+	clearSnapshots,
+	deleteSnapshot,
+	enforceSnapshotLimit,
 	ensureHistoryDir,
 	generateSnapshotId,
-	parseSnapshotId,
-	saveStateSnapshot,
+	getHistoryDir,
+	getHistoryStats,
+	getLatestSnapshot,
+	getStateHistoryDir,
 	listSnapshots,
 	loadSnapshot,
-	getLatestSnapshot,
+	parseSnapshotId,
 	rollbackState,
-	enforceSnapshotLimit,
-	deleteSnapshot,
-	clearSnapshots,
-	clearAllHistory,
-	getHistoryStats,
-	DEFAULT_HISTORY_CONFIG,
+	saveStateSnapshot,
 } from "./history.ts";
 import { createRun, getRunStateDir } from "./runs.ts";
-import type { Issue } from "./types.ts";
 
 describe("History Module Tests", () => {
 	const testDir = join(process.cwd(), ".test-history");
@@ -120,10 +119,15 @@ describe("History Module Tests", () => {
 		test("saveStateSnapshot should include agent_id when provided", () => {
 			const run = createRun({ scope: "test", workDir: testDir });
 
-			const meta = saveStateSnapshot(run.id, "tasks", { test: "data" }, {
-				agentId: "agent-123",
-				workDir: testDir,
-			});
+			const meta = saveStateSnapshot(
+				run.id,
+				"tasks",
+				{ test: "data" },
+				{
+					agentId: "agent-123",
+					workDir: testDir,
+				},
+			);
 
 			expect(meta.agent_id).toBe("agent-123");
 		});
@@ -131,10 +135,15 @@ describe("History Module Tests", () => {
 		test("saveStateSnapshot should skip when history is disabled", () => {
 			const run = createRun({ scope: "test", workDir: testDir });
 
-			const meta = saveStateSnapshot(run.id, "issues", { test: "data" }, {
-				workDir: testDir,
-				config: { enabled: false, maxSnapshots: 10 },
-			});
+			const meta = saveStateSnapshot(
+				run.id,
+				"issues",
+				{ test: "data" },
+				{
+					workDir: testDir,
+					config: { enabled: false, maxSnapshots: 10 },
+				},
+			);
 
 			// Should return meta but not create file
 			expect(meta.id).toBeDefined();
@@ -174,8 +183,8 @@ describe("History Module Tests", () => {
 			const snapshot = loadSnapshot(run.id, "issues", meta.id, testDir);
 
 			expect(snapshot).not.toBeNull();
-			expect(snapshot!.meta.id).toBe(meta.id);
-			expect(snapshot!.data).toEqual(originalData);
+			expect(snapshot?.meta.id).toBe(meta.id);
+			expect(snapshot?.data).toEqual(originalData);
 		});
 
 		test("loadSnapshot should return null for non-existent snapshot", () => {
@@ -195,8 +204,8 @@ describe("History Module Tests", () => {
 			const latest = getLatestSnapshot(run.id, "issues", testDir);
 
 			expect(latest).not.toBeNull();
-			expect(latest!.meta.reason).toBe("Latest");
-			expect(latest!.data).toEqual({ v: 2 });
+			expect(latest?.meta.reason).toBe("Latest");
+			expect(latest?.data).toEqual({ v: 2 });
 		});
 
 		test("getLatestSnapshot should return null when no snapshots", () => {
@@ -293,7 +302,12 @@ describe("History Module Tests", () => {
 
 			// Create 5 snapshots
 			for (let i = 0; i < 5; i++) {
-				saveStateSnapshot(run.id, "issues", { v: i }, { reason: `Snapshot ${i}`, workDir: testDir });
+				saveStateSnapshot(
+					run.id,
+					"issues",
+					{ v: i },
+					{ reason: `Snapshot ${i}`, workDir: testDir },
+				);
 				await new Promise((r) => setTimeout(r, 10));
 			}
 
@@ -383,13 +397,13 @@ describe("History Module Tests", () => {
 			expect(stats.length).toBe(5); // issues, tasks, meta, graph, executions
 
 			const issuesStats = stats.find((s) => s.stateType === "issues");
-			expect(issuesStats!.snapshotCount).toBe(2);
+			expect(issuesStats?.snapshotCount).toBe(2);
 
 			const tasksStats = stats.find((s) => s.stateType === "tasks");
-			expect(tasksStats!.snapshotCount).toBe(1);
+			expect(tasksStats?.snapshotCount).toBe(1);
 
 			const metaStats = stats.find((s) => s.stateType === "meta");
-			expect(metaStats!.snapshotCount).toBe(0);
+			expect(metaStats?.snapshotCount).toBe(0);
 		});
 
 		test("getHistoryStats should include size information", () => {
@@ -401,7 +415,7 @@ describe("History Module Tests", () => {
 			const stats = getHistoryStats(run.id, testDir);
 			const issuesStats = stats.find((s) => s.stateType === "issues");
 
-			expect(issuesStats!.totalSizeBytes).toBeGreaterThan(0);
+			expect(issuesStats?.totalSizeBytes).toBeGreaterThan(0);
 		});
 	});
 

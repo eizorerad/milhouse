@@ -129,7 +129,7 @@ export async function mergeCompletedBranches(
 	logInfo(
 		`Merging ${branches.length} branch(es) into ${targetBranch} using rebase-then-merge strategy`,
 	);
-	logInfo(`Branches will be merged SEQUENTIALLY to avoid conflicts`);
+	logInfo("Branches will be merged SEQUENTIALLY to avoid conflicts");
 
 	for (let branchIndex = 0; branchIndex < branches.length; branchIndex++) {
 		const branch = branches[branchIndex];
@@ -172,10 +172,10 @@ export async function mergeCompletedBranches(
 				};
 
 				if (errorCode === "DIRTY_WORKTREE") {
-					logError(`  ✗ Cannot rebase: worktree has uncommitted changes`);
-					logInfo(`    Suggestion: Commit or stash changes before merge`);
+					logError("  ✗ Cannot rebase: worktree has uncommitted changes");
+					logInfo("    Suggestion: Commit or stash changes before merge");
 				} else if (errorCode === "BRANCH_LOCKED") {
-					logError(`  ✗ Cannot rebase: branch is checked out in another worktree`);
+					logError("  ✗ Cannot rebase: branch is checked out in another worktree");
 					logInfo(`    Suggestion: Remove the worktree first with 'git worktree remove'`);
 				} else if (errorCode === "BRANCH_NOT_FOUND") {
 					logError(`  ✗ Cannot rebase: branch ${branch} not found`);
@@ -188,7 +188,7 @@ export async function mergeCompletedBranches(
 
 			// --- Clean rebase: fast-forward merge ---
 			if (rebaseResult.success) {
-				logDebug(`  ✓ Rebase succeeded, performing merge...`);
+				logDebug("  ✓ Rebase succeeded, performing merge...");
 
 				const issueInfo = branchToIssueInfo.get(branch);
 				const commitMessage = issueInfo ? issueInfo.title : undefined;
@@ -217,7 +217,7 @@ export async function mergeCompletedBranches(
 				logWarn(
 					`  ⚠ Rebase conflict (${rebaseResult.conflictedFiles.length} files): ${rebaseResult.conflictedFiles.join(", ")}`,
 				);
-				logInfo(`  Attempting AI resolution...`);
+				logInfo("  Attempting AI resolution...");
 
 				const conflicts = createMergeConflictInfo(
 					rebaseResult.conflictedFiles,
@@ -235,7 +235,7 @@ export async function mergeCompletedBranches(
 				const issueInfoForConflict = branchToIssueInfo.get(branch);
 
 				if (resolved) {
-					logDebug(`  ✓ AI resolved conflicts`);
+					logDebug("  ✓ AI resolved conflicts");
 
 					const mergeResultVcs2 = await mergeAgentBranch(branch, targetBranch, workDir, {
 						message: issueInfoForConflict?.title,
@@ -295,7 +295,7 @@ export async function mergeCompletedBranches(
 
 			// For non-conflict errors, try direct merge as fallback
 			if (attempt < maxRetries) {
-				logInfo(`  Attempting direct merge as fallback for non-conflict error...`);
+				logInfo("  Attempting direct merge as fallback for non-conflict error...");
 
 				const issueInfoForDirect = branchToIssueInfo.get(branch);
 				const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
@@ -303,14 +303,14 @@ export async function mergeCompletedBranches(
 				});
 
 				if (directMergeResultVcs.ok && directMergeResultVcs.value.success) {
-					logSuccess(`  ✓ Direct merge succeeded (bypassed rebase)`);
+					logSuccess("  ✓ Direct merge succeeded (bypassed rebase)");
 					await deleteLocalBranch(branch, workDir, true);
 					success = true;
 					break;
 				}
 
 				if (directMergeResultVcs.ok && directMergeResultVcs.value.hasConflicts) {
-					logWarn(`  ⚠ Direct merge has conflicts`);
+					logWarn("  ⚠ Direct merge has conflicts");
 					await abortMerge(workDir);
 				}
 			}
@@ -324,7 +324,7 @@ export async function mergeCompletedBranches(
 
 		if (!success) {
 			logError(`  ✗ Failed to merge ${branch} after ${maxRetries} attempts`);
-			logWarn(`  Branch preserved for manual inspection`);
+			logWarn("  Branch preserved for manual inspection");
 			logInfo(`  Manual merge: git checkout ${targetBranch} && git merge --no-ff ${branch}`);
 		}
 	}
@@ -336,7 +336,7 @@ export async function mergeCompletedBranches(
 
 	if (failed > 0) {
 		logWarn(`Merge summary: ${succeeded}/${branches.length} succeeded, ${failed} failed`);
-		logInfo(`\nFailed branches:`);
+		logInfo("\nFailed branches:");
 		for (const result of results.filter((r) => !r.success)) {
 			logError(`  - ${result.branch}: ${result.error}`);
 		}
@@ -364,14 +364,14 @@ async function tryDirectMerge(
 	issueInfo: IssueInfo | undefined,
 	modelOverride?: string,
 ): Promise<{ success: boolean }> {
-	logInfo(`  Attempting direct merge as fallback...`);
+	logInfo("  Attempting direct merge as fallback...");
 
 	const directMergeResultVcs = await mergeAgentBranch(branch, targetBranch, workDir, {
 		message: issueInfo?.title,
 	});
 
 	if (directMergeResultVcs.ok && directMergeResultVcs.value.success) {
-		logSuccess(`  ✓ Direct merge succeeded`);
+		logSuccess("  ✓ Direct merge succeeded");
 		await deleteLocalBranch(branch, workDir, true);
 		return { success: true };
 	}
@@ -381,7 +381,7 @@ async function tryDirectMerge(
 		directMergeResultVcs.value.hasConflicts &&
 		directMergeResultVcs.value.conflictedFiles
 	) {
-		logWarn(`  ⚠ Direct merge has conflicts, attempting AI resolution...`);
+		logWarn("  ⚠ Direct merge has conflicts, attempting AI resolution...");
 
 		const directConflicts = createMergeConflictInfo(
 			directMergeResultVcs.value.conflictedFiles,
@@ -396,7 +396,7 @@ async function tryDirectMerge(
 		);
 
 		if (directResolutionResult.success) {
-			logSuccess(`  ✓ Direct merge with AI resolution succeeded`);
+			logSuccess("  ✓ Direct merge with AI resolution succeeded");
 			await deleteLocalBranch(branch, workDir, true);
 			return { success: true };
 		}

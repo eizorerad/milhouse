@@ -93,7 +93,7 @@ export function createDefaultHooks(): ExecutionHooks {
  */
 export function createEventEmittingHooks(): ExecutionHooks {
 	return {
-		onTaskStart: async (task: Task, context: ExecutionContext) => {
+		onTaskStart: async (task: Task, _context: ExecutionContext) => {
 			bus.emit("task:start", {
 				taskId: task.id,
 				title: task.title,
@@ -175,9 +175,9 @@ export function composeHooks(...hookSets: Partial<ExecutionHooks>[]): ExecutionH
 
 		if (hooks.length > 0) {
 			// Create a composed hook that calls all hooks in sequence
-			(composed as any)[name] = async (...args: any[]) => {
+			(composed as Record<string, unknown>)[name] = async (...args: unknown[]) => {
 				for (const hook of hooks) {
-					await (hook as Function)(...args);
+					await (hook as (...a: unknown[]) => unknown)(...args);
 				}
 			};
 		}
@@ -198,9 +198,9 @@ export function withErrorHandling(
 
 	for (const [name, hook] of Object.entries(hooks)) {
 		if (typeof hook === "function") {
-			(wrapped as any)[name] = async (...args: any[]) => {
+			(wrapped as Record<string, unknown>)[name] = async (...args: unknown[]) => {
 				try {
-					await (hook as Function)(...args);
+					await (hook as (...a: unknown[]) => unknown)(...args);
 				} catch (error) {
 					if (fullConfig.debug) {
 						loggers.task.error({ hook: name, err: error }, "Hook error");
@@ -227,7 +227,7 @@ export function withTimeout(
 
 	for (const [name, hook] of Object.entries(hooks)) {
 		if (typeof hook === "function") {
-			(wrapped as any)[name] = async (...args: any[]) => {
+			(wrapped as Record<string, unknown>)[name] = async (...args: unknown[]) => {
 				const timeoutPromise = new Promise<never>((_, reject) => {
 					setTimeout(
 						() => reject(new Error(`Hook ${name} timed out after ${timeoutMs}ms`)),
@@ -235,7 +235,7 @@ export function withTimeout(
 					);
 				});
 
-				await Promise.race([(hook as Function)(...args), timeoutPromise]);
+				await Promise.race([(hook as (...a: unknown[]) => unknown)(...args), timeoutPromise]);
 			};
 		}
 	}

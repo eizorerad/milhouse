@@ -6,15 +6,10 @@
  * structure to the run-based .milhouse/runs/<run-id>/ structure.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createRun, getRunDir, getRunStateDir, loadRunsIndex } from "./runs.ts";
 import type { RunMeta } from "./types.ts";
-import {
-	createRun,
-	getRunDir,
-	getRunStateDir,
-	loadRunsIndex,
-} from "./runs.ts";
 
 // ============================================================================
 // INTERNAL UTILITIES

@@ -6,10 +6,10 @@
  * @module cli/commands/pipeline/validate
  */
 
-import type { RuntimeOptions } from "../../runtime-options.ts";
 import { loadResolvedConfig } from "../../../runner/config-loader.ts";
 import { runPhase } from "../../../runner/phase-runner.ts";
 import { validatePhaseConfig } from "../../../runner/phases/validate.ts";
+import type { RuntimeOptions } from "../../runtime-options.ts";
 
 export async function runValidatePipeline(options: RuntimeOptions): Promise<void> {
 	const workDir = process.cwd();
@@ -20,6 +20,3 @@ export async function runValidatePipeline(options: RuntimeOptions): Promise<void
 		runId: options.runId,
 	});
 }
-
-// Backward-compat: re-export the old function name
-export { runValidate } from "../validate.ts";

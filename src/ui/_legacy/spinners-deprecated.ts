@@ -12,7 +12,7 @@ import { createSpinner } from "nanospinner";
 import pc from "picocolors";
 import type { DetailedStep } from "../../engines/base.ts";
 import { formatStepForDisplay } from "../../engines/base.ts";
-import { spinners, type SpinnerInstance } from "../spinners.ts";
+import { type SpinnerInstance, spinners } from "../spinners.ts";
 import { theme } from "../theme.ts";
 
 /**
@@ -348,7 +348,7 @@ export class DynamicAgentSpinner {
 	/**
 	 * Release a slot and mark task as complete
 	 */
-	releaseSlot(slotNum: number, success: boolean): void {
+	releaseSlot(slotNum: number, _success: boolean): void {
 		const slot = this.slots.get(slotNum);
 		if (slot?.issueId) {
 			this.completedTasks++;

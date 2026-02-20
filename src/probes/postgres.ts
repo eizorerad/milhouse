@@ -36,7 +36,7 @@ const MIGRATION_PATTERNS: Record<string, RegExp[]> = {
 /**
  * Schema file patterns by framework
  */
-const SCHEMA_PATTERNS: Record<string, string[]> = {
+const _SCHEMA_PATTERNS: Record<string, string[]> = {
 	prisma: ["prisma/schema.prisma"],
 	drizzle: ["drizzle/schema.ts", "src/db/schema.ts", "src/schema.ts"],
 	typeorm: ["src/entities/**/*.ts", "src/entity/**/*.ts"],
@@ -51,7 +51,7 @@ const SCHEMA_PATTERNS: Record<string, string[]> = {
 /**
  * Raw migration file data
  */
-interface RawMigrationFile {
+interface _RawMigrationFile {
 	name: string;
 	path: string;
 	content?: string;
@@ -869,7 +869,7 @@ export class PostgresProbe extends BaseProbe<PostgresProbeOutput> {
 	 */
 	parseMigrationFile(
 		filePath: string,
-		relativePath: string,
+		_relativePath: string,
 		framework: string,
 	): PostgresMigration | null {
 		const fileName = path.basename(filePath);

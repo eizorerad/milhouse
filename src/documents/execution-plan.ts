@@ -1,13 +1,20 @@
 import { loadIssues } from "../state/issues.ts";
 import { initializeDir } from "../state/manager.ts";
-import { getCurrentRun } from "../state/runs.ts";
-import { loadTasks } from "../state/tasks.ts";
 import {
 	createPlanMetadataHeader,
 	syncLegacyPlansView,
 	writeExecutionPlan as writePlanStoreExecutionPlan,
 } from "../state/plan-store.ts";
-import { type Issue, type RunMeta, type RunState, type Task, type TaskStatus, getWorkItemTitle } from "../state/types.ts";
+import { getCurrentRun } from "../state/runs.ts";
+import { loadTasks } from "../state/tasks.ts";
+import {
+	type Issue,
+	type RunMeta,
+	type RunState,
+	type Task,
+	type TaskStatus,
+	getWorkItemTitle,
+} from "../state/types.ts";
 
 /**
  * Options for generating Execution Plan
@@ -153,9 +160,7 @@ function generateTaskMarkdown(task: Task, issues: Issue[], options: ExecutionPla
 	if (task.issue_id) {
 		const issue = issues.find((i) => i.id === task.issue_id);
 		const title = issue ? getWorkItemTitle(issue) : "";
-		const truncatedTitle = title
-			? title.slice(0, 50) + (title.length > 50 ? "..." : "")
-			: "";
+		const truncatedTitle = title ? title.slice(0, 50) + (title.length > 50 ? "..." : "") : "";
 		const issueInfo = issue ? `${task.issue_id} (${truncatedTitle})` : task.issue_id;
 		parts.push(`| **Related Work Item** | ${issueInfo} |`);
 	}

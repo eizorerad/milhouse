@@ -304,7 +304,7 @@ export class CursorPlugin implements IEnginePlugin {
 		const lines = output.trim().split("\n");
 		const messages: string[] = [];
 		const steps: ExecutionStep[] = [];
-		let sessionId: string | undefined;
+		let _sessionId: string | undefined;
 		let durationMs = 0;
 		let isError = false;
 		let errorMessage: string | undefined;
@@ -319,7 +319,7 @@ export class CursorPlugin implements IEnginePlugin {
 				switch (event.type) {
 					case "system":
 						if (event.subtype === "init") {
-							sessionId = event.session_id;
+							_sessionId = event.session_id;
 							steps.push({
 								type: "thinking",
 								content: `Session initialized with model: ${event.model || "unknown"}`,
@@ -349,7 +349,7 @@ export class CursorPlugin implements IEnginePlugin {
 						break;
 
 					case "result":
-						sessionId = event.session_id;
+						_sessionId = event.session_id;
 						durationMs = event.duration_ms || 0;
 						isError = event.is_error || false;
 						if (event.result && !messages.length) {

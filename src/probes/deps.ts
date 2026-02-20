@@ -146,7 +146,7 @@ interface PackageLock {
 /**
  * Interface for Cargo.toml structure
  */
-interface CargoToml {
+interface _CargoToml {
 	dependencies?: Record<string, string | { version: string }>;
 	devDependencies?: Record<string, string | { version: string }>;
 	"dev-dependencies"?: Record<string, string | { version: string }>;

@@ -109,7 +109,7 @@ function supportsColor(): boolean {
 /**
  * Get terminal width or default
  */
-function getTerminalWidth(): number {
+function _getTerminalWidth(): number {
 	return process.stdout.columns ?? 80;
 }
 
@@ -153,15 +153,20 @@ export function formatTokenPair(inputTokens: number, outputTokens: number): stri
 /**
  * Pad or truncate string to exact width
  */
-function padString(str: string, width: number, align: "left" | "right" | "center" = "left"): string {
+function padString(
+	str: string,
+	width: number,
+	align: "left" | "right" | "center" = "left",
+): string {
 	// Strip ANSI codes for length calculation
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes use control characters by definition
 	const plainStr = str.replace(/\x1b\[[0-9;]*m/g, "");
 	const len = plainStr.length;
 
 	if (len >= width) {
 		// Truncate if too long
 		if (len > width) {
-			return str.slice(0, width - 1) + "…";
+			return `${str.slice(0, width - 1)}…`;
 		}
 		return str;
 	}

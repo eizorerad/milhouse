@@ -8,27 +8,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { loadIssues, saveIssues, updateIssue } from "./issues.ts";
 import {
 	createRun,
 	loadRunMeta,
-	updateRunStats,
-	updateRunPhaseInMeta,
-	setCurrentRun,
 	loadRunsIndex,
 	saveRunsIndex,
+	setCurrentRun,
+	updateRunPhaseInMeta,
+	updateRunStats,
 } from "./runs.ts";
-import {
-	createTask,
-	loadTasks,
-	updateTask,
-	saveTasks,
-} from "./tasks.ts";
-import {
-	loadIssues,
-	saveIssues,
-	updateIssue,
-} from "./issues.ts";
-import type { RunMeta, Task, Issue, RunsIndex } from "./types.ts";
+import { createTask, loadTasks, saveTasks, updateTask } from "./tasks.ts";
+import type { Issue, RunsIndex, Task } from "./types.ts";
 
 describe("Immutability Tests", () => {
 	const testDir = join(process.cwd(), ".test-immutability");
@@ -56,13 +47,13 @@ describe("Immutability Tests", () => {
 			expect(originalMeta).not.toBeNull();
 
 			// Create a snapshot of the original values
-			const originalSnapshot = {
-				issues_found: originalMeta!.issues_found,
-				issues_validated: originalMeta!.issues_validated,
-				tasks_total: originalMeta!.tasks_total,
-				tasks_completed: originalMeta!.tasks_completed,
-				tasks_failed: originalMeta!.tasks_failed,
-				updated_at: originalMeta!.updated_at,
+			const _originalSnapshot = {
+				issues_found: originalMeta?.issues_found,
+				issues_validated: originalMeta?.issues_validated,
+				tasks_total: originalMeta?.tasks_total,
+				tasks_completed: originalMeta?.tasks_completed,
+				tasks_failed: originalMeta?.tasks_failed,
+				updated_at: originalMeta?.updated_at,
 			};
 
 			// Update stats
@@ -73,14 +64,14 @@ describe("Immutability Tests", () => {
 					issues_validated: 5,
 					tasks_total: 20,
 				},
-				testDir
+				testDir,
 			);
 
 			// Verify the update succeeded
 			expect(updated).not.toBeNull();
-			expect(updated!.issues_found).toBe(10);
-			expect(updated!.issues_validated).toBe(5);
-			expect(updated!.tasks_total).toBe(20);
+			expect(updated?.issues_found).toBe(10);
+			expect(updated?.issues_validated).toBe(5);
+			expect(updated?.tasks_total).toBe(20);
 
 			// Verify the original object was not mutated (reload to check)
 			// Note: Since we're testing file-based state, we verify by checking
@@ -94,25 +85,25 @@ describe("Immutability Tests", () => {
 			// Load original meta
 			const originalMeta = loadRunMeta(run.id, testDir);
 			expect(originalMeta).not.toBeNull();
-			const originalPhase = originalMeta!.phase;
+			const originalPhase = originalMeta?.phase;
 
 			// Update phase
 			const updated = updateRunPhaseInMeta(run.id, "exec", testDir);
 
 			// Verify update succeeded
 			expect(updated).not.toBeNull();
-			expect(updated!.phase).toBe("exec");
+			expect(updated?.phase).toBe("exec");
 
 			// Verify original was not mutated (different reference)
 			expect(updated).not.toBe(originalMeta);
 			// Original object in memory should still have original phase
-			expect(originalMeta!.phase).toBe(originalPhase);
+			expect(originalMeta?.phase).toBe(originalPhase);
 		});
 
 		test("setCurrentRun should not mutate input RunsIndex", () => {
 			// Create multiple runs
 			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+			const _run2 = createRun({ scope: "run 2", workDir: testDir });
 
 			// Load original index
 			const originalIndex = loadRunsIndex(testDir);
@@ -169,7 +160,7 @@ describe("Immutability Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Store original values
@@ -183,13 +174,13 @@ describe("Immutability Tests", () => {
 					title: "Updated Title",
 					description: "Updated Description",
 				},
-				testDir
+				testDir,
 			);
 
 			// Verify update succeeded
 			expect(updated).not.toBeNull();
-			expect(updated!.title).toBe("Updated Title");
-			expect(updated!.description).toBe("Updated Description");
+			expect(updated?.title).toBe("Updated Title");
+			expect(updated?.description).toBe("Updated Description");
 
 			// Verify original task object was not mutated
 			expect(task.title).toBe(originalTitle);
@@ -200,7 +191,7 @@ describe("Immutability Tests", () => {
 			createRun({ scope: "test save tasks", workDir: testDir });
 
 			// Create some tasks
-			const task1 = createTask(
+			const _task1 = createTask(
 				{
 					title: "Task 1",
 					description: "Description 1",
@@ -211,7 +202,7 @@ describe("Immutability Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Load tasks and create a copy
@@ -251,7 +242,7 @@ describe("Immutability Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Load tasks twice
@@ -305,13 +296,13 @@ describe("Immutability Tests", () => {
 					symptom: "Updated Symptom",
 					hypothesis: "Updated Hypothesis",
 				},
-				testDir
+				testDir,
 			);
 
 			// Verify update succeeded
 			expect(updated).not.toBeNull();
-			expect(updated!.symptom).toBe("Updated Symptom");
-			expect(updated!.hypothesis).toBe("Updated Hypothesis");
+			expect(updated?.symptom).toBe("Updated Symptom");
+			expect(updated?.hypothesis).toBe("Updated Hypothesis");
 
 			// Verify original issue object was not mutated
 			expect(originalIssue.symptom).toBe(originalSymptom);
@@ -399,7 +390,7 @@ describe("Immutability Tests", () => {
 					checks: [],
 					acceptance: [],
 				},
-				testDir
+				testDir,
 			);
 
 			// Store original arrays
@@ -413,13 +404,13 @@ describe("Immutability Tests", () => {
 					depends_on: ["DEP-3"],
 					files: ["file3.ts"],
 				},
-				testDir
+				testDir,
 			);
 
 			// Verify update succeeded
 			expect(updated).not.toBeNull();
-			expect(updated!.depends_on).toEqual(["DEP-3"]);
-			expect(updated!.files).toEqual(["file3.ts"]);
+			expect(updated?.depends_on).toEqual(["DEP-3"]);
+			expect(updated?.files).toEqual(["file3.ts"]);
 
 			// Verify original arrays were not mutated
 			expect(task.depends_on).toEqual(originalDependsOn);
@@ -469,13 +460,13 @@ describe("Immutability Tests", () => {
 						},
 					],
 				},
-				testDir
+				testDir,
 			);
 
 			// Verify update succeeded
 			expect(updated).not.toBeNull();
-			expect(updated!.evidence.length).toBe(1);
-			expect(updated!.evidence[0].type).toBe("probe");
+			expect(updated?.evidence.length).toBe(1);
+			expect(updated?.evidence[0].type).toBe("probe");
 
 			// Verify original evidence array was not mutated
 			expect(originalIssue.evidence.length).toBe(originalEvidenceLength);

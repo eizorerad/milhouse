@@ -5,16 +5,16 @@
  * with proper dependencies, deduplication, and parallel execution groups.
  */
 
-import type { PhaseConfig, PhaseContext, PhaseItemResult } from "../types.ts";
-import type { GraphNode, Issue, RunPhase, Task } from "../../state/types.ts";
-import { buildConsolidatePrompt, type ConsolidateInput } from "../../agents/prompts/consolidate.ts";
+import { type ConsolidateInput, buildConsolidatePrompt } from "../../agents/prompts/consolidate.ts";
 import { CONSOLIDATE_SCHEMA } from "../../agents/schemas/consolidate.ts";
-import { loadIssuesForRun } from "../../state/issues.ts";
-import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
 import { saveGraphForRun } from "../../state/graph.ts";
+import { loadIssuesForRun } from "../../state/issues.ts";
 import { writeExecutionPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
+import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
+import type { GraphNode, Issue, RunPhase, Task } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import type { PhaseConfig } from "../types.ts";
 
 /** Parsed consolidation response from AI */
 interface ConsolidationResult {
@@ -58,7 +58,9 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 			const parsed = JSON.parse(jsonStr);
 			return {
 				duplicates: Array.isArray(parsed.duplicates) ? parsed.duplicates : [],
-				cross_dependencies: Array.isArray(parsed.cross_dependencies) ? parsed.cross_dependencies : [],
+				cross_dependencies: Array.isArray(parsed.cross_dependencies)
+					? parsed.cross_dependencies
+					: [],
 				parallel_groups: Array.isArray(parsed.parallel_groups) ? parsed.parallel_groups : [],
 				execution_order: Array.isArray(parsed.execution_order) ? parsed.execution_order : [],
 			};
@@ -94,7 +96,11 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 				if (idx !== -1) {
 					const task = allTasks[idx];
 					const newDeps = [...new Set([...task.depends_on, ...crossDep.depends_on])];
-					allTasks = [...allTasks.slice(0, idx), { ...task, depends_on: newDeps }, ...allTasks.slice(idx + 1)];
+					allTasks = [
+						...allTasks.slice(0, idx),
+						{ ...task, depends_on: newDeps },
+						...allTasks.slice(idx + 1),
+					];
 				}
 			}
 
@@ -103,7 +109,11 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 				for (const taskId of pg.task_ids) {
 					const idx = allTasks.findIndex((t) => t.id === taskId);
 					if (idx !== -1) {
-						allTasks = [...allTasks.slice(0, idx), { ...allTasks[idx], parallel_group: pg.group }, ...allTasks.slice(idx + 1)];
+						allTasks = [
+							...allTasks.slice(0, idx),
+							{ ...allTasks[idx], parallel_group: pg.group },
+							...allTasks.slice(idx + 1),
+						];
 					}
 				}
 			}
@@ -161,12 +171,16 @@ function assignParallelGroups(tasks: Task[]): Task[] {
 }
 
 /** Generate execution plan markdown */
-function generateExecutionPlanMarkdown(tasks: Task[], issues: Issue[], duplicatesRemoved: number): string {
+function generateExecutionPlanMarkdown(
+	tasks: Task[],
+	_issues: Issue[],
+	duplicatesRemoved: number,
+): string {
 	const groups = new Map<number, Task[]>();
 	for (const task of tasks) {
 		const g = task.parallel_group;
 		if (!groups.has(g)) groups.set(g, []);
-		groups.get(g)!.push(task);
+		groups.get(g)?.push(task);
 	}
 	const sortedGroups = [...groups.keys()].sort((a, b) => a - b);
 

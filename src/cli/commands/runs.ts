@@ -72,7 +72,7 @@ export async function infoRunCommand(
 	runId: string | undefined,
 	options: RunsOptions,
 ): Promise<void> {
-	let meta;
+	let meta: ReturnType<typeof loadRunMeta>;
 
 	if (runId) {
 		meta = loadRunMeta(runId, options.workDir);
@@ -182,7 +182,7 @@ export async function cleanupRunsCommand(options: CleanupCommandOptions): Promis
 	if (options.olderThan) {
 		try {
 			olderThan = getDateFromDuration(options.olderThan);
-		} catch (error) {
+		} catch (_error) {
 			logError(`Invalid duration format: ${options.olderThan}`);
 			logInfo("Use format like: 30d (days), 2w (weeks), 6h (hours), 30m (minutes)");
 			return;
@@ -199,7 +199,7 @@ export async function cleanupRunsCommand(options: CleanupCommandOptions): Promis
 
 	// Display results
 	if (options.dryRun) {
-		console.log(`\n🔍 Dry Run - No runs will be deleted\n`);
+		console.log("\n🔍 Dry Run - No runs will be deleted\n");
 	}
 
 	if (result.deleted.length === 0) {

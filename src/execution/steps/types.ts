@@ -407,4 +407,3 @@ export interface MilhouseStepHooks {
 export function createDefaultStepHooks(): MilhouseStepHooks {
 	return {};
 }
-

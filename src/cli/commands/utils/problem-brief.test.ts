@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { generateValidatedProblemBrief, formatIssueSection } from "./problem-brief.ts";
 import type { Issue } from "../../../state/types.ts";
+import { formatIssueSection, generateValidatedProblemBrief } from "./problem-brief.ts";
 
 // Create a mock issue for testing
 const createMockIssue = (overrides: Partial<Issue> = {}): Issue => ({
@@ -65,18 +65,14 @@ describe("problem-brief", () => {
 		});
 
 		it("should count partial issues correctly", () => {
-			const issues: Issue[] = [
-				createMockIssue({ id: "P-1", status: "PARTIAL" }),
-			];
+			const issues: Issue[] = [createMockIssue({ id: "P-1", status: "PARTIAL" })];
 			const brief = generateValidatedProblemBrief(issues, "run-123");
 
 			expect(brief).toContain("| PARTIAL | 1 |");
 		});
 
 		it("should count misdiagnosed issues correctly", () => {
-			const issues: Issue[] = [
-				createMockIssue({ id: "P-1", status: "MISDIAGNOSED" }),
-			];
+			const issues: Issue[] = [createMockIssue({ id: "P-1", status: "MISDIAGNOSED" })];
 			const brief = generateValidatedProblemBrief(issues, "run-123");
 
 			expect(brief).toContain("| MISDIAGNOSED | 1 |");
@@ -114,9 +110,7 @@ describe("problem-brief", () => {
 		});
 
 		it("should include misdiagnosed issues section", () => {
-			const issues: Issue[] = [
-				createMockIssue({ id: "P-misdiagnosed", status: "MISDIAGNOSED" }),
-			];
+			const issues: Issue[] = [createMockIssue({ id: "P-misdiagnosed", status: "MISDIAGNOSED" })];
 			const brief = generateValidatedProblemBrief(issues, "run-123");
 
 			expect(brief).toContain("## Misdiagnosed Issues (Different Root Cause)");
@@ -144,9 +138,7 @@ describe("problem-brief", () => {
 		});
 
 		it("should show 'No confirmed issues' when none exist", () => {
-			const issues: Issue[] = [
-				createMockIssue({ id: "P-1", status: "FALSE" }),
-			];
+			const issues: Issue[] = [createMockIssue({ id: "P-1", status: "FALSE" })];
 			const brief = generateValidatedProblemBrief(issues, "run-123");
 
 			expect(brief).toContain("No confirmed issues.");

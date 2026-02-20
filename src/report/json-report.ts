@@ -4,10 +4,10 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getRunDir, loadRunMeta } from "../state/runs.ts";
-import { loadIssuesForRun } from "../state/issues.ts";
-import { loadTasksForRun } from "../state/tasks.ts";
 import type { RunCost } from "../runner/cost.ts";
+import { loadIssuesForRun } from "../state/issues.ts";
+import { getRunDir, loadRunMeta } from "../state/runs.ts";
+import { loadTasksForRun } from "../state/tasks.ts";
 
 /** JSON report schema */
 export interface JsonRunReport {
@@ -20,11 +20,14 @@ export interface JsonRunReport {
 	cost: {
 		total: number;
 		currency: string;
-		by_phase: Record<string, {
-			input_tokens: number;
-			output_tokens: number;
-			cost: number;
-		}>;
+		by_phase: Record<
+			string,
+			{
+				input_tokens: number;
+				output_tokens: number;
+				cost: number;
+			}
+		>;
 	};
 	results: {
 		items_found: number;
@@ -60,11 +63,11 @@ export function generateJsonReport(
 	const issues = loadIssuesForRun(runId, workDir);
 	const tasks = loadTasksForRun(runId, workDir);
 
-	const confirmed = issues.filter(i => i.status === "CONFIRMED").length;
-	const falsePosCount = issues.filter(i => i.status === "FALSE").length;
-	const partial = issues.filter(i => i.status === "PARTIAL").length;
-	const completed = tasks.filter(t => t.status === "done").length;
-	const failed = tasks.filter(t => t.status === "failed").length;
+	const confirmed = issues.filter((i) => i.status === "CONFIRMED").length;
+	const falsePosCount = issues.filter((i) => i.status === "FALSE").length;
+	const partial = issues.filter((i) => i.status === "PARTIAL").length;
+	const completed = tasks.filter((t) => t.status === "done").length;
+	const failed = tasks.filter((t) => t.status === "failed").length;
 
 	return {
 		version: "0.2.0",
@@ -92,7 +95,7 @@ export function generateJsonReport(
 			tasks_completed: completed,
 			tasks_failed: failed,
 		},
-		items: issues.map(issue => ({
+		items: issues.map((issue) => ({
 			id: issue.id,
 			type: issue.type,
 			title: issue.title ?? issue.symptom,

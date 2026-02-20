@@ -1,7 +1,7 @@
 import pc from "picocolors";
 import { PROBE_SUBDIRS, WORK_SUBDIRS } from "../../domain/config/directories.ts";
-import { getConfigService } from "../../services/config/index.ts";
 import { getDirectoryService } from "../../services/config/DirectoryService.ts";
+import { getConfigService } from "../../services/config/index.ts";
 import { logSuccess, logWarn } from "../../ui/logger.ts";
 
 /**
@@ -36,7 +36,7 @@ export async function runInit(workDir = process.cwd()): Promise<void> {
 	const initResult = configService.ensureInitialized();
 	if (!initResult.success) {
 		const errorType = initResult.error.type;
-		const errorPath = 'path' in initResult.error ? initResult.error.path : 'unknown';
+		const errorPath = "path" in initResult.error ? initResult.error.path : "unknown";
 		logWarn(`Failed to initialize config: ${errorType} at ${errorPath}`);
 		return;
 	}

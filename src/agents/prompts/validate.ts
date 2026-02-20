@@ -6,7 +6,12 @@
  */
 
 import type { PhaseContext } from "../../runner/types.ts";
-import { AGENT_ROLES, type Issue, getWorkItemTitle, getWorkItemRationale } from "../../state/types.ts";
+import {
+	AGENT_ROLES,
+	type Issue,
+	getWorkItemRationale,
+	getWorkItemTitle,
+} from "../../state/types.ts";
 
 /**
  * Build the validation prompt for a single issue.
@@ -15,7 +20,7 @@ import { AGENT_ROLES, type Issue, getWorkItemTitle, getWorkItemRationale } from 
  * @param ctx - Phase context
  * @returns Full prompt string
  */
-export function buildValidatePrompt(issue: Issue, ctx: PhaseContext): string {
+export function buildValidatePrompt(issue: Issue, _ctx: PhaseContext): string {
 	const parts: string[] = [];
 	const itemType = issue.type ?? "bug";
 
@@ -45,7 +50,8 @@ You are validating a specific work item (type: ${itemType}) identified by the Le
 	if (issue.evidence.length > 0) {
 		const evidenceList = issue.evidence
 			.map((ev) => {
-				if (ev.type === "file" && ev.file) return `- File: ${ev.file}${ev.line_start ? `:${ev.line_start}` : ""}`;
+				if (ev.type === "file" && ev.file)
+					return `- File: ${ev.file}${ev.line_start ? `:${ev.line_start}` : ""}`;
 				if (ev.type === "command" && ev.command) return `- Command: ${ev.command}`;
 				if (ev.type === "probe" && ev.probe_id) return `- Probe: ${ev.probe_id}`;
 				return `- ${ev.type}`;

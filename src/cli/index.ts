@@ -102,40 +102,23 @@ export { showConfig, addRule } from "./commands/config.ts";
 
 // Task commands
 export { runTask } from "./commands/task.ts";
-export { runPipelineMode, runLoop } from "./commands/run.ts";
+export { runPipelineV2, runLoop } from "./commands/run.ts";
 export { runsCommand } from "./commands/runs.ts";
 
-// Pipeline commands
-export { runScan } from "./commands/scan.ts";
-export { runValidate } from "./commands/validate.ts";
-export { runPlan } from "./commands/plan.ts";
-export {
-	runConsolidate,
-	topologicalSort,
-	buildDependencyGraph,
-	assignParallelGroups,
-} from "./commands/consolidate.ts";
+// Pipeline commands (thin wrappers around PhaseRunner)
+export { runScanPipeline } from "./commands/pipeline/scan.ts";
+export { runValidatePipeline } from "./commands/pipeline/validate.ts";
+export { runPlanPipeline } from "./commands/pipeline/plan.ts";
+export { runConsolidatePipeline } from "./commands/pipeline/consolidate.ts";
+export { runVerifyPipeline } from "./commands/pipeline/verify.ts";
+
+// Exec command (stays specialized, not in PhaseRunner)
 export {
 	runExec,
 	buildExecutorPrompt,
 	getReadyTasksForRun,
 	type ExecResult,
 } from "./commands/exec.ts";
-export {
-	runVerify,
-	buildVerifierPrompt,
-	runPlaceholderGate,
-	runDiffHygieneGate,
-	runEvidenceGate,
-	runDoDGate,
-	runEnvConsistencyGate,
-	runAllGates,
-	GATES,
-	type GateName,
-	type VerifyResult,
-	// Note: VerificationIssue from verify.ts is available as VerifyVerificationIssue
-	// The canonical VerificationIssue type is exported from types.ts above
-} from "./commands/verify.ts";
 
 // Utility commands
 export { runExport, parseFormats } from "./commands/export.ts";
@@ -144,4 +127,3 @@ export { runExport, parseFormats } from "./commands/export.ts";
 // Command Groups (for organized imports)
 // ============================================================================
 export * as pipelineCommands from "./commands/pipeline/index.ts";
-export * as utilCommands from "./commands/utils/index.ts";

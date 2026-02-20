@@ -81,11 +81,12 @@ export function generateGateId(): string {
  * Wrapper around loadTasksFromPath to handle relative paths
  */
 export function loadTasks(workDir: string, tasksPath?: string): Task[] {
-	const fullPath = tasksPath && path.isAbsolute(tasksPath)
-		? tasksPath
-		: tasksPath
-			? path.join(workDir, tasksPath)
-			: getStatePathForCurrentRun("tasks", workDir);
+	const fullPath =
+		tasksPath && path.isAbsolute(tasksPath)
+			? tasksPath
+			: tasksPath
+				? path.join(workDir, tasksPath)
+				: getStatePathForCurrentRun("tasks", workDir);
 	return loadTasksFromPath(fullPath);
 }
 
@@ -264,7 +265,7 @@ export function analyzeTaskDoD(
  * Get severity for a DoD violation
  */
 export function getSeverityForDoDViolation(
-	analysis: TaskDoDAnalysis,
+	_analysis: TaskDoDAnalysis,
 	checkResult: DoDCheckResult,
 ): GateSeverity {
 	// Missing check command on a task that's marked as done is critical

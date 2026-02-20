@@ -54,7 +54,7 @@ function renderListItem(item: string, indent = 2): string {
  */
 function renderProjectSection(project: MilhouseConfigDisplay["project"]): string[] {
 	const lines: string[] = [];
-	lines.push(renderSectionHeader(configLabels.sections.project + ":"));
+	lines.push(renderSectionHeader(`${configLabels.sections.project}:`));
 	lines.push(
 		renderField(configLabels.fields.name, project.name || configLabels.placeholders.unknown),
 	);
@@ -75,7 +75,7 @@ function renderProjectSection(project: MilhouseConfigDisplay["project"]): string
  */
 function renderCommandsSection(commands: MilhouseConfigDisplay["commands"]): string[] {
 	const lines: string[] = [];
-	lines.push(renderSectionHeader(configLabels.sections.commands + ":"));
+	lines.push(renderSectionHeader(`${configLabels.sections.commands}:`));
 	lines.push(renderField(configLabels.fields.test, commands.test));
 	lines.push(renderField(configLabels.fields.lint, commands.lint));
 	lines.push(renderField(configLabels.fields.build, commands.build));
@@ -87,7 +87,7 @@ function renderCommandsSection(commands: MilhouseConfigDisplay["commands"]): str
  */
 function renderRulesSection(rules: string[]): string[] {
 	const lines: string[] = [];
-	lines.push(renderSectionHeader(configLabels.sections.rules + ":"));
+	lines.push(renderSectionHeader(`${configLabels.sections.rules}:`));
 	if (rules.length > 0) {
 		for (const rule of rules) {
 			lines.push(renderListItem(rule));
@@ -106,7 +106,7 @@ function renderRulesSection(rules: string[]): string[] {
 function renderBoundariesSection(boundaries: MilhouseConfigDisplay["boundaries"]): string[] {
 	const lines: string[] = [];
 	if (boundaries.neverTouch.length > 0) {
-		lines.push(renderSectionHeader(configLabels.sections.neverTouch + ":"));
+		lines.push(renderSectionHeader(`${configLabels.sections.neverTouch}:`));
 		for (const path of boundaries.neverTouch) {
 			lines.push(renderListItem(path));
 		}

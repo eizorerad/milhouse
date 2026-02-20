@@ -6,10 +6,10 @@
  * @module cli/commands/pipeline/scan
  */
 
-import type { RuntimeOptions } from "../../runtime-options.ts";
 import { loadResolvedConfig } from "../../../runner/config-loader.ts";
 import { runPhase } from "../../../runner/phase-runner.ts";
 import { scanPhaseConfig } from "../../../runner/phases/scan.ts";
+import type { RuntimeOptions } from "../../runtime-options.ts";
 
 export async function runScanPipeline(options: RuntimeOptions): Promise<void> {
 	const workDir = process.cwd();
@@ -21,6 +21,3 @@ export async function runScanPipeline(options: RuntimeOptions): Promise<void> {
 		runId: options.runId,
 	});
 }
-
-// Backward-compat: re-export the old function name
-export { runScan } from "../scan.ts";

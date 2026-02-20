@@ -102,7 +102,7 @@ describe("Probe Integration E2E", () => {
 			await runApplicableProbes(testWorkDir);
 
 			// Check that probe results directory exists
-			const probesDir = join(testWorkDir, ".milhouse", "probes");
+			const _probesDir = join(testWorkDir, ".milhouse", "probes");
 			// Results may or may not be saved depending on the probe execution
 			// This test verifies the function runs without error
 		});

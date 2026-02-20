@@ -1,8 +1,3 @@
-/**
- * Runner types -- ResolvedConfig, PhaseConfig, PhaseContext, cost types
- */
-
-import type { PipelinePhase } from "../domain/config/types.ts";
 import type { AIEngine } from "../engines/types.ts";
 import type { AgentRole, RunPhase } from "../state/types.ts";
 

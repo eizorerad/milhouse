@@ -5,59 +5,11 @@
  * Supports both run-aware paths (when runs are active) and legacy paths.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { logStateError, StateParseError } from "./errors.ts";
-import {
-	type ProbeResult,
-	ProbeResultSchema,
-} from "./types.ts";
+import { loadJsonFile, saveJsonFile } from "./json-io.ts";
 import { getCurrentRunId, getProbesPathForCurrentRun, getRunDir } from "./runs.ts";
-
-// ============================================================================
-// INTERNAL UTILITIES
-// ============================================================================
-
-/**
- * Load JSON file with schema validation
- */
-function loadJsonFile<T>(
-	filePath: string,
-	schema: { parse: (data: unknown) => T },
-	defaultValue: T,
-): T {
-	if (!existsSync(filePath)) {
-		return defaultValue;
-	}
-
-	try {
-		const content = readFileSync(filePath, "utf-8");
-		const parsed = JSON.parse(content);
-		return schema.parse(parsed);
-	} catch (error) {
-		// Log the error with context instead of silently swallowing
-		const stateError = new StateParseError(
-			`Failed to load or parse state file: ${filePath}`,
-			{
-				filePath,
-				cause: error instanceof Error ? error : new Error(String(error)),
-			},
-		);
-		logStateError(stateError, "debug");
-		return defaultValue;
-	}
-}
-
-/**
- * Save JSON file
- */
-function saveJsonFile(filePath: string, data: unknown): void {
-	const dir = join(filePath, "..");
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-	writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
+import { type ProbeResult, ProbeResultSchema } from "./types.ts";
 
 // ============================================================================
 // ForRun Variants (explicit runId)
@@ -66,7 +18,11 @@ function saveJsonFile(filePath: string, data: unknown): void {
 /**
  * Save a probe result for a specific run
  */
-export function saveProbeResultForRun(runId: string, result: ProbeResult, workDir = process.cwd()): void {
+export function saveProbeResultForRun(
+	runId: string,
+	result: ProbeResult,
+	workDir = process.cwd(),
+): void {
 	const dir = join(getRunDir(runId, workDir), "probes", result.probe_type);
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	const path = join(dir, `${result.probe_id}.json`);
@@ -76,7 +32,11 @@ export function saveProbeResultForRun(runId: string, result: ProbeResult, workDi
 /**
  * Load all probe results of a specific type for a specific run
  */
-export function loadProbeResultsForRun(runId: string, probeType: string, workDir = process.cwd()): ProbeResult[] {
+export function loadProbeResultsForRun(
+	runId: string,
+	probeType: string,
+	workDir = process.cwd(),
+): ProbeResult[] {
 	const dir = join(getRunDir(runId, workDir), "probes", probeType);
 	if (!existsSync(dir)) return [];
 	const results: ProbeResult[] = [];
@@ -222,9 +182,7 @@ export function getProbeTypes(workDir = process.cwd()): string[] {
 	}
 
 	const entries = readdirSync(probesDir, { withFileTypes: true });
-	return entries
-		.filter((entry) => entry.isDirectory())
-		.map((entry) => entry.name);
+	return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 }
 
 /**
@@ -266,6 +224,6 @@ export function getProbeResultsBySeverity(
 		result.findings.some((finding) => {
 			const findingIndex = severityOrder.indexOf(finding.severity);
 			return findingIndex >= minIndex;
-		})
+		}),
 	);
 }

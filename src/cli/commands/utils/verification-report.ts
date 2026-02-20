@@ -83,14 +83,18 @@ export function saveVerificationReport(
 		writeFileSync(runFilepath, JSON.stringify(enrichedReport, null, 2));
 
 		// Update verification index in run directory
-		updateVerificationIndex(effectiveRunId, {
-			run_id: effectiveRunId,
-			report_path: globalFilepath,
-			created_at: enrichedReport.created_at,
-			overall_success: enrichedReport.overall_success,
-			gates_passed: enrichedReport.gates.passed,
-			gates_failed: enrichedReport.gates.failed,
-		}, workDir);
+		updateVerificationIndex(
+			effectiveRunId,
+			{
+				run_id: effectiveRunId,
+				report_path: globalFilepath,
+				created_at: enrichedReport.created_at,
+				overall_success: enrichedReport.overall_success,
+				gates_passed: enrichedReport.gates.passed,
+				gates_failed: enrichedReport.gates.failed,
+			},
+			workDir,
+		);
 
 		// Emit verification:report:created event (using validation event as proxy)
 		// Note: The event system doesn't have a specific verification event yet,
@@ -205,7 +209,9 @@ export function generateVerificationMarkdownReport(report: VerificationReport): 
 		for (const gate of report.gates.results) {
 			const gateEmoji = gate.passed ? "✅" : "❌";
 			const message = gate.message || "-";
-			parts.push(`| ${gate.gate} | ${gateEmoji} ${gate.passed ? "PASSED" : "FAILED"} | ${message} |`);
+			parts.push(
+				`| ${gate.gate} | ${gateEmoji} ${gate.passed ? "PASSED" : "FAILED"} | ${message} |`,
+			);
 		}
 
 		// Add evidence details for failed gates
@@ -221,7 +227,9 @@ export function generateVerificationMarkdownReport(report: VerificationReport): 
 `);
 				for (const evidence of gate.evidence) {
 					if (evidence.file) {
-						parts.push(`- **File**: \`${evidence.file}\`${evidence.line_start ? `:${evidence.line_start}` : ""}`);
+						parts.push(
+							`- **File**: \`${evidence.file}\`${evidence.line_start ? `:${evidence.line_start}` : ""}`,
+						);
 					}
 					if (evidence.command) {
 						parts.push(`- **Command**: \`${evidence.command}\``);
@@ -255,7 +263,9 @@ ${evidence.output}
 		for (const issue of report.issues) {
 			const severityEmoji = issue.severity === "ERROR" ? "🔴" : "🟡";
 			const file = issue.file ? `\`${issue.file}${issue.line ? `:${issue.line}` : ""}\`` : "-";
-			parts.push(`| ${severityEmoji} ${issue.severity} | ${issue.gate} | ${file} | ${issue.message} |`);
+			parts.push(
+				`| ${severityEmoji} ${issue.severity} | ${issue.gate} | ${file} | ${issue.message} |`,
+			);
 		}
 
 		// Detailed issue evidence

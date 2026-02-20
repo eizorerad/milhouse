@@ -4,15 +4,15 @@ import { addRule, showConfig } from "./cli/commands/config.ts";
 import { runExec } from "./cli/commands/exec.ts";
 import { parseFormats, runExport } from "./cli/commands/export.ts";
 import { runInit } from "./cli/commands/init.ts";
-import { runLoop, runPipelineV2 } from "./cli/commands/run.ts";
-import { runsCommand } from "./cli/commands/runs.ts";
-import { runReport } from "./cli/commands/report.ts";
-import { runTask } from "./cli/commands/task.ts";
+import { runConsolidatePipeline } from "./cli/commands/pipeline/consolidate.ts";
+import { runPlanPipeline } from "./cli/commands/pipeline/plan.ts";
 import { runScanPipeline } from "./cli/commands/pipeline/scan.ts";
 import { runValidatePipeline } from "./cli/commands/pipeline/validate.ts";
-import { runPlanPipeline } from "./cli/commands/pipeline/plan.ts";
-import { runConsolidatePipeline } from "./cli/commands/pipeline/consolidate.ts";
 import { runVerifyPipeline } from "./cli/commands/pipeline/verify.ts";
+import { runReport } from "./cli/commands/report.ts";
+import { runLoop, runPipelineV2 } from "./cli/commands/run.ts";
+import { runsCommand } from "./cli/commands/runs.ts";
+import { runTask } from "./cli/commands/task.ts";
 import { logError } from "./ui/logger.ts";
 
 async function main(): Promise<void> {
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
 			runMode,
 			resumeMode,
 			forceMode,
-			failFast,
+			failFast: _failFast,
 			startPhase,
 			endPhase,
 			runsMode,

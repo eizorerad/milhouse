@@ -48,7 +48,7 @@ const REDIS_URL_PATTERNS = [
 /**
  * Raw Redis configuration data
  */
-interface RawRedisConfig {
+interface _RawRedisConfig {
 	host?: string;
 	port?: number;
 	database?: number;
@@ -187,7 +187,7 @@ export class RedisProbe extends BaseProbe<RedisProbeOutput> {
 			if (fs.existsSync(envPath)) {
 				const content = fs.readFileSync(envPath, "utf-8");
 				const parsed = this.parseEnvConnectionString(content);
-				if (parsed && parsed.host) {
+				if (parsed?.host) {
 					return parsed;
 				}
 			}
@@ -199,7 +199,7 @@ export class RedisProbe extends BaseProbe<RedisProbeOutput> {
 			if (fs.existsSync(composePath)) {
 				const content = fs.readFileSync(composePath, "utf-8");
 				const parsed = this.parseComposeRedisConfig(content);
-				if (parsed && parsed.host) {
+				if (parsed?.host) {
 					return parsed;
 				}
 			}
@@ -368,7 +368,7 @@ export class RedisProbe extends BaseProbe<RedisProbeOutput> {
 	/**
 	 * Extract Redis key patterns from code content
 	 */
-	extractKeyPatternsFromCode(content: string, filePath: string): RedisKeyPattern[] {
+	extractKeyPatternsFromCode(content: string, _filePath: string): RedisKeyPattern[] {
 		const patterns: Map<string, RedisKeyPattern> = new Map();
 
 		// Common Redis key patterns in code

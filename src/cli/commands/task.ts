@@ -17,18 +17,22 @@
  * ```
  */
 
-import type { RuntimeOptions } from "../runtime-options.ts";
-import { logTaskProgress } from "../../services/config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngineName } from "../../engines/types.ts";
-import { shouldEnableBrowser, legacyFlagToBrowserMode, createBrowserConfig } from "../../execution/runtime/browser.ts";
+import {
+	createBrowserConfig,
+	legacyFlagToBrowserMode,
+	shouldEnableBrowser,
+} from "../../execution/runtime/browser.ts";
 import { buildMilhousePrompt } from "../../execution/runtime/prompt.ts";
 import { executeWithRetry, isRetryableError } from "../../execution/runtime/retry.ts";
 import { DEFAULT_RETRY_CONFIG, type MilhouseRetryConfig } from "../../execution/runtime/types.ts";
+import { logTaskProgress } from "../../services/config/index.ts";
 import { formatTokens, logError, logInfo, setVerbose } from "../../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../../ui/notify.ts";
 import { buildActiveSettings } from "../../ui/settings.ts";
 import { ProgressSpinner } from "../../ui/spinners.ts";
+import type { RuntimeOptions } from "../runtime-options.ts";
 import { MILHOUSE_BRANDING } from "../types.ts";
 
 /**
@@ -137,27 +141,24 @@ export async function runTask(task: string, options: RuntimeOptions): Promise<vo
 			baseDelayMs: options.retryDelay,
 		};
 
-		const retryResult = await executeWithRetry(
-			async () => {
-				spinner.updateStep(MILHOUSE_TASK_CONFIG.statusMessages.working);
+		const retryResult = await executeWithRetry(async () => {
+			spinner.updateStep(MILHOUSE_TASK_CONFIG.statusMessages.working);
 
-				// Use streaming if available
-				if (engine.executeStreaming) {
-					return await engine.executeStreaming(prompt, workDir, (step) => {
-						spinner.updateStep(step);
-					});
-				}
+			// Use streaming if available
+			if (engine.executeStreaming) {
+				return await engine.executeStreaming(prompt, workDir, (step) => {
+					spinner.updateStep(step);
+				});
+			}
 
-				const res = await engine.execute(prompt, workDir);
+			const res = await engine.execute(prompt, workDir);
 
-				if (!res.success && res.error && isRetryableError(res.error)) {
-					throw new Error(res.error);
-				}
+			if (!res.success && res.error && isRetryableError(res.error)) {
+				throw new Error(res.error);
+			}
 
-				return res;
-			},
-			retryConfig,
-		);
+			return res;
+		}, retryConfig);
 
 		// Handle retry result
 		if (!retryResult.success || !retryResult.value) {

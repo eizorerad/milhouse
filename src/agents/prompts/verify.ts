@@ -34,7 +34,7 @@ export interface VerifyInput {
  * @param ctx - Phase context
  * @returns Full prompt string
  */
-export function buildVerifyPrompt(input: VerifyInput, ctx: PhaseContext): string {
+export function buildVerifyPrompt(input: VerifyInput, _ctx: PhaseContext): string {
 	const { tasks, preCheckIssues } = input;
 	const parts: string[] = [];
 

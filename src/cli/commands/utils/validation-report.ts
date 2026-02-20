@@ -65,12 +65,16 @@ export function saveValidationReport(
 
 	// Update validation-index.json in the run directory if we have an active run
 	if (effectiveRunId) {
-		updateValidationIndex(effectiveRunId, {
-			issue_id: report.issue_id,
-			report_path: filepath,
-			created_at: now,
-			status: report.status,
-		}, workDir);
+		updateValidationIndex(
+			effectiveRunId,
+			{
+				issue_id: report.issue_id,
+				report_path: filepath,
+				created_at: now,
+				status: report.status,
+			},
+			workDir,
+		);
 
 		// Emit validation:report:created event
 		stateEvents.emitValidationReportCreated(

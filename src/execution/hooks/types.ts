@@ -95,7 +95,7 @@ export const DEFAULT_HOOK_CONFIG: HookConfig = {
 /**
  * Hook registration entry.
  */
-export interface HookRegistration<T extends (...args: any[]) => Promise<any>> {
+export interface HookRegistration<T extends (...args: unknown[]) => Promise<unknown>> {
 	/** Unique identifier for this hook */
 	id: string;
 	/** Hook function */

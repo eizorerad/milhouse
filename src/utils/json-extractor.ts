@@ -193,9 +193,7 @@ function extractCodeBlocks(response: string): Array<{ language: string | null; c
 
 	// Match code blocks with optional language tag
 	const codeBlockRegex = /```(\w*)\s*([\s\S]*?)```/g;
-	let match: RegExpExecArray | null;
-
-	while ((match = codeBlockRegex.exec(response)) !== null) {
+	for (const match of response.matchAll(codeBlockRegex)) {
 		const language = match[1] || null;
 		const content = match[2].trim();
 		blocks.push({ language, content });

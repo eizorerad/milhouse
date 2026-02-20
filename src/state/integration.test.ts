@@ -8,50 +8,37 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { stateEvents } from "./events.ts";
+import { listSnapshots, rollbackState, saveStateSnapshot } from "./history.ts";
+import { loadIssues, saveIssues, updateIssue } from "./issues.ts";
 import {
 	createRun,
+	deleteRun,
+	getCurrentRun,
+	getRunStateDir,
+	listRuns,
 	loadRunMeta,
+	setCurrentRun,
 	updateRunPhaseInMeta,
 	updateRunStats,
-	getCurrentRun,
-	setCurrentRun,
-	deleteRun,
-	listRuns,
-	getRunStateDir,
-	getRunDir,
 } from "./runs.ts";
 import {
-	createTask,
+	countTasksByStatus,
+	getReadyTasks,
 	loadTasks,
 	saveTasks,
 	updateTask,
 	updateTaskStatus,
-	getReadyTasks,
-	getPendingTasks,
-	getCompletedTasks,
-	countTasksByStatus,
 } from "./tasks.ts";
+import type { Issue, Task } from "./types.ts";
 import {
-	loadIssues,
-	saveIssues,
-	updateIssue,
-} from "./issues.ts";
-import {
-	updateValidationIndex,
-	getValidationReportsForRun,
-	getValidationReportsByIssue,
 	countValidationReportsByStatus,
+	getValidationReportsByIssue,
+	getValidationReportsForRun,
+	updateValidationIndex,
 } from "./validation-index.ts";
-import {
-	saveStateSnapshot,
-	listSnapshots,
-	loadSnapshot,
-	rollbackState,
-} from "./history.ts";
-import { stateEvents } from "./events.ts";
-import type { Issue, Task, RunPhase } from "./types.ts";
 
 describe("Integration Tests", () => {
 	const testDir = join(process.cwd(), ".test-integration");
@@ -86,7 +73,7 @@ describe("Integration Tests", () => {
 			// Verify run is current
 			const currentRun = getCurrentRun(testDir);
 			expect(currentRun).not.toBeNull();
-			expect(currentRun!.id).toBe(run.id);
+			expect(currentRun?.id).toBe(run.id);
 
 			// Step 2: Save issues (simulating scan phase)
 			const now = new Date().toISOString();
@@ -219,12 +206,12 @@ describe("Integration Tests", () => {
 			// Final verification
 			const finalRun = loadRunMeta(run.id, testDir);
 			expect(finalRun).not.toBeNull();
-			expect(finalRun!.phase).toBe("completed");
-			expect(finalRun!.issues_found).toBe(2);
-			expect(finalRun!.issues_validated).toBe(2);
-			expect(finalRun!.tasks_total).toBe(3);
-			expect(finalRun!.tasks_completed).toBe(3);
-			expect(finalRun!.tasks_failed).toBe(0);
+			expect(finalRun?.phase).toBe("completed");
+			expect(finalRun?.issues_found).toBe(2);
+			expect(finalRun?.issues_validated).toBe(2);
+			expect(finalRun?.tasks_total).toBe(3);
+			expect(finalRun?.tasks_completed).toBe(3);
+			expect(finalRun?.tasks_failed).toBe(0);
 
 			const finalTasks = loadTasks(testDir);
 			const completedTasks = finalTasks.filter((t) => t.status === "done");
@@ -273,7 +260,7 @@ describe("Integration Tests", () => {
 			// Verify dependent task is blocked
 			const loadedTasks = loadTasks(testDir);
 			const dependentTask = loadedTasks.find((t) => t.id === "TASK-2");
-			expect(dependentTask!.status).toBe("blocked");
+			expect(dependentTask?.status).toBe("blocked");
 
 			// Verify counts
 			const counts = countTasksByStatus(testDir);
@@ -285,7 +272,7 @@ describe("Integration Tests", () => {
 	describe("State Consistency", () => {
 		test("should maintain consistency between run meta and index", () => {
 			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+			const _run2 = createRun({ scope: "run 2", workDir: testDir });
 
 			// Update run1 phase
 			updateRunPhaseInMeta(run1.id, "exec", testDir);
@@ -295,8 +282,8 @@ describe("Integration Tests", () => {
 			const runs = listRuns(testDir);
 			const indexEntry = runs.find((r) => r.id === run1.id);
 
-			expect(meta!.phase).toBe("exec");
-			expect(indexEntry!.phase).toBe("exec");
+			expect(meta?.phase).toBe("exec");
+			expect(indexEntry?.phase).toBe("exec");
 		});
 
 		test("should maintain consistency between issues and tasks", () => {
@@ -355,7 +342,7 @@ describe("Integration Tests", () => {
 			const issue = loadedIssues.find((i) => i.id === "ISSUE-1");
 			const issueTasks = loadedTasks.filter((t) => t.issue_id === "ISSUE-1");
 
-			expect(issue!.related_task_ids.length).toBe(2);
+			expect(issue?.related_task_ids.length).toBe(2);
 			expect(issueTasks.length).toBe(2);
 		});
 
@@ -449,7 +436,7 @@ describe("Integration Tests", () => {
 			});
 
 			expect(rolledBack).not.toBeNull();
-			expect(rolledBack![0].symptom).toBe("Initial symptom");
+			expect(rolledBack?.[0].symptom).toBe("Initial symptom");
 
 			// Verify rollback persisted
 			currentIssues = loadIssues(testDir);
@@ -510,10 +497,10 @@ describe("Integration Tests", () => {
 
 			// Switch between runs
 			setCurrentRun(run1.id, testDir);
-			expect(getCurrentRun(testDir)!.id).toBe(run1.id);
+			expect(getCurrentRun(testDir)?.id).toBe(run1.id);
 
 			setCurrentRun(run2.id, testDir);
-			expect(getCurrentRun(testDir)!.id).toBe(run2.id);
+			expect(getCurrentRun(testDir)?.id).toBe(run2.id);
 
 			// Delete a run
 			deleteRun(run3.id, testDir);
@@ -588,7 +575,7 @@ describe("Integration Tests", () => {
 
 	describe("Error Recovery", () => {
 		test("should handle missing state files gracefully", () => {
-			const run = createRun({ scope: "error recovery", workDir: testDir });
+			const _run = createRun({ scope: "error recovery", workDir: testDir });
 
 			// Try to load non-existent state
 			const issues = loadIssues(testDir);

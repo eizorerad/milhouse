@@ -187,7 +187,7 @@ export async function executeWithRetry<T>(
 	const maxAttempts = 1 + config.maxRetries;
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-		const attemptStart = Date.now();
+		const _attemptStart = Date.now();
 
 		// Log attempt start
 		logInfo(`Attempt ${attempt}/${maxAttempts}`);
@@ -242,9 +242,9 @@ export async function executeWithRetry<T>(
 
 				// Log retry reason
 				if (config.retryOnAnyFailure && !isRetryable) {
-					logInfo(`Retrying: --retry-on-any-failure enabled`);
+					logInfo("Retrying: --retry-on-any-failure enabled");
 				} else {
-					logInfo(`Retrying: error matches retryable pattern`);
+					logInfo("Retrying: error matches retryable pattern");
 				}
 
 				logWarn(`Attempt ${attempt}/${maxAttempts} failed: ${errorMsg}`);
@@ -319,7 +319,10 @@ export function createFollowUpTask(
 	}
 
 	const tasks = loadTasksForRun(runId, workDir);
-	const maxParallelGroup = tasks.reduce((max: number, t: Task) => Math.max(max, t.parallel_group), 0);
+	const maxParallelGroup = tasks.reduce(
+		(max: number, t: Task) => Math.max(max, t.parallel_group),
+		0,
+	);
 
 	// Truncate error message if too long
 	const truncatedError =
@@ -443,11 +446,7 @@ export function hasPendingFollowUps(
  * @param workDir - Working directory
  * @returns Number of retries (follow-up tasks)
  */
-export function getTaskRetryCount(
-	runId: string,
-	taskId: string,
-	workDir = process.cwd(),
-): number {
+export function getTaskRetryCount(runId: string, taskId: string, workDir = process.cwd()): number {
 	const followUps = getFollowUpTasksFor(runId, taskId, workDir);
 	return followUps.length;
 }

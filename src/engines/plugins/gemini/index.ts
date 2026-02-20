@@ -378,7 +378,7 @@ export class GeminiPlugin implements IEnginePlugin {
 		const lines = output.trim().split("\n");
 		const assistantMessages: string[] = [];
 		const steps: ExecutionStep[] = [];
-		let sessionId: string | undefined;
+		let _sessionId: string | undefined;
 		let durationMs = 0;
 		let isError = false;
 		let errorMessage: string | undefined;
@@ -395,7 +395,7 @@ export class GeminiPlugin implements IEnginePlugin {
 
 				switch (event.type) {
 					case "init":
-						sessionId = event.session_id;
+						_sessionId = event.session_id;
 						steps.push({
 							type: "thinking",
 							content: `Session started with model: ${event.model || "unknown"}`,
@@ -467,7 +467,7 @@ export class GeminiPlugin implements IEnginePlugin {
 						break;
 
 					case "result":
-						sessionId = event.session_id;
+						_sessionId = event.session_id;
 						durationMs = event.stats?.duration_ms || 0;
 						isError = event.status !== "success";
 						inputTokens = event.stats?.input_tokens || 0;
@@ -504,7 +504,7 @@ export class GeminiPlugin implements IEnginePlugin {
 
 		// Add a final result step with the complete output for extractFinalResult to find
 		// This ensures the adapter can extract the final response correctly
-		if (finalOutput && finalOutput.trim()) {
+		if (finalOutput?.trim()) {
 			const now = new Date().toISOString();
 			steps.push({
 				type: "result",

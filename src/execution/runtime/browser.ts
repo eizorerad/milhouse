@@ -57,7 +57,6 @@ export function shouldEnableBrowser(mode: BrowserMode): boolean {
 				return false;
 			}
 			return true;
-		case "auto":
 		default:
 			return detectAgentBrowser();
 	}
@@ -75,7 +74,6 @@ export function legacyFlagToBrowserMode(flag: "auto" | "true" | "false"): Browse
 			return "enabled";
 		case "false":
 			return "disabled";
-		case "auto":
 		default:
 			return "auto";
 	}

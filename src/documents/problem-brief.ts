@@ -1,8 +1,20 @@
-import { initializeDir } from "../state/manager.ts";
 import { loadIssues } from "../state/issues.ts";
+import { initializeDir } from "../state/manager.ts";
+import {
+	createPlanMetadataHeader,
+	syncLegacyPlansView,
+	writeProblemBrief,
+} from "../state/plan-store.ts";
 import { getCurrentRun } from "../state/runs.ts";
-import { createPlanMetadataHeader, syncLegacyPlansView, writeProblemBrief } from "../state/plan-store.ts";
-import { type Issue, type IssueStatus, type RunMeta, type RunState, type Severity, getWorkItemTitle, getWorkItemRationale } from "../state/types.ts";
+import {
+	type Issue,
+	type IssueStatus,
+	type RunMeta,
+	type RunState,
+	type Severity,
+	getWorkItemRationale,
+	getWorkItemTitle,
+} from "../state/types.ts";
 
 /**
  * Options for generating Problem Brief

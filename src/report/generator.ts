@@ -2,11 +2,11 @@
  * Report generator -- orchestrates JSON and markdown report generation
  */
 
-import type { ResolvedConfig } from "../runner/types.ts";
 import type { RunCost } from "../runner/cost.ts";
+import type { ResolvedConfig } from "../runner/types.ts";
+import { logInfo } from "../ui/logger.ts";
 import { generateJsonReport, writeJsonReport } from "./json-report.ts";
 import { generateMarkdownReport, writeMarkdownReport } from "./markdown-report.ts";
-import { logInfo } from "../ui/logger.ts";
 
 export interface GenerateReportOptions {
 	runId: string;
@@ -28,7 +28,12 @@ export function generateReport(options: GenerateReportOptions): ReportResult {
 	const result: ReportResult = {};
 
 	// Always generate JSON data (needed for markdown too)
-	const jsonReport = generateJsonReport(options.runId, options.cost, options.duration, options.workDir);
+	const jsonReport = generateJsonReport(
+		options.runId,
+		options.cost,
+		options.duration,
+		options.workDir,
+	);
 
 	if (options.format === "json" || options.format === "both") {
 		result.jsonPath = writeJsonReport(jsonReport, options.runId, options.workDir);

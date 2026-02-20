@@ -1,36 +1,27 @@
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import pc from "picocolors";
-import type { RuntimeOptions } from "../runtime-options.ts";
-import { getConfigService } from "../../services/config/index.ts";
 import { createEngine, getPlugin } from "../../engines/index.ts";
 import type { AIEngine, AIEngineName, AIResult } from "../../engines/types.ts";
-import {
-	type MergeBranchResult,
-	runParallelByIssue,
-} from "../../execution/issue-executor.ts";
+import { type MergeBranchResult, runParallelByIssue } from "../../execution/issue-executor.ts";
 import { runParallelWithGroupOrdering } from "../../execution/steps/parallel.ts";
-import {
-	createTaskBranch,
-	getCurrentBranch,
-	returnToBaseBranch,
-} from "../../vcs/services/branch-service.ts";
-import { createPullRequest } from "../../vcs/services/pr-service.ts";
+import { getConfigService } from "../../services/config/index.ts";
 import { createExecution, updateExecution } from "../../state/executions.ts";
-import { buildFilterOptionsFromRuntime, filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import {
-	getMilhouseDir,
-	initializeDir,
-	updateProgress,
-} from "../../state/manager.ts";
+	buildFilterOptionsFromRuntime,
+	filterIssues,
+	loadIssuesForRun,
+} from "../../state/issues.ts";
+import { getMilhouseDir, initializeDir, updateProgress } from "../../state/manager.ts";
+import { updateRunPhaseInMeta, updateRunStats } from "../../state/runs.ts";
 import {
-	updateRunPhaseInMeta,
-	updateRunStats,
-} from "../../state/runs.ts";
-import { loadTasksForRun, readTask, updateTaskForRun, updateTaskForRunSafe } from "../../state/tasks.ts";
+	loadTasksForRun,
+	readTask,
+	updateTaskForRun,
+	updateTaskForRunSafe,
+} from "../../state/tasks.ts";
 import type { Issue } from "../../state/types.ts";
 import { AGENT_ROLES, type Task } from "../../state/types.ts";
-import { selectOrRequireRun } from "./utils/run-selector.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -42,6 +33,14 @@ import {
 	setVerbose,
 } from "../../ui/logger.ts";
 import { ProgressSpinner } from "../../ui/spinners.ts";
+import {
+	createTaskBranch,
+	getCurrentBranch,
+	returnToBaseBranch,
+} from "../../vcs/services/branch-service.ts";
+import { createPullRequest } from "../../vcs/services/pr-service.ts";
+import type { RuntimeOptions } from "../runtime-options.ts";
+import { selectOrRequireRun } from "./utils/run-selector.ts";
 
 /**
  * Result of execution
@@ -559,8 +558,8 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 			issues = Array.from(issueIds).map((id) => ({
 				id,
 				type: "task" as const,
-			title: `Work item ${id} (derived from tasks)`,
-			symptom: `Work item ${id} (derived from tasks)`,
+				title: `Work item ${id} (derived from tasks)`,
+				symptom: `Work item ${id} (derived from tasks)`,
 				hypothesis: "Derived from task assignments",
 				evidence: [],
 				status: "CONFIRMED" as const,
@@ -851,7 +850,9 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 			const readyTasks = getReadyTasksForRun(runId, workDir);
 			if (readyTasks.length === 0) {
 				// Check if there are still pending tasks (blocked)
-				const remaining = loadTasksForRun(runId, workDir).filter((t: Task) => t.status === "pending");
+				const remaining = loadTasksForRun(runId, workDir).filter(
+					(t: Task) => t.status === "pending",
+				);
 				if (remaining.length > 0) {
 					logWarn(`${remaining.length} tasks blocked due to failed dependencies`);
 				}
@@ -894,10 +895,15 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 
 	const nextPhase = allDone ? "verify" : anyFailed ? "failed" : "exec";
 	currentRun = updateRunPhaseInMeta(runId, nextPhase, workDir) ?? currentRun;
-	currentRun = updateRunStats(runId, {
-		tasks_completed: finalTasks.filter((t: Task) => t.status === "done").length,
-		tasks_failed: finalTasks.filter((t: Task) => t.status === "failed").length,
-	}, workDir) ?? currentRun;
+	currentRun =
+		updateRunStats(
+			runId,
+			{
+				tasks_completed: finalTasks.filter((t: Task) => t.status === "done").length,
+				tasks_failed: finalTasks.filter((t: Task) => t.status === "failed").length,
+			},
+			workDir,
+		) ?? currentRun;
 
 	const duration = Date.now() - startTime;
 

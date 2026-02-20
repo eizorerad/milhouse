@@ -294,7 +294,7 @@ export class ComposeProbe extends BaseProbe<ComposeProbeOutput> {
 	/**
 	 * Parse a single service definition
 	 */
-	parseService(name: string, raw: RawComposeService, sourceFile: string): ComposeService {
+	parseService(name: string, raw: RawComposeService, _sourceFile: string): ComposeService {
 		const service: ComposeService = {
 			name,
 			image: raw.image,
@@ -748,7 +748,7 @@ export class ComposeProbe extends BaseProbe<ComposeProbeOutput> {
 	 * Allow continuation when docker version check fails
 	 * We can still parse compose files without docker installed
 	 */
-	protected shouldContinueOnFailure(result: CommandResult): boolean {
+	protected shouldContinueOnFailure(_result: CommandResult): boolean {
 		// Continue even if docker version check fails
 		return true;
 	}

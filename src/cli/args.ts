@@ -22,9 +22,9 @@
 
 import { existsSync, statSync } from "node:fs";
 import { Command } from "commander";
-import type { RuntimeOptions } from "./runtime-options.ts";
 import type { Severity } from "../state/types.ts";
 import { banner, theme } from "../ui/theme";
+import type { RuntimeOptions } from "./runtime-options.ts";
 import { MILHOUSE_BRANDING, MILHOUSE_PHASES, type MilhousePhase } from "./types.ts";
 
 /**
@@ -73,15 +73,15 @@ export function createProgram(): Command {
 			"--scope <focus>",
 			"Focus scan on specific area (e.g., 'add auth flow', 'frontend bugs', 'refactor API')",
 		)
-		.option(
-			"--type <type>",
-			"Work item type hint: bug, feature, refactor, improvement, task",
-		)
+		.option("--type <type>", "Work item type hint: bug, feature, refactor, improvement, task")
 		.option(
 			"--validate",
 			`Run ${theme.phase.validate("Validators")} to validate work items with evidence`,
 		)
-		.option("--plan", `Run ${theme.phase.plan("Planners")} to generate WBS for validated work items`)
+		.option(
+			"--plan",
+			`Run ${theme.phase.plan("Planners")} to generate WBS for validated work items`,
+		)
 		.option(
 			"--consolidate",
 			`${theme.phase.consolidate("Merge")} WBS into unified Execution Plan with dependencies`,
@@ -105,15 +105,12 @@ export function createProgram(): Command {
 		.option("--run-id <id>", "Specify run ID to use (full or partial match)")
 		.option("--resume", "Resume Milhouse pipeline from where it left off")
 		.option("--force", "Force re-run even if phases already completed")
-		.option("--fail-fast", "Stop on first failure — applies to both pipeline phases and task execution (default: true)")
 		.option(
-			"--start-phase <phase>",
-			"Start from a specific phase",
+			"--fail-fast",
+			"Stop on first failure — applies to both pipeline phases and task execution (default: true)",
 		)
-		.option(
-			"--end-phase <phase>",
-			"Stop after a specific phase",
-		)
+		.option("--start-phase <phase>", "Start from a specific phase")
+		.option("--end-phase <phase>", "Stop after a specific phase")
 		.option("--no-tests, --skip-tests", "Skip running tests")
 		.option("--no-lint, --skip-lint", "Skip running lint")
 		.option("--fast", "Skip both tests and lint")
@@ -464,14 +461,14 @@ export function parseArgs(args: string[]): ParsedArgs {
 	// Validate tmux mode options
 	if (options.tmux && aiEngine !== "opencode") {
 		console.error(
-			`Error: --tmux flag is only supported with --opencode engine.\n` +
-				`Other engines (claude, gemini, etc.) do not have a Server API with TUI attachment capability.`,
+			"Error: --tmux flag is only supported with --opencode engine.\n" +
+				"Other engines (claude, gemini, etc.) do not have a Server API with TUI attachment capability.",
 		);
 		process.exit(1);
 	}
 
 	if (options.tmuxAutoAttach && !options.tmux) {
-		console.error(`Error: --tmux-auto-attach requires --tmux flag.`);
+		console.error("Error: --tmux-auto-attach requires --tmux flag.");
 		process.exit(1);
 	}
 

@@ -21,44 +21,37 @@ import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import pLimit from "p-limit";
 import { MILHOUSE_DIR } from "../domain/config/directories.ts";
-import { getConfigService } from "../services/config/index.ts";
 import type { AIEngine } from "../engines/types.ts";
+import { getConfigService } from "../services/config/index.ts";
 // ServerInfo is now used only within execution/tmux module
 import {
-	getMilhouseDir,
 	getCurrentPlansDir,
-	readIssueWbsPlan,
+	getMilhouseDir,
 	hasLegacyPlansToImport,
 	importLegacyPlans,
+	readIssueWbsPlan,
 } from "../state/index.ts";
 import { AGENT_ROLES, type Issue, type Task as StateTask } from "../state/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { DynamicAgentSpinner } from "../ui/spinners.ts";
-import {
-	checkMergeReadiness,
-	stashChanges,
-	popStash,
-} from "../vcs/services/merge-service.ts";
+import { checkMergeReadiness, popStash, stashChanges } from "../vcs/services/merge-service.ts";
 import { cleanupWorktree, createWorktree } from "../vcs/services/worktree-service.ts";
+import { type IssueInfo, mergeCompletedBranches } from "./merge/index.ts";
 import { executeWithRetry, isRetryableError } from "./runtime/retry.ts";
 import { DEFAULT_RETRY_CONFIG, type MilhouseRetryConfig } from "./runtime/types.ts";
 import type { ExecutionResult } from "./steps/types.ts";
-import { analyzeIssueTaskCompletion } from "./utils/task-commit-matcher.ts";
 // Extracted shared modules (T6)
 import {
 	type TmuxServerInfo,
-	initTmuxMode,
-	showTmuxHeader,
-	showCompletionSummary,
-	executeIssueTmuxMode,
 	cleanupTmuxResources,
+	executeIssueTmuxMode,
+	initTmuxMode,
 	registerSignalHandlers,
 	removeSignalHandlers,
+	showCompletionSummary,
+	showTmuxHeader,
 } from "./tmux/index.ts";
-import {
-	type IssueInfo,
-	mergeCompletedBranches,
-} from "./merge/index.ts";
+import { analyzeIssueTaskCompletion } from "./utils/task-commit-matcher.ts";
 
 // ============================================================================
 // Types
@@ -255,16 +248,20 @@ export function groupTasksByIssue(tasks: StateTask[], issues: Issue[]): IssueGro
 		if (!issue) {
 			// Create a synthetic work item for tasks without a matching issue
 			// instead of silently dropping them
-			logWarn(`Issue ${issueId} not found for ${issueTasks.length} task(s) - creating synthetic work item`);
+			logWarn(
+				`Issue ${issueId} not found for ${issueTasks.length} task(s) - creating synthetic work item`,
+			);
 			issue = {
 				id: issueId,
 				type: "task",
-				title: issueId === "UNASSIGNED"
-					? `Unassigned tasks (${issueTasks.length})`
-					: `Work item ${issueId} (derived)`,
-				symptom: issueId === "UNASSIGNED"
-					? `Unassigned tasks (${issueTasks.length})`
-					: `Work item ${issueId} (derived)`,
+				title:
+					issueId === "UNASSIGNED"
+						? `Unassigned tasks (${issueTasks.length})`
+						: `Work item ${issueId} (derived)`,
+				symptom:
+					issueId === "UNASSIGNED"
+						? `Unassigned tasks (${issueTasks.length})`
+						: `Work item ${issueId} (derived)`,
 				hypothesis: "Derived from task assignments",
 				evidence: [],
 				status: "CONFIRMED",
@@ -533,9 +530,13 @@ export function displayBranchStatusSummary(
 		for (const b of complete) {
 			const mergeStatus = b.merged ? "✓ merged" : "⏳ pending merge";
 			logInfo(`  ${b.branch}`);
-			logInfo(`    Issue: ${b.issueId} | Tasks: ${b.completedTasks}/${b.totalTasks} | ${mergeStatus}`);
+			logInfo(
+				`    Issue: ${b.issueId} | Tasks: ${b.completedTasks}/${b.totalTasks} | ${mergeStatus}`,
+			);
 			if (!b.merged) {
-				logSuccess(`    → Ready to merge: git checkout ${targetBranch} && git merge --no-ff ${b.branch}`);
+				logSuccess(
+					`    → Ready to merge: git checkout ${targetBranch} && git merge --no-ff ${b.branch}`,
+				);
 			}
 		}
 	}
@@ -549,8 +550,10 @@ export function displayBranchStatusSummary(
 		for (const b of partial) {
 			logWarn(`  ${b.branch}`);
 			logWarn(`    Issue: ${b.issueId} | Tasks: ${b.completedTasks}/${b.totalTasks} completed`);
-			logInfo(`    Options:`);
-			logInfo(`      1. Merge partial work: git checkout ${targetBranch} && git merge --no-ff ${b.branch}`);
+			logInfo("    Options:");
+			logInfo(
+				`      1. Merge partial work: git checkout ${targetBranch} && git merge --no-ff ${b.branch}`,
+			);
 			logInfo(`      2. Re-run failed tasks: milhouse exec --issue ${b.issueId}`);
 			logInfo(`      3. Inspect branch: git checkout ${b.branch} && git log --oneline`);
 		}
@@ -565,7 +568,7 @@ export function displayBranchStatusSummary(
 		for (const b of failed) {
 			logError(`  ${b.branch}`);
 			logError(`    Issue: ${b.issueId} | Error: ${b.error || "Unknown error"}`);
-			logInfo(`    Options:`);
+			logInfo("    Options:");
 			logInfo(`      1. Re-run: milhouse exec --issue ${b.issueId}`);
 			logInfo(`      2. Delete branch: git branch -D ${b.branch}`);
 			logInfo(`      3. Inspect: git checkout ${b.branch} && git status`);
@@ -606,7 +609,7 @@ After successful merge, clean up branches:
  * or other issues. After worktrees are cleaned up, branches become available
  * for manual merging.
  */
-function displayManualMergeInstructions(failedBranches: string[], targetBranch: string): void {
+function _displayManualMergeInstructions(failedBranches: string[], targetBranch: string): void {
 	logInfo(`
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                         MANUAL MERGE INSTRUCTIONS                             ║
@@ -796,9 +799,7 @@ export async function runParallelByIssue(
 				// This implements the fallback policy: if active run but no plans in run dir,
 				// while legacy .milhouse/plans has plans, import them first
 				if (hasLegacyPlansToImport(workDir)) {
-					logWarn(
-						`Legacy plans detected in .milhouse/plans but not in current run. Importing...`,
-					);
+					logWarn("Legacy plans detected in .milhouse/plans but not in current run. Importing...");
 					const imported = importLegacyPlans(workDir);
 					if (imported > 0) {
 						logInfo(`Imported ${imported} plan file(s) from legacy directory to current run`);
@@ -864,16 +865,13 @@ export async function runParallelByIssue(
 						baseDelayMs: retryDelay,
 						retryOnAnyFailure: options.retryOnAnyFailure,
 					};
-					const retryResult = await executeWithRetry(
-						async () => {
-							const res = await engine.execute(prompt, worktreeDir, engineOptions);
-							if (!res.success && res.error && isRetryableError(res.error)) {
-								throw new Error(res.error);
-							}
-							return res;
-						},
-						retryConfig,
-					);
+					const retryResult = await executeWithRetry(async () => {
+						const res = await engine.execute(prompt, worktreeDir, engineOptions);
+						if (!res.success && res.error && isRetryableError(res.error)) {
+							throw new Error(res.error);
+						}
+						return res;
+					}, retryConfig);
 
 					// Handle retry result
 					if (!retryResult.success || !retryResult.value) {
@@ -1000,11 +998,11 @@ export async function runParallelByIssue(
 				});
 
 				branchToIssueMap.set(branchName, issueGroup.issueId);
-					// Store issue info for human-readable commit messages
-					branchToIssueInfo.set(branchName, {
-						id: issueGroup.issueId,
-						title: issueGroup.issue.title ?? issueGroup.issue.symptom,
-					});
+				// Store issue info for human-readable commit messages
+				branchToIssueInfo.set(branchName, {
+					id: issueGroup.issueId,
+					title: issueGroup.issue.title ?? issueGroup.issue.symptom,
+				});
 
 				// Queue branch for merge AFTER all agents complete (do NOT merge here!)
 				// This prevents race conditions where parallel merges conflict

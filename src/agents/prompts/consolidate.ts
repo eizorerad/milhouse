@@ -23,7 +23,7 @@ export interface ConsolidateInput {
  * @param ctx - Phase context
  * @returns Full prompt string
  */
-export function buildConsolidatePrompt(input: ConsolidateInput, ctx: PhaseContext): string {
+export function buildConsolidatePrompt(input: ConsolidateInput, _ctx: PhaseContext): string {
 	const { tasks, issues } = input;
 	const parts: string[] = [];
 
