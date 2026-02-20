@@ -51,7 +51,12 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 
 	loadItems(ctx) {
 		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
-		return issues.filter((i) => i.status === "CONFIRMED" || i.status === "PARTIAL");
+		return issues.filter(
+			(i) =>
+				(i.status === "CONFIRMED" || i.status === "PARTIAL") &&
+				// Skip issues that already have tasks (prevents duplicates on resume)
+				i.related_task_ids.length === 0,
+		);
 	},
 
 	buildPrompt(issue, ctx) {
@@ -136,14 +141,20 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 
 			// Create tasks in state
 			const createdTaskIds: string[] = [];
+			const createdTaskTitles: string[] = [];
 			for (const wbsTask of wbs.tasks) {
-				// Convert depends_on indices to task IDs
+				// Convert depends_on to task IDs — supports both numeric indices and title matches
 				const dependsOn = wbsTask.depends_on
 					.map((dep) => {
-						const depIndex = typeof dep === "string" ? Number.parseInt(dep, 10) : Number(dep);
-						return depIndex >= 0 && depIndex < createdTaskIds.length
-							? createdTaskIds[depIndex]
-							: null;
+						// Try numeric index first
+						const depIndex = Number.parseInt(dep, 10);
+						if (!Number.isNaN(depIndex) && depIndex >= 0 && depIndex < createdTaskIds.length) {
+							return createdTaskIds[depIndex];
+						}
+						// Fallback: match by task title
+						const titleIdx = createdTaskTitles.indexOf(dep);
+						if (titleIdx >= 0) return createdTaskIds[titleIdx];
+						return null;
 					})
 					.filter((id): id is string => id !== null);
 
@@ -169,6 +180,7 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 					ctx.workDir,
 				);
 				createdTaskIds.push(task.id);
+				createdTaskTitles.push(wbsTask.title);
 			}
 
 			// Update issue with related task IDs
