@@ -8,7 +8,7 @@
 import pc from "picocolors";
 import { type ConsolidateInput, buildConsolidatePrompt } from "../../agents/prompts/consolidate.ts";
 import { CONSOLIDATE_SCHEMA } from "../../agents/schemas/consolidate.ts";
-import { saveGraphForRun } from "../../state/graph.ts";
+import { loadGraphForRun, saveGraphForRun } from "../../state/graph.ts";
 import { loadIssuesForRun } from "../../state/issues.ts";
 import { writeExecutionPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
@@ -34,6 +34,11 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 	defaultParallel: 1,
 
 	loadItems(ctx) {
+		// Idempotency guard: if graph already exists, consolidation already ran.
+		// Re-running would apply dedup again and potentially delete legitimate tasks.
+		const existingGraph = loadGraphForRun(ctx.runId, ctx.workDir);
+		if (existingGraph.length > 0) return [];
+
 		const tasks = loadTasksForRun(ctx.runId, ctx.workDir).filter((t) => t.status === "pending");
 		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
 
@@ -83,6 +88,8 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 			// Apply duplicate removal
 			for (const dup of consolidation.duplicates) {
 				if (!dup.keep || !Array.isArray(dup.remove)) continue;
+				// Validate that dup.keep actually exists — prevents dangling dep references
+				if (!allTasks.some((t) => t.id === dup.keep)) continue;
 				allTasks = allTasks.filter((t) => !dup.remove.includes(t.id));
 				duplicatesRemoved += dup.remove.length;
 				// Rewrite deps pointing to removed tasks

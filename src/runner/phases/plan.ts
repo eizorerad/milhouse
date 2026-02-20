@@ -51,11 +51,15 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 
 	loadItems(ctx) {
 		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
+		// Check tasks on disk (not just related_task_ids) to handle crash between
+		// createTaskForRun and updateIssueForRun — prevents orphan duplicates on resume
+		const existingTasks = loadTasksForRun(ctx.runId, ctx.workDir);
+		const issuesWithTasks = new Set(existingTasks.map((t) => t.issue_id).filter(Boolean));
+
 		return issues.filter(
 			(i) =>
 				(i.status === "CONFIRMED" || i.status === "PARTIAL") &&
-				// Skip issues that already have tasks (prevents duplicates on resume)
-				i.related_task_ids.length === 0,
+				!issuesWithTasks.has(i.id),
 		);
 	},
 

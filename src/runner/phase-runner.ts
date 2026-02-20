@@ -19,7 +19,6 @@ import { phaseIcons, theme } from "../ui/theme.ts";
 import {
 	BudgetExceededError,
 	type RunCost,
-	addPhaseCost,
 	calculateCost,
 	checkBudget,
 	createRunCost,
@@ -105,6 +104,8 @@ export interface RunPhaseOptions {
 	workDir: string;
 	/** Resolved config (already merged defaults + yaml + CLI) */
 	config: ResolvedConfig;
+	/** Unified user config (for rules, prompts, project info) */
+	userConfig?: import("../config/define.ts").ResolvedFullConfig;
 	/** Existing run ID (if resuming) */
 	runId?: string;
 	/** Scope for scan (creates new run) */
@@ -154,12 +155,17 @@ export async function runPhase<TItem, TResult>(
 		const model = resolvePhaseModel(config, phaseConfig.name);
 
 		// 5. Create phase context
+		const { loadUserConfig } = await import("../config/loader.ts");
+		const { resolveConfig } = await import("../config/define.ts");
+		const userConfig = options.userConfig ?? resolveConfig(await loadUserConfig(workDir));
+
 		const ctx: PhaseContext = {
 			runId,
 			workDir,
 			engine,
 			config,
 			startTime,
+			userConfig,
 			store: {},
 		};
 
@@ -225,8 +231,11 @@ export async function runPhase<TItem, TResult>(
 			totalOutput += r.outputTokens;
 		}
 
-		// Add to run cost
-		addPhaseCost(runCost, phaseConfig.name, totalInput, totalOutput, config.cost);
+		// Set phase breakdown (totals already updated incrementally in executePool)
+		const phaseCost = calculateCost({ input: totalInput, output: totalOutput }, config.cost);
+		runCost.byPhase[phaseConfig.name] = { inputTokens: totalInput, outputTokens: totalOutput, cost: phaseCost };
+		runCost.inputCost += (totalInput / 1_000_000) * config.cost.inputPerMillion;
+		runCost.outputCost += (totalOutput / 1_000_000) * config.cost.outputPerMillion;
 
 		// 14. Display summary
 		if (phaseConfig.formatSummary) {
@@ -384,6 +393,19 @@ async function executePool<TItem, TResult>(
 		const result = await executeItem(phaseConfig, items[0], ctx, model, (step) =>
 			spinner.updateStep(step),
 		);
+
+		// Update runCost incrementally so budget checks see real-time spend
+		if (result.inputTokens > 0 || result.outputTokens > 0) {
+			const itemCost = calculateCost(
+				{ input: result.inputTokens, output: result.outputTokens },
+				config.cost,
+			);
+			runCost.totalCost += itemCost;
+			runCost.inputTokens += result.inputTokens;
+			runCost.outputTokens += result.outputTokens;
+			runCost.totalTokens += result.inputTokens + result.outputTokens;
+		}
+
 		const tokenInfo = `${formatTokens(result.inputTokens)} in / ${formatTokens(result.outputTokens)} out`;
 
 		if (result.success) {
@@ -416,6 +438,18 @@ async function executePool<TItem, TResult>(
 				const label = typeof step === "string" ? step : (step.shortDetail ?? step.category);
 				spinner.updateSlot(slot, label);
 			});
+
+			// Update runCost incrementally so budget checks see real-time spend
+			if (result.inputTokens > 0 || result.outputTokens > 0) {
+				const itemCost = calculateCost(
+					{ input: result.inputTokens, output: result.outputTokens },
+					config.cost,
+				);
+				runCost.totalCost += itemCost;
+				runCost.inputTokens += result.inputTokens;
+				runCost.outputTokens += result.outputTokens;
+				runCost.totalTokens += result.inputTokens + result.outputTokens;
+			}
 
 			spinner.releaseSlot(slot, result.success);
 			return result;
