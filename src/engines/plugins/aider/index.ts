@@ -76,14 +76,14 @@ export type AiderModel = (typeof AIDER_MODELS)[keyof typeof AIDER_MODELS];
  *   prompt: "add docstrings to all functions",
  *   workDir: "/path/to/project"
  * });
- * // Result: ["--message", "add docstrings to all functions", "--yes", "--no-stream"]
+ * // Result: ["--message", "add docstrings to all functions", "--yes-always", "--no-stream"]
  *
  * // With model override
  * const args = plugin.buildArgs({
  *   prompt: "refactor the auth module",
  *   modelOverride: "gpt-4o"
  * });
- * // Result: ["--message", "refactor the auth module", "--yes", "--no-stream", "--model", "gpt-4o"]
+ * // Result: ["--message", "refactor the auth module", "--yes-always", "--no-stream", "--model", "gpt-4o"]
  * ```
  */
 export class AiderPlugin implements IEnginePlugin {
@@ -148,9 +148,10 @@ export class AiderPlugin implements IEnginePlugin {
 		args.push("--message", request.prompt);
 
 		// Auto-approve all confirmations for non-interactive mode
-		// --yes: Always say yes to every confirmation
+		// --yes-always: Always say yes to every confirmation
+		// Note: --yes does NOT exist; the correct flag is --yes-always
 		if (request.autoApprove !== false) {
-			args.push("--yes");
+			args.push("--yes-always");
 		}
 
 		// Disable streaming for cleaner output parsing
@@ -387,8 +388,8 @@ export class AiderPlugin implements IEnginePlugin {
 	 */
 	getEnv(): Record<string, string> {
 		const env: Record<string, string> = {
-			// Disable interactive features
-			AIDER_YES: "true",
+			// Disable interactive features (env var matches --yes-always flag)
+			AIDER_YES_ALWAYS: "true",
 			// Disable analytics
 			AIDER_ANALYTICS: "false",
 			// Disable update checks

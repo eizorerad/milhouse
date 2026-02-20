@@ -177,6 +177,9 @@ export class GeminiPlugin implements IEnginePlugin {
 
 		// Allowed tools bypass confirmation
 		// --allowed-tools: repeated flag OR comma-separated
+		// NOTE: Deprecated by Gemini CLI — use Policy Engine instead.
+		// Still functional but emits a deprecation warning to stderr.
+		// @see https://geminicli.com/docs/core/policy-engine
 		if (request.allowedTools && request.allowedTools.length > 0) {
 			args.push("--allowed-tools", ...request.allowedTools);
 		}
