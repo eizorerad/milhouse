@@ -5,6 +5,7 @@
  * gates and checking for regressions. Determines overall pass/fail.
  */
 
+import pc from "picocolors";
 import {
 	type VerifyInput,
 	type VerifyPreCheckIssue,
@@ -14,6 +15,7 @@ import { VERIFY_SCHEMA } from "../../agents/schemas/verify.ts";
 import { loadTasksForRun } from "../../state/tasks.ts";
 import type { RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import { displayPhaseSummaryHeader } from "../phase-runner.ts";
 import type { PhaseConfig } from "../types.ts";
 
 /** Parsed verification result */
@@ -86,6 +88,55 @@ export const verifyPhaseConfig: PhaseConfig<VerifyInput, VerifyResult> = {
 	saveResults() {
 		// Verification results are logged/displayed but don't mutate state
 		// The phase transition handles marking the run as completed/failed
+	},
+
+	formatSummary(results, ctx) {
+		let totalInput = 0;
+		let totalOutput = 0;
+		for (const r of results) {
+			totalInput += r.inputTokens;
+			totalOutput += r.outputTokens;
+		}
+		const startTime = (ctx.store._startTime as number) ?? 0;
+		displayPhaseSummaryHeader("verify", results, totalInput, totalOutput, ctx.config, startTime);
+
+		for (const r of results) {
+			if (!r.success) continue;
+			const v = r.result;
+
+			// Overall status
+			const statusText = v.overall_pass ? pc.green("PASS") : pc.red("FAIL");
+			const regressions = v.regressions_found ? pc.red(" (regressions found)") : "";
+			console.log("");
+			console.log(`  ${pc.bold("Verification:")} ${statusText}${regressions}`);
+
+			// Gate results in a compact line
+			if (v.gates.length > 0) {
+				const gateStrs = v.gates.map((g) => {
+					const icon = g.passed ? pc.green("✔") : pc.red("✗");
+					return `${icon} ${g.gate}`;
+				});
+				console.log(`    ${gateStrs.join("  ")}`);
+			}
+
+			// Recommendations
+			if (v.recommendations.length > 0) {
+				console.log("");
+				console.log(`  ${pc.bold("Recommendations:")}`);
+				for (const rec of v.recommendations) {
+					console.log(`    ${pc.dim("-")} ${rec}`);
+				}
+			}
+
+			// Summary
+			if (v.summary) {
+				console.log("");
+				console.log(`  ${pc.dim(v.summary)}`);
+			}
+		}
+
+		console.log(pc.dim("═".repeat(47)));
+		console.log("");
 	},
 
 	nextPhase(results): RunPhase {

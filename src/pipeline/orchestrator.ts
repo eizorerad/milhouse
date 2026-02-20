@@ -26,7 +26,7 @@ import { verifyPhaseConfig } from "../runner/phases/verify.ts";
 import type { PhaseConfig, PhaseRunResult, ResolvedConfig } from "../runner/types.ts";
 import { loadRunMeta, loadRunsIndex } from "../state/runs.ts";
 import type { RunMeta } from "../state/types.ts";
-import { logError, logInfo, logWarn } from "../ui/logger.ts";
+import { formatDuration, logError, logInfo, logWarn } from "../ui/logger.ts";
 
 /** All phase configs indexed by name */
 const PHASE_CONFIGS: Record<string, PhaseConfig> = {
@@ -40,7 +40,15 @@ const PHASE_CONFIGS: Record<string, PhaseConfig> = {
 /** Default phase order */
 const PHASE_ORDER: string[] = ["scan", "validate", "plan", "consolidate", "exec", "verify"];
 
-const SEPARATOR = "=".repeat(47);
+const SEPARATOR = pc.dim("═".repeat(47));
+
+/** Track per-phase outcome for the final summary */
+interface PhaseOutcome {
+	phase: string;
+	success: boolean;
+	duration: number;
+	error?: string;
+}
 
 /** Pipeline run options */
 export interface PipelineOptions {
@@ -210,6 +218,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	const phases = resolvePhases(options);
 	logInfo(`Pipeline phases: ${phases.join(" \u2192 ")}`);
 
+	const outcomes: PhaseOutcome[] = [];
+
 	for (const phase of phases) {
 		// Budget gate
 		if (config.cost.budgetLimit > 0 && cost.totalCost >= config.cost.budgetLimit) {
@@ -219,11 +229,14 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 			return failResult(runId, cost, phasesCompleted, phase, "Budget exceeded");
 		}
 
+		const phaseStart = Date.now();
+
 		try {
 			if (phase === "exec") {
 				// Exec is specialised -- delegate to existing exec code (wired in T9).
 				logInfo('Phase "exec" -- delegating to exec module');
 				phasesCompleted.push(phase);
+				outcomes.push({ phase, success: true, duration: Date.now() - phaseStart });
 				continue;
 			}
 
@@ -233,7 +246,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 				continue;
 			}
 
-			logInfo(`Starting phase: ${phase}`);
 			const result: PhaseRunResult = await runPhase(phaseConfig, {
 				workDir,
 				config,
@@ -245,12 +257,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 			// After scan, capture the runId for subsequent phases
 			if (phase === "scan" && result.runId) runId = result.runId;
 			phasesCompleted.push(phase);
+			outcomes.push({ phase, success: result.success, duration: result.duration });
 
 			if (!result.success && config.failFast) {
 				logError(`Phase "${phase}" failed. Stopping (fail-fast enabled).`);
 				return failResult(runId, cost, phasesCompleted, phase, `Phase ${phase} failed`);
 			}
 		} catch (error) {
+			outcomes.push({
+				phase,
+				success: false,
+				duration: Date.now() - phaseStart,
+				error: error instanceof Error ? error.message : String(error),
+			});
 			if (error instanceof BudgetExceededError) {
 				logWarn(`Budget exceeded during "${phase}": ${error.message}`);
 				return failResult(runId, cost, phasesCompleted, phase, error.message);
@@ -269,8 +288,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 		autoGenerateReport(runId, cost, pipelineDuration, config, workDir);
 	}
 
-	displaySummary(cost, config, phasesCompleted, phases);
-	return { runId, success: true, cost, phasesCompleted };
+	const allSuccess = outcomes.every((o) => o.success);
+	displaySummary(cost, config, phasesCompleted, phases, outcomes, pipelineDuration, allSuccess);
+	return { runId, success: allSuccess, cost, phasesCompleted };
 }
 
 /** Display pipeline cost summary. */
@@ -279,26 +299,30 @@ function displaySummary(
 	config: ResolvedConfig,
 	completed: string[],
 	total: string[],
+	outcomes: PhaseOutcome[],
+	totalDuration: number,
+	allSuccess: boolean,
 ): void {
 	const log = console.log;
 	log("");
 	log(SEPARATOR);
-	log("Pipeline Summary:");
-	log(`  Phases completed: ${completed.length}/${total.length}`);
-	log(
-		`  Total tokens:     ${formatTokens(cost.inputTokens)} in / ${formatTokens(cost.outputTokens)} out`,
-	);
-	log(`  Total cost:       ${formatCost(cost.totalCost)}`);
+	const status = allSuccess ? pc.green("SUCCESS") : pc.red("FAILED");
+	log(`Pipeline Summary: ${status}`);
+	log(`  Phases:    ${pc.cyan(String(completed.length))}/${total.length}`);
+	log(`  Duration:  ${formatDuration(totalDuration)}`);
+	log(`  Tokens:    ${formatTokens(cost.inputTokens)} in / ${formatTokens(cost.outputTokens)} out`);
+	log(`  Cost:      ${formatCost(cost.totalCost)}`);
 	if (config.cost.budgetLimit > 0) {
 		const rem = config.cost.budgetLimit - cost.totalCost;
-		log(`  Budget remaining: ${formatCost(rem)} / ${formatCost(config.cost.budgetLimit)}`);
+		log(`  Budget:    ${formatCost(rem)} / ${formatCost(config.cost.budgetLimit)} remaining`);
 	}
 	log("");
-	log("  Phase breakdown:");
-	for (const [phase, pc] of Object.entries(cost.byPhase)) {
-		log(
-			`    ${phase.padEnd(12)} ${formatCost(pc.cost)}  (${formatTokens(pc.inputTokens)} in / ${formatTokens(pc.outputTokens)} out)`,
-		);
+	for (const outcome of outcomes) {
+		const icon = outcome.success ? pc.green("✔") : pc.red("✗");
+		const dur = pc.dim(formatDuration(outcome.duration));
+		const phaseCost = cost.byPhase[outcome.phase];
+		const costStr = phaseCost ? pc.dim(formatCost(phaseCost.cost)) : "";
+		log(`  ${icon} ${outcome.phase.padEnd(14)} ${dur.padEnd(12)} ${costStr}`);
 	}
 	log(SEPARATOR);
 	log("");

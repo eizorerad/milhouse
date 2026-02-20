@@ -6,6 +6,7 @@
  * and acceptance criteria.
  */
 
+import pc from "picocolors";
 import { buildPlanPrompt } from "../../agents/prompts/plan.ts";
 import { PLAN_SCHEMA } from "../../agents/schemas/plan.ts";
 import { loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
@@ -14,6 +15,7 @@ import { updateRunStatsWithLock } from "../../state/runs.ts";
 import { createTaskForRun, loadTasksForRun } from "../../state/tasks.ts";
 import type { DoDCriteria, Issue, RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import { displayPhaseSummaryHeader } from "../phase-runner.ts";
 import type { PhaseConfig } from "../types.ts";
 
 /** Parsed WBS task from AI response */
@@ -170,6 +172,41 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 			const allTasks = loadTasksForRun(ctx.runId, ctx.workDir);
 			await updateRunStatsWithLock(ctx.runId, { tasks_total: allTasks.length }, ctx.workDir);
 		}
+	},
+
+	formatSummary(results, ctx) {
+		let totalInput = 0;
+		let totalOutput = 0;
+		for (const r of results) {
+			totalInput += r.inputTokens;
+			totalOutput += r.outputTokens;
+		}
+		const startTime = (ctx.store._startTime as number) ?? 0;
+		displayPhaseSummaryHeader("plan", results, totalInput, totalOutput, ctx.config, startTime);
+
+		let totalTasks = 0;
+		const issueBreakdown: Array<{ issueId: string; taskCount: number }> = [];
+		for (const r of results) {
+			if (!r.success) continue;
+			const issue = r.item as Issue;
+			const taskCount = r.result.tasks.length;
+			totalTasks += taskCount;
+			issueBreakdown.push({ issueId: issue.id, taskCount });
+		}
+
+		if (issueBreakdown.length > 0) {
+			console.log("");
+			console.log(`  ${pc.bold("Work Breakdown:")}`);
+			for (const { issueId, taskCount } of issueBreakdown) {
+				console.log(`    ${issueId}: ${pc.cyan(String(taskCount))} tasks`);
+			}
+			console.log(`    ${pc.bold("Total:")} ${pc.cyan(String(totalTasks))} tasks`);
+		}
+
+		console.log("");
+		console.log(`  ${pc.dim("->")} Next: ${pc.cyan("milhouse --consolidate")}`);
+		console.log(pc.dim("═".repeat(47)));
+		console.log("");
 	},
 
 	nextPhase(results): RunPhase {

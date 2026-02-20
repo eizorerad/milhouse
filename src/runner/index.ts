@@ -21,5 +21,5 @@ export {
 	BudgetExceededError,
 } from "./cost.ts";
 export type { RunCost, PhaseCost } from "./cost.ts";
-export { runPhase } from "./phase-runner.ts";
+export { runPhase, displayPhaseSummaryHeader } from "./phase-runner.ts";
 export type { RunPhaseOptions } from "./phase-runner.ts";

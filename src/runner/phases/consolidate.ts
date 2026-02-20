@@ -5,6 +5,7 @@
  * with proper dependencies, deduplication, and parallel execution groups.
  */
 
+import pc from "picocolors";
 import { type ConsolidateInput, buildConsolidatePrompt } from "../../agents/prompts/consolidate.ts";
 import { CONSOLIDATE_SCHEMA } from "../../agents/schemas/consolidate.ts";
 import { saveGraphForRun } from "../../state/graph.ts";
@@ -14,6 +15,7 @@ import { updateRunStatsWithLock } from "../../state/runs.ts";
 import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
 import type { GraphNode, Issue, RunPhase, Task } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import { displayPhaseSummaryHeader } from "../phase-runner.ts";
 import type { PhaseConfig } from "../types.ts";
 
 /** Parsed consolidation response from AI */
@@ -139,6 +141,43 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 		writeExecutionPlanForRun(ctx.workDir, ctx.runId, markdown);
 
 		await updateRunStatsWithLock(ctx.runId, { tasks_total: pendingTasks.length }, ctx.workDir);
+	},
+
+	formatSummary(results, ctx) {
+		let totalInput = 0;
+		let totalOutput = 0;
+		for (const r of results) {
+			totalInput += r.inputTokens;
+			totalOutput += r.outputTokens;
+		}
+		const startTime = (ctx.store._startTime as number) ?? 0;
+		displayPhaseSummaryHeader(
+			"consolidate",
+			results,
+			totalInput,
+			totalOutput,
+			ctx.config,
+			startTime,
+		);
+
+		for (const r of results) {
+			if (!r.success) continue;
+			const c = r.result;
+			const dupsRemoved = c.duplicates.reduce((sum, d) => sum + (d.remove?.length ?? 0), 0);
+			const groups = c.parallel_groups.length;
+			const orderLen = c.execution_order.length;
+
+			console.log("");
+			console.log(`  ${pc.bold("Execution Plan:")}`);
+			console.log(`    Duplicates removed: ${pc.cyan(String(dupsRemoved))}`);
+			console.log(`    Parallel groups:    ${pc.cyan(String(groups))}`);
+			console.log(`    Execution order:    ${pc.cyan(String(orderLen))} tasks`);
+		}
+
+		console.log("");
+		console.log(`  ${pc.dim("->")} Next: ${pc.cyan("milhouse --exec")}`);
+		console.log(pc.dim("═".repeat(47)));
+		console.log("");
 	},
 
 	nextPhase(): RunPhase {

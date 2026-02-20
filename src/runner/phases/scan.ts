@@ -5,6 +5,7 @@
  * refactoring, improvements, tasks). Produces Work Brief v0 (UNVALIDATED).
  */
 
+import pc from "picocolors";
 import { buildScanPrompt } from "../../agents/prompts/scan.ts";
 import { SCAN_SCHEMA } from "../../agents/schemas/scan.ts";
 import { saveIssuesForRun } from "../../state/issues.ts";
@@ -12,6 +13,7 @@ import { writeProblemBriefForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import type { Issue, RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
+import { displayPhaseSummaryHeader } from "../phase-runner.ts";
 import type { PhaseConfig } from "../types.ts";
 
 /** Scan input — scope and workDir */
@@ -121,6 +123,42 @@ export const scanPhaseConfig: PhaseConfig<ScanInput, ScanResult> = {
 
 			await updateRunStatsWithLock(ctx.runId, { issues_found: issues.length }, ctx.workDir);
 		}
+	},
+
+	formatSummary(results, ctx) {
+		let totalInput = 0;
+		let totalOutput = 0;
+		for (const r of results) {
+			totalInput += r.inputTokens;
+			totalOutput += r.outputTokens;
+		}
+		const startTime = (ctx.store._startTime as number) ?? 0;
+		displayPhaseSummaryHeader("scan", results, totalInput, totalOutput, ctx.config, startTime);
+
+		const allIssues = results.flatMap((r) => (r.success ? r.result.issues : []));
+		if (allIssues.length > 0) {
+			console.log("");
+			console.log(`  ${pc.bold("Work Items")} ${pc.dim("(UNVALIDATED)")}:`);
+			for (const issue of allIssues) {
+				const title = issue.title ?? issue.symptom ?? "Untitled";
+				const typeTag = pc.dim(`[${issue.type ?? "bug"}]`);
+				const sev = issue.severity ?? "MEDIUM";
+				const sevColor =
+					sev === "CRITICAL"
+						? pc.red
+						: sev === "HIGH"
+							? pc.yellow
+							: sev === "MEDIUM"
+								? pc.blue
+								: pc.dim;
+				console.log(`    ${typeTag} ${sevColor(`[${sev}]`)} ${title}`);
+			}
+		}
+
+		console.log("");
+		console.log(`  ${pc.dim("->")} Next: ${pc.cyan("milhouse --validate")}`);
+		console.log(pc.dim("═".repeat(47)));
+		console.log("");
 	},
 
 	nextPhase(results): RunPhase {

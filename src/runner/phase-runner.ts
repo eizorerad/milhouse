@@ -6,14 +6,16 @@
  */
 
 import pLimit from "p-limit";
+import pc from "picocolors";
 import { type AgentRole, DEFAULT_AGENT_CONFIGS } from "../agents/types.ts";
 import { createEngine } from "../engines/index.ts";
 import type { AgentRole as EngineAgentRole, PipelinePhase } from "../schemas/engine.schema.ts";
 import { acquireRunLock } from "../state/run-lock.ts";
 import { createRun, loadRunsIndex, updateRunPhaseInMetaWithLock } from "../state/runs.ts";
 import type { RunPhase } from "../state/types.ts";
-import { logInfo, logWarn } from "../ui/logger.ts";
+import { formatDuration, logInfo, logWarn } from "../ui/logger.ts";
 import { DynamicAgentSpinner, ProgressSpinner } from "../ui/spinners.ts";
+import { phaseIcons, theme } from "../ui/theme.ts";
 import {
 	BudgetExceededError,
 	type RunCost,
@@ -42,6 +44,60 @@ const ROLE_TO_ENGINE: Partial<Record<AgentRole, EngineAgentRole>> = {
 	EX: "executor",
 	TV: "verifier",
 };
+
+const SEPARATOR = "═".repeat(47);
+
+/** Display phase header before execution */
+function displayPhaseHeader(phaseName: string, engineName: string, runId: string): void {
+	const phaseKey = phaseName as keyof typeof theme.phase;
+	const icon = phaseIcons[phaseKey as keyof typeof phaseIcons] ?? "▸";
+	const colored = theme.phase[phaseKey] ? theme.phase[phaseKey](phaseName) : phaseName;
+
+	console.log("");
+	console.log(pc.dim(SEPARATOR));
+	console.log(
+		`${icon}  ${pc.bold(colored)}  ${pc.dim("·")}  ${pc.dim(engineName)}  ${pc.dim("·")}  ${pc.dim(runId)}`,
+	);
+	console.log(pc.dim(SEPARATOR));
+}
+
+/**
+ * Display the common stats block used by both formatSummary implementations
+ * and displayDefaultSummary. Exported for use by phase configs.
+ */
+export function displayPhaseSummaryHeader(
+	phaseName: string,
+	results: PhaseItemResult[],
+	totalInput: number,
+	totalOutput: number,
+	config: ResolvedConfig,
+	startTime: number,
+): void {
+	const duration = Date.now() - startTime;
+	const succeeded = results.filter((r) => r.success).length;
+	const failed = results.filter((r) => !r.success).length;
+	const cost = calculateCost({ input: totalInput, output: totalOutput }, config.cost);
+
+	console.log("");
+	console.log(pc.dim(SEPARATOR));
+
+	const phaseKey = phaseName as keyof typeof theme.phase;
+	const icon = phaseIcons[phaseKey as keyof typeof phaseIcons] ?? "▸";
+	const colored = theme.phase[phaseKey] ? theme.phase[phaseKey](phaseName) : phaseName;
+	console.log(`${icon}  ${pc.bold(colored)} Summary`);
+
+	console.log(
+		`  Items:     ${pc.green(String(succeeded))} succeeded${failed > 0 ? `, ${pc.red(String(failed))} failed` : ""}`,
+	);
+	console.log(`  Duration:  ${formatDuration(duration)}`);
+	console.log(`  Tokens:    ${formatTokens(totalInput)} in / ${formatTokens(totalOutput)} out`);
+	console.log(`  Cost:      ${formatCost(cost)}`);
+
+	const failedItems = results.filter((r) => !r.success && r.error);
+	for (const item of failedItems) {
+		console.log(`  ${pc.red("Error:")}     ${item.error}`);
+	}
+}
 
 /** Options for running a phase */
 export interface RunPhaseOptions {
@@ -103,7 +159,7 @@ export async function runPhase<TItem, TResult>(
 			workDir,
 			engine,
 			config,
-			store: {},
+			store: { _startTime: startTime },
 		};
 
 		// 6. Update run phase
@@ -120,6 +176,9 @@ export async function runPhase<TItem, TResult>(
 			logWarn(`No items to process for phase "${phaseConfig.name}"`);
 			return makeResult(phaseConfig.name, runId, true, [], 0, 0, 0, startTime, { runId });
 		}
+
+		// 8b. Display phase header
+		displayPhaseHeader(phaseConfig.name, config.engine, runId);
 
 		// 9. Execute with pool
 		let allResults = await executePool(phaseConfig, items, ctx, model, config, runCost);
@@ -396,7 +455,7 @@ function getItemId(item: unknown, index: number): string {
 }
 
 /**
- * Display default summary
+ * Display default summary (used when phase doesn't provide formatSummary)
  */
 function displayDefaultSummary<TResult>(
 	phaseName: string,
@@ -406,29 +465,8 @@ function displayDefaultSummary<TResult>(
 	config: ResolvedConfig,
 	startTime: number,
 ): void {
-	const duration = Date.now() - startTime;
-	const minutes = Math.floor(duration / 60000);
-	const seconds = Math.floor((duration % 60000) / 1000);
-	const succeeded = results.filter((r) => r.success).length;
-	const failed = results.filter((r) => !r.success).length;
-
-	const cost = calculateCost({ input: totalInput, output: totalOutput }, config.cost);
-
-	console.log("");
-	console.log("══════════════════════════════════════════");
-	console.log(`${phaseName.charAt(0).toUpperCase() + phaseName.slice(1)} Summary:`);
-	console.log(`  Items:     ${succeeded} succeeded${failed > 0 ? `, ${failed} failed` : ""}`);
-	console.log(`  Duration:  ${minutes}m ${seconds}s`);
-	console.log(`  Tokens:    ${formatTokens(totalInput)} in / ${formatTokens(totalOutput)} out`);
-	console.log(`  Cost:      ${formatCost(cost)}`);
-
-	// Show errors for failed items
-	const failedItems = results.filter((r) => !r.success && r.error);
-	for (const item of failedItems) {
-		console.log(`  Error:     ${item.error}`);
-	}
-
-	console.log("══════════════════════════════════════════");
+	displayPhaseSummaryHeader(phaseName, results, totalInput, totalOutput, config, startTime);
+	console.log(pc.dim(SEPARATOR));
 	console.log("");
 }
 
