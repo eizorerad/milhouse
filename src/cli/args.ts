@@ -128,9 +128,9 @@ export function createProgram(): Command {
 		.option("--dry-run", "Show what would happen without executing")
 
 		// ── Retries ────────────────────────────────────────────
-		.option("--max-retries <n>", "Max retries per task (default: 3)", "3")
-		.option("--retry-delay <n>", "Retry delay in seconds (default: 5)", "5")
-		.option("--max-validation-retries <n>", "Max retries for unvalidated issues (default: 2)", "2")
+		.option("--max-retries <n>", "Max retries per task", "3")
+		.option("--retry-delay <n>", "Retry delay in seconds", "5")
+		.option("--max-validation-retries <n>", "Max retries for unvalidated issues", "2")
 		.option("--no-retry-unvalidated", "Don't retry unvalidated issues")
 		.option("--retry-on-any-failure", "Retry all failures, not just retryable ones")
 
@@ -158,6 +158,22 @@ export function createProgram(): Command {
 		.option("--retry-delay-validation <ms>", "Validation retry delay in ms", "2000")
 		.option("--unsafe-dod-checks", "Skip DoD command safety checks (SECURITY RISK)")
 		.option("-v, --verbose", "Verbose output");
+
+	program.addHelpText("after", `
+Examples:
+  $ milhouse --init                          # Create .milhouse/config.ts
+  $ milhouse --scan --scope "auth bugs"      # Scan repo for issues
+  $ milhouse --run                           # Run full pipeline
+  $ milhouse --resume                        # Resume from last checkpoint
+  $ milhouse --exec --workers 5              # Execute with 5 parallel agents
+  $ milhouse "Fix the login bug"             # Single task mode
+  $ milhouse runs list                       # List all runs
+
+Pipeline:  scan → validate → plan → consolidate → exec → verify
+
+Config:    Edit .milhouse/config.ts to configure phases, workers, rules,
+           gates, cost budgets, and more. CLI flags override config per run.
+`);
 
 	return program;
 }
