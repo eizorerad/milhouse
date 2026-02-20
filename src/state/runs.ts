@@ -27,18 +27,7 @@ import {
 	STATE_FILES,
 } from "./types.ts";
 
-// ============================================================================
-// INTERNAL UTILITIES (shared with manager.ts)
-// ============================================================================
-
-const MILHOUSE_DIR = ".milhouse";
-
-/**
- * Get the full path to the milhouse directory
- */
-function getMilhouseDir(workDir = process.cwd()): string {
-	return join(workDir, MILHOUSE_DIR);
-}
+import { MILHOUSE_DIR, getMilhouseDir } from "./paths.ts";
 
 // ============================================================================
 // RUNS DIRECTORY FUNCTIONS

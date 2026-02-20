@@ -11,18 +11,7 @@ import { join } from "node:path";
 import { createRun, getRunDir, getRunStateDir, loadRunsIndex } from "./runs.ts";
 import type { RunMeta } from "./types.ts";
 
-// ============================================================================
-// INTERNAL UTILITIES
-// ============================================================================
-
-const MILHOUSE_DIR = ".milhouse";
-
-/**
- * Get the full path to the milhouse directory
- */
-function getMilhouseDir(workDir = process.cwd()): string {
-	return join(workDir, MILHOUSE_DIR);
-}
+import { getMilhouseDir } from "./paths.ts";
 
 /**
  * Get path to plans directory (legacy)

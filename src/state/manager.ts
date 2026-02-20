@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadJsonFile, saveJsonFile } from "./json-io.ts";
+import { MILHOUSE_DIR, getMilhouseDir } from "./paths.ts";
 import {
 	type ExecutionRecord,
 	type GateResult,
@@ -41,16 +42,10 @@ import { loadExecutions as _loadExecutions } from "./executions.ts";
 // CORE CONSTANTS AND DIRECTORY MANAGEMENT
 // ============================================================================
 
-export const MILHOUSE_DIR = ".milhouse";
+// Re-export for backward compatibility (other modules import from manager.ts)
+export { MILHOUSE_DIR, getMilhouseDir };
 
 const SUBDIRS = ["state", "probes", "plans", "compat", "work/branches", "work/worktrees", "rules"];
-
-/**
- * Get the full path to the milhouse directory
- */
-export function getMilhouseDir(workDir = process.cwd()): string {
-	return join(workDir, MILHOUSE_DIR);
-}
 
 /**
  * Get path to a state file
