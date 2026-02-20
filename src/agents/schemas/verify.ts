@@ -5,6 +5,8 @@
  * Compliant with Anthropic Structured Outputs requirements:
  * - additionalProperties: false on all objects
  * - All properties listed in required
+ *
+ * Only includes fields consumed by parseResponse in verify phase config.
  */
 export const VERIFY_SCHEMA = {
 	type: "object",

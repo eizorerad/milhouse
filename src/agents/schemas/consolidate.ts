@@ -5,6 +5,8 @@
  * Compliant with Anthropic Structured Outputs requirements:
  * - additionalProperties: false on all objects
  * - All properties listed in required
+ *
+ * Only includes fields consumed by parseResponse in consolidate phase config.
  */
 export const CONSOLIDATE_SCHEMA = {
 	type: "object",

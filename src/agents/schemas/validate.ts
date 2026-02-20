@@ -5,6 +5,8 @@
  * Compliant with Anthropic Structured Outputs requirements:
  * - additionalProperties: false on all objects
  * - All properties listed in required
+ *
+ * Only includes fields consumed by parseResponse in validate phase config.
  */
 export const VALIDATE_SCHEMA = {
 	type: "object",
@@ -13,60 +15,7 @@ export const VALIDATE_SCHEMA = {
 		status: { type: "string", enum: ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] },
 		confidence: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
 		summary: { type: "string" },
-		investigation: {
-			type: "object",
-			properties: {
-				files_examined: { type: "array", items: { type: "string" } },
-				commands_run: { type: "array", items: { type: "string" } },
-				patterns_found: { type: "array", items: { type: "string" } },
-				related_code: {
-					type: "array",
-					items: {
-						type: "object",
-						properties: {
-							file: { type: "string" },
-							line: { type: "number" },
-							snippet: { type: "string" },
-						},
-						required: ["file", "line", "snippet"],
-						additionalProperties: false,
-					},
-				},
-			},
-			required: ["files_examined", "commands_run", "patterns_found", "related_code"],
-			additionalProperties: false,
-		},
-		analysis: {
-			type: "object",
-			properties: {
-				confirmed_finding: { type: "string" },
-				alternative_considerations: { type: "array", items: { type: "string" } },
-				validity_assessment: { type: "string" },
-			},
-			required: ["confirmed_finding", "alternative_considerations", "validity_assessment"],
-			additionalProperties: false,
-		},
-		impact_assessment: {
-			type: "object",
-			properties: {
-				severity_confirmed: { type: "boolean" },
-				actual_severity: { type: "string" },
-				affected_components: { type: "array", items: { type: "string" } },
-				user_impact: { type: "string" },
-			},
-			required: ["severity_confirmed", "actual_severity", "affected_components", "user_impact"],
-			additionalProperties: false,
-		},
-		recommendations: {
-			type: "object",
-			properties: {
-				implementation_approach: { type: "string" },
-				estimated_complexity: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
-				test_strategy: { type: "string" },
-			},
-			required: ["implementation_approach", "estimated_complexity", "test_strategy"],
-			additionalProperties: false,
-		},
+		corrected_description: { type: "string" },
 		evidence: {
 			type: "array",
 			items: {
@@ -79,23 +28,11 @@ export const VALIDATE_SCHEMA = {
 					output: { type: "string" },
 					timestamp: { type: "string" },
 				},
-				required: ["type"],
+				required: ["type", "file", "line_start", "line_end", "output", "timestamp"],
 				additionalProperties: false,
 			},
 		},
-		corrected_description: { type: "string" },
 	},
-	required: [
-		"issue_id",
-		"status",
-		"confidence",
-		"summary",
-		"investigation",
-		"analysis",
-		"impact_assessment",
-		"recommendations",
-		"evidence",
-		"corrected_description",
-	],
+	required: ["issue_id", "status", "confidence", "summary", "corrected_description", "evidence"],
 	additionalProperties: false,
 } as const;
