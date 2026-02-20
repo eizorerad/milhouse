@@ -287,8 +287,8 @@ describe("Issue Executor Error Scenarios", () => {
 		testDir = join(process.cwd(), `.test-issue-executor-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 
-		// Initialize git repo
-		execSync("git init", { cwd: testDir, stdio: "pipe" });
+		// Initialize git repo with "main" branch (tests use baseBranch: "main")
+		execSync("git init -b main", { cwd: testDir, stdio: "pipe" });
 		execSync('git config user.email "test@test.com"', { cwd: testDir, stdio: "pipe" });
 		execSync('git config user.name "Test"', { cwd: testDir, stdio: "pipe" });
 
