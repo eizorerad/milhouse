@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git stash push:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)",
+      "Bash(npm run build:*)",
+      "WebFetch(domain:opencode.ai)"
+    ]
+  }
+}

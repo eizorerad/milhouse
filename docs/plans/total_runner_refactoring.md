@@ -3,7 +3,10 @@
 ## Overview
 
 Complete rewrite of the pipeline execution layer into a single configurable runner.
-Lives in `milhouse-020/` as a parallel project. TUI/CLI interface preserved from current version.
+Lives in a **separate repository** at `C:\Users\eizo\Documents\Projects\milhouse-020` (sibling to `milhouse/`, separate git). TUI/CLI interface preserved from current version.
+
+> **Source**: Original milhouse at `C:\Users\eizo\Documents\Projects\milhouse`
+> **Target**: New project at `C:\Users\eizo\Documents\Projects\milhouse-020`
 
 ### Design principles
 
@@ -57,7 +60,7 @@ PhaseRunner implements only pool via `pLimit(maxParallel)`. No batch mode, no st
 ## Project Structure
 
 ```
-milhouse-020/
+C:\Users\eizo\Documents\Projects\milhouse-020\
 ├── src/
 │   ├── index.ts                      # Entry point (from current)
 │   │
@@ -592,9 +595,10 @@ async function runPipeline(options: RuntimeOptions): Promise<PipelineResult> {
 
 ## Migration Steps
 
-### Step 0: Setup milhouse-020/ project
-- Copy package.json, tsconfig.json, biome.json
-- Copy src/engines/, src/gates/, src/probes/, src/vcs/, src/ui/
+### Step 0: Setup milhouse-020 project (separate repo)
+- Create `C:\Users\eizo\Documents\Projects\milhouse-020` with its own `git init`
+- Copy package.json, tsconfig.json, biome.json from `../milhouse/`
+- Copy src/engines/, src/gates/, src/probes/, src/vcs/, src/ui/ from `../milhouse/`
 - Copy src/state/ (will be cleaned in step 1)
 - `pnpm install` + verify `npx tsc --noEmit`
 
