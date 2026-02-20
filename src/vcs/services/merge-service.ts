@@ -9,6 +9,7 @@
 
 import { join } from "node:path";
 import { bus } from "../../events/bus.ts";
+import { logDebug } from "../../ui/logger.ts";
 import { parseStatusPorcelain, runGitCommand } from "../backends/git-cli.ts";
 import { makeIntegrationBranchName } from "../policies/naming.ts";
 import type {
@@ -146,8 +147,11 @@ export class MergeService implements IMergeService {
 			);
 		}
 
-		// Delete the branch if it exists
-		await runGitCommand(["branch", "-D", branchName], workDir);
+		// Delete the branch if it exists (failure is expected if branch doesn't exist)
+		const deleteResult = await runGitCommand(["branch", "-D", branchName], workDir);
+		if (deleteResult.ok && deleteResult.value.exitCode !== 0) {
+			logDebug(`Branch ${branchName} did not exist (expected for fresh creation)`);
+		}
 
 		// Create new branch from base
 		const createResult = await runGitCommand(["checkout", "-b", branchName], workDir);
@@ -209,11 +213,23 @@ export class MergeService implements IMergeService {
 	}
 
 	/**
-	 * Abort an in-progress merge
+	 * Abort an in-progress merge.
+	 * Returns ok if abort succeeded or no merge was in progress.
+	 * Returns err only if the abort command itself failed unexpectedly.
 	 */
 	async abortMerge(workDir: string): Promise<VcsResult<void>> {
-		const _result = await runGitCommand(["merge", "--abort"], workDir);
-		// Ignore errors - there may be no merge in progress
+		const result = await runGitCommand(["merge", "--abort"], workDir);
+		if (!result.ok) {
+			return result;
+		}
+		// Exit code 128 = no merge in progress (not an error)
+		if (result.value.exitCode !== 0 && !result.value.stderr.includes("no merge")) {
+			return err(
+				createVcsError("COMMAND_FAILED", "Failed to abort merge", {
+					context: { stderr: result.value.stderr },
+				}),
+			);
+		}
 		return ok(undefined);
 	}
 
@@ -434,11 +450,23 @@ export class MergeService implements IMergeService {
 	}
 
 	/**
-	 * Abort an in-progress rebase
+	 * Abort an in-progress rebase.
+	 * Returns ok if abort succeeded or no rebase was in progress.
+	 * Returns err only if the abort command itself failed unexpectedly.
 	 */
 	async abortRebase(workDir: string): Promise<VcsResult<void>> {
-		const _result = await runGitCommand(["rebase", "--abort"], workDir);
-		// Ignore errors - there may be no rebase in progress
+		const result = await runGitCommand(["rebase", "--abort"], workDir);
+		if (!result.ok) {
+			return result;
+		}
+		// Exit code 128 = no rebase in progress (not an error)
+		if (result.value.exitCode !== 0 && !result.value.stderr.includes("no rebase")) {
+			return err(
+				createVcsError("COMMAND_FAILED", "Failed to abort rebase", {
+					context: { stderr: result.value.stderr },
+				}),
+			);
+		}
 		return ok(undefined);
 	}
 
@@ -632,8 +660,11 @@ export class MergeService implements IMergeService {
 		const mergeId = `merge-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 		const mergeWorktreePath = join(workDir, ".milhouse", "runs", runId, "merge-worktrees", mergeId);
 
-		// Ensure directory exists
-		await runGitCommand(["worktree", "prune"], workDir);
+		// Prune stale worktrees before creating merge worktree
+		const pruneResult = await runGitCommand(["worktree", "prune"], workDir);
+		if (!pruneResult.ok) {
+			logDebug(`Worktree prune failed before safe merge: ${pruneResult.error.message}`);
+		}
 
 		// Create worktree from target branch
 		const createResult = await runGitCommand(

@@ -87,7 +87,10 @@ export class WorktreeService implements IWorktreeService {
 		if (existsSync(worktreePath)) {
 			rmSync(worktreePath, { recursive: true, force: true });
 			// Prune again after removing directory
-			await runGitCommand(["worktree", "prune"], workDir);
+			const secondPruneResult = await runGitCommand(["worktree", "prune"], workDir);
+			if (!secondPruneResult.ok) {
+				logDebug(`Second worktree prune failed: ${secondPruneResult.error.message}`);
+			}
 		}
 
 		// Use atomic -B flag to create/reset branch in one operation
@@ -159,16 +162,23 @@ export class WorktreeService implements IWorktreeService {
 			originalDir,
 		);
 
-		if (!removeResult.ok) {
-			logDebug(`Failed to remove worktree ${worktreePath}: ${removeResult.error.message}`);
-		} else if (removeResult.value.exitCode !== 0) {
-			logDebug(`Failed to remove worktree ${worktreePath}: ${removeResult.value.stderr}`);
+		const removeFailed =
+			!removeResult.ok || removeResult.value.exitCode !== 0;
+
+		if (removeFailed) {
+			const reason = !removeResult.ok
+				? removeResult.error.message
+				: removeResult.value.stderr;
+			logDebug(`Failed to remove worktree ${worktreePath}: ${reason}`);
 		}
 
 		// Emit event for worktree cleanup
 		bus.emit("git:worktree:cleanup", { path: worktreePath });
 
 		// Don't delete branch - it may have commits we want to keep/PR
+		if (removeFailed) {
+			return ok({ leftInPlace: true, reason: "Worktree removal failed" });
+		}
 		return ok({ leftInPlace: false });
 	}
 
@@ -227,7 +237,10 @@ export class WorktreeService implements IWorktreeService {
 		}
 
 		// Prune any stale worktrees
-		await runGitCommand(["worktree", "prune"], workDir);
+		const pruneResult = await runGitCommand(["worktree", "prune"], workDir);
+		if (!pruneResult.ok) {
+			logDebug(`Worktree prune failed during cleanup: ${pruneResult.error.message}`);
+		}
 
 		// Clean up legacy empty directories
 		await this.cleanupLegacyWorktreeDirectories(workDir);

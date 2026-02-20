@@ -119,13 +119,14 @@ export class ParallelWorktreeStrategy implements IExecutionStrategy {
 			// Notify group complete
 			await hooks.onGroupComplete?.(groupNum, groupResults);
 
-			// Merge completed branches after each group (BEFORE worktree cleanup)
+			// Cleanup worktrees BEFORE merge phase to release branch locks
+			// (deleteLocalBranch inside mergeBranches fails if branch is checked out in a worktree)
+			await this.cleanupWorktrees(worktreesToCleanup, context);
+
+			// Merge completed branches after worktree cleanup
 			if (!skipMerge && successfulBranches.length > 0) {
 				await this.mergeBranches(successfulBranches, baseBranch, context);
 			}
-
-			// Cleanup worktrees AFTER merge phase completes to prevent BRANCH_LOCKED errors
-			await this.cleanupWorktrees(worktreesToCleanup, context);
 
 			// Check for fail fast
 			const hasFailures = groupResults.some((r) => !r.success);
@@ -270,8 +271,8 @@ export class ParallelWorktreeStrategy implements IExecutionStrategy {
 				error: err,
 			};
 		}
-		// Note: worktree cleanup is handled by cleanupWorktrees() after merge phase
-		// to prevent BRANCH_LOCKED errors when merging branches
+		// Note: worktree cleanup is handled by cleanupWorktrees() before merge phase
+		// to release branch locks so deleteLocalBranch can succeed during merge
 	}
 
 	/**
@@ -334,8 +335,9 @@ export class ParallelWorktreeStrategy implements IExecutionStrategy {
 	}
 
 	/**
-	 * Cleanup worktrees after merge phase completes.
-	 * This is called AFTER mergeBranches to prevent BRANCH_LOCKED errors.
+	 * Cleanup worktrees before merge phase.
+	 * This is called BEFORE mergeBranches to release branch locks so
+	 * deleteLocalBranch can succeed during merge.
 	 */
 	private async cleanupWorktrees(
 		worktreePaths: string[],

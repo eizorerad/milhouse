@@ -8,6 +8,7 @@
  */
 
 import { bus } from "../../events/bus.ts";
+import { logWarn } from "../../ui/logger.ts";
 import {
 	parseBranchListPorcelain,
 	parseStatusPorcelain,
@@ -139,7 +140,10 @@ export class BranchService implements IBranchService {
 
 			// Restore stash on success before returning
 			if (stashed) {
-				await runGitCommand(["stash", "pop"], workDir);
+				const popResult = await runGitCommand(["stash", "pop"], workDir);
+				if (!popResult.ok || popResult.value.exitCode !== 0) {
+					logWarn("Failed to restore stashed changes after branch creation. Run 'git stash pop' manually.");
+				}
 			}
 
 			return ok({
@@ -150,7 +154,10 @@ export class BranchService implements IBranchService {
 		} catch (error) {
 			// Restore stash on failure
 			if (stashed) {
-				await runGitCommand(["stash", "pop"], workDir);
+				const popResult = await runGitCommand(["stash", "pop"], workDir);
+				if (!popResult.ok || popResult.value.exitCode !== 0) {
+					logWarn("Failed to restore stashed changes after error. Run 'git stash pop' manually.");
+				}
 			}
 
 			// Check if error is a VcsError by verifying it has the required shape

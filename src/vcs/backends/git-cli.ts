@@ -90,13 +90,14 @@ export async function runGitCommand(
 		let stdout = "";
 		let stderr = "";
 		let timedOut = false;
+		let forceKillId: ReturnType<typeof setTimeout> | undefined;
 
 		// Set up timeout
 		const timeoutId = setTimeout(() => {
 			timedOut = true;
 			child.kill("SIGTERM");
 			// Force kill after 5 seconds if SIGTERM doesn't work
-			setTimeout(() => {
+			forceKillId = setTimeout(() => {
 				if (!child.killed) {
 					child.kill("SIGKILL");
 				}
@@ -113,6 +114,7 @@ export async function runGitCommand(
 
 		child.on("error", (error: Error) => {
 			clearTimeout(timeoutId);
+			if (forceKillId) clearTimeout(forceKillId);
 			const duration = Date.now() - startTime;
 
 			resolve(
@@ -129,6 +131,7 @@ export async function runGitCommand(
 
 		child.on("close", (exitCode: number | null) => {
 			clearTimeout(timeoutId);
+			if (forceKillId) clearTimeout(forceKillId);
 			const duration = Date.now() - startTime;
 
 			if (timedOut) {
@@ -203,10 +206,28 @@ export function parseStatusPorcelain(output: string): StatusEntry[] {
 /**
  * Strip git's C-style quoting from paths.
  * Git quotes paths with special characters: "path with spaces/file.ts"
+ * Supports all C-style escape sequences git uses: \", \\, \n, \t, \r, \a, \b, \f, \v, and octal \NNN.
  */
 function unquoteGitPath(p: string): string {
 	if (p.length >= 2 && p[0] === '"' && p[p.length - 1] === '"') {
-		return p.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+		return p.slice(1, -1).replace(/\\(["\\/abfnrtv])|\\([0-7]{1,3})/g, (_match, esc, oct) => {
+			if (oct) {
+				return String.fromCharCode(Number.parseInt(oct, 8));
+			}
+			const escapeMap: Record<string, string> = {
+				'"': '"',
+				"\\": "\\",
+				"/": "/",
+				a: "\x07",
+				b: "\b",
+				f: "\f",
+				n: "\n",
+				r: "\r",
+				t: "\t",
+				v: "\v",
+			};
+			return escapeMap[esc] ?? esc;
+		});
 	}
 	return p;
 }
@@ -422,10 +443,13 @@ export function parseDiffNumstat(output: string): DiffStats[] {
 			}
 		}
 
+		const linesAdded = isBinary ? 0 : Number.parseInt(addedStr, 10);
+		const linesRemoved = isBinary ? 0 : Number.parseInt(removedStr, 10);
+
 		stats.push({
 			file,
-			linesAdded: isBinary ? 0 : Number.parseInt(addedStr, 10),
-			linesRemoved: isBinary ? 0 : Number.parseInt(removedStr, 10),
+			linesAdded: Number.isNaN(linesAdded) ? 0 : linesAdded,
+			linesRemoved: Number.isNaN(linesRemoved) ? 0 : linesRemoved,
 			isNew: false, // Will be determined by status if needed
 			isDeleted: false, // Will be determined by status if needed
 			isRenamed,

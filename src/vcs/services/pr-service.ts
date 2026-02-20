@@ -47,8 +47,8 @@ async function execCommand(
 			stderr += data.toString();
 		});
 
-		child.on("error", () => {
-			resolve({ stdout, stderr, exitCode: 1 });
+		child.on("error", (error: Error) => {
+			resolve({ stdout, stderr: stderr || error.message, exitCode: 1 });
 		});
 
 		child.on("close", (exitCode: number | null) => {
@@ -185,7 +185,14 @@ export class PrService implements IPrService {
 
 		// Extract PR number from URL
 		const prNumberMatch = url.match(/\/pull\/(\d+)/);
-		const number = prNumberMatch ? Number.parseInt(prNumberMatch[1], 10) : 0;
+		if (!prNumberMatch) {
+			return err(
+				createVcsError("COMMAND_FAILED", "Could not parse PR number from gh output", {
+					context: { stdout: url },
+				}),
+			);
+		}
+		const number = Number.parseInt(prNumberMatch[1], 10);
 
 		return ok({ url, number });
 	}
@@ -229,9 +236,14 @@ export class PrService implements IPrService {
 
 		try {
 			const data = JSON.parse(stdout);
+			const rawState = (data.state as string)?.toLowerCase();
+			const state: "open" | "closed" | "merged" =
+				rawState === "open" || rawState === "closed" || rawState === "merged"
+					? rawState
+					: "open";
 			return ok({
 				exists: true,
-				state: data.state?.toLowerCase() as "open" | "closed" | "merged",
+				state,
 				url: data.url,
 				number: data.number,
 				title: data.title,
@@ -301,15 +313,22 @@ export class PrService implements IPrService {
 		try {
 			const data = JSON.parse(stdout);
 			return ok(
-				data.map((pr: Record<string, unknown>) => ({
-					number: pr.number as number,
-					title: pr.title as string,
-					url: pr.url as string,
-					headBranch: pr.headRefName as string,
-					baseBranch: pr.baseRefName as string,
-					state: (pr.state as string)?.toLowerCase() as "open" | "closed" | "merged",
-					isDraft: pr.isDraft as boolean,
-				})),
+				data.map((pr: Record<string, unknown>) => {
+					const rawState = (pr.state as string)?.toLowerCase();
+					const state: "open" | "closed" | "merged" =
+						rawState === "open" || rawState === "closed" || rawState === "merged"
+							? rawState
+							: "open";
+					return {
+						number: pr.number as number,
+						title: pr.title as string,
+						url: pr.url as string,
+						headBranch: pr.headRefName as string,
+						baseBranch: pr.baseRefName as string,
+						state,
+						isDraft: pr.isDraft as boolean,
+					};
+				}),
 			);
 		} catch {
 			return err(
