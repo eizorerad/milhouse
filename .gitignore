@@ -7,3 +7,6 @@ docs/
 # Milhouse — track config, ignore runtime data
 .milhouse/*
 !.milhouse/config.ts
+
+# Examples
+examples/

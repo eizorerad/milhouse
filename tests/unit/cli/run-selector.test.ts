@@ -37,18 +37,18 @@ describe("run-selector", () => {
 	});
 
 	describe("resolveRunId", () => {
-		test("should return exact match when full ID provided", () => {
+		test("should return exact match when full ID provided", async () => {
 			// Create actual runs for testing
-			const run1 = runs.createRun({ scope: "test scope 1", workDir: testDir });
-			const _run2 = runs.createRun({ scope: "test scope 2", workDir: testDir });
+			const run1 = await runs.createRun({ scope: "test scope 1", workDir: testDir });
+			const _run2 = await runs.createRun({ scope: "test scope 2", workDir: testDir });
 
 			const result = resolveRunId(run1.id, testDir);
 			expect(result).toBe(run1.id);
 		});
 
-		test("should resolve partial ID (suffix match)", () => {
+		test("should resolve partial ID (suffix match)", async () => {
 			// Create a run and extract its suffix
-			const run = runs.createRun({ scope: "after test", workDir: testDir });
+			const run = await runs.createRun({ scope: "after test", workDir: testDir });
 			// Run ID format: run-YYYYMMDD-name-xxxx
 			// Extract the last part (random suffix)
 			const parts = run.id.split("-");
@@ -58,9 +58,9 @@ describe("run-selector", () => {
 			expect(result).toBe(run.id);
 		});
 
-		test("should resolve partial ID with name and suffix", () => {
+		test("should resolve partial ID with name and suffix", async () => {
 			// Create a run with a specific name hint
-			const run = runs.createRun({ scope: "after test", name: "after", workDir: testDir });
+			const run = await runs.createRun({ scope: "after test", name: "after", workDir: testDir });
 			// Run ID format: run-YYYYMMDD-after-xxxx
 			const parts = run.id.split("-");
 			const nameSuffix = `${parts[2]}-${parts[3]}`; // e.g., "after-ujb8"
@@ -69,30 +69,30 @@ describe("run-selector", () => {
 			expect(result).toBe(run.id);
 		});
 
-		test("should throw error when no runs exist", () => {
+		test("should throw error when no runs exist", async () => {
 			expect(() => resolveRunId("nonexistent", testDir)).toThrow(/No runs found/);
 		});
 
-		test("should throw error when no match found", () => {
-			runs.createRun({ scope: "test scope", workDir: testDir });
+		test("should throw error when no match found", async () => {
+			await runs.createRun({ scope: "test scope", workDir: testDir });
 
 			expect(() => resolveRunId("nonexistent-xyz123", testDir)).toThrow(/Run not found/);
 		});
 
-		test("should throw error when multiple matches found", () => {
+		test("should throw error when multiple matches found", async () => {
 			// Create two runs that could match the same partial ID
 			// This is tricky because run IDs include timestamps and random parts
 			// We'll create runs and then try to match on a common substring
-			const _run1 = runs.createRun({ scope: "test", name: "test", workDir: testDir });
-			const _run2 = runs.createRun({ scope: "test", name: "test", workDir: testDir });
+			const _run1 = await runs.createRun({ scope: "test", name: "test", workDir: testDir });
+			const _run2 = await runs.createRun({ scope: "test", name: "test", workDir: testDir });
 
 			// Both runs should contain "test" in their ID
 			// Try to match on "test" which should match both
 			expect(() => resolveRunId("test", testDir)).toThrow(/multiple/i);
 		});
 
-		test("should list available runs in error message when no match", () => {
-			const run = runs.createRun({ scope: "test scope", workDir: testDir });
+		test("should list available runs in error message when no match", async () => {
+			const run = await runs.createRun({ scope: "test scope", workDir: testDir });
 
 			try {
 				resolveRunId("nonexistent-xyz123", testDir);
@@ -106,7 +106,7 @@ describe("run-selector", () => {
 
 	describe("selectOrRequireRun", () => {
 		test("should use explicit run ID when provided", async () => {
-			const run = runs.createRun({ scope: "test scope", workDir: testDir });
+			const run = await runs.createRun({ scope: "test scope", workDir: testDir });
 
 			const result = await selectOrRequireRun(run.id, testDir);
 
@@ -116,7 +116,7 @@ describe("run-selector", () => {
 		});
 
 		test("should resolve partial run ID when provided", async () => {
-			const run = runs.createRun({ scope: "test scope", name: "myrun", workDir: testDir });
+			const run = await runs.createRun({ scope: "test scope", name: "myrun", workDir: testDir });
 			const parts = run.id.split("-");
 			const suffix = parts[parts.length - 1];
 
@@ -126,7 +126,7 @@ describe("run-selector", () => {
 		});
 
 		test("should auto-select when only one eligible run", async () => {
-			const run = runs.createRun({ scope: "single run", workDir: testDir });
+			const run = await runs.createRun({ scope: "single run", workDir: testDir });
 
 			const result = await selectOrRequireRun(undefined, testDir);
 
@@ -136,10 +136,10 @@ describe("run-selector", () => {
 
 		test("should filter by phase when requirePhase is specified", async () => {
 			// Create runs in different phases
-			const _scanRun = runs.createRun({ scope: "scan run", workDir: testDir });
+			const _scanRun = await runs.createRun({ scope: "scan run", workDir: testDir });
 			// scanRun is in 'scan' phase by default
 
-			const validateRun = runs.createRun({ scope: "validate run", workDir: testDir });
+			const validateRun = await runs.createRun({ scope: "validate run", workDir: testDir });
 			runs.updateRunPhaseInMeta(validateRun.id, "validate", testDir);
 
 			// Request only validate phase runs
@@ -152,7 +152,7 @@ describe("run-selector", () => {
 		});
 
 		test("should throw when explicit run ID has wrong phase", async () => {
-			const run = runs.createRun({ scope: "scan run", workDir: testDir });
+			const run = await runs.createRun({ scope: "scan run", workDir: testDir });
 			// run is in 'scan' phase by default
 
 			await expect(
@@ -168,7 +168,7 @@ describe("run-selector", () => {
 
 		test("should throw when no eligible runs match phase filter", async () => {
 			// Create a run in scan phase
-			runs.createRun({ scope: "scan run", workDir: testDir });
+			await runs.createRun({ scope: "scan run", workDir: testDir });
 
 			await expect(
 				selectOrRequireRun(undefined, testDir, {
@@ -179,8 +179,8 @@ describe("run-selector", () => {
 
 		test("should prompt when multiple eligible runs exist", async () => {
 			// Create multiple runs
-			runs.createRun({ scope: "run 1", workDir: testDir });
-			runs.createRun({ scope: "run 2", workDir: testDir });
+			await runs.createRun({ scope: "run 1", workDir: testDir });
+			await runs.createRun({ scope: "run 2", workDir: testDir });
 
 			// When multiple runs exist and no explicit ID, it should prompt
 			// Since we can't mock inquirer easily in bun:test, we expect it to
@@ -196,7 +196,7 @@ describe("run-selector", () => {
 	});
 
 	describe("formatRunChoice", () => {
-		test("should format run with all fields", () => {
+		test("should format run with all fields", async () => {
 			const runMeta: RunMeta = {
 				id: "run-20260128-test-ujb8",
 				phase: "validate",
@@ -218,7 +218,7 @@ describe("run-selector", () => {
 			expect(result).toContain("test scope");
 		});
 
-		test("should show 'no issues' when issues_found is 0", () => {
+		test("should show 'no issues' when issues_found is 0", async () => {
 			const runMeta: RunMeta = {
 				id: "run-20260128-test-ujb8",
 				phase: "scan",
@@ -236,7 +236,7 @@ describe("run-selector", () => {
 			expect(result).toContain("no issues");
 		});
 
-		test("should handle missing scope", () => {
+		test("should handle missing scope", async () => {
 			const runMeta: RunMeta = {
 				id: "run-20260128-test-ujb8",
 				phase: "scan",
@@ -259,55 +259,55 @@ describe("run-selector", () => {
 	});
 
 	describe("formatRelativeTime", () => {
-		test("should return 'just now' for recent times", () => {
+		test("should return 'just now' for recent times", async () => {
 			const now = new Date().toISOString();
 			const result = formatRelativeTime(now);
 			expect(result).toBe("just now");
 		});
 
-		test("should return minutes ago", () => {
+		test("should return minutes ago", async () => {
 			const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(fiveMinutesAgo);
 			expect(result).toBe("5 minutes ago");
 		});
 
-		test("should return '1 minute ago' for singular", () => {
+		test("should return '1 minute ago' for singular", async () => {
 			const oneMinuteAgo = new Date(Date.now() - 1 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(oneMinuteAgo);
 			expect(result).toBe("1 minute ago");
 		});
 
-		test("should return hours ago", () => {
+		test("should return hours ago", async () => {
 			const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(twoHoursAgo);
 			expect(result).toBe("2 hours ago");
 		});
 
-		test("should return '1 hour ago' for singular", () => {
+		test("should return '1 hour ago' for singular", async () => {
 			const oneHourAgo = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(oneHourAgo);
 			expect(result).toBe("1 hour ago");
 		});
 
-		test("should return days ago", () => {
+		test("should return days ago", async () => {
 			const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(threeDaysAgo);
 			expect(result).toBe("3 days ago");
 		});
 
-		test("should return '1 day ago' for singular", () => {
+		test("should return '1 day ago' for singular", async () => {
 			const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(oneDayAgo);
 			expect(result).toBe("1 day ago");
 		});
 
-		test("should return weeks ago", () => {
+		test("should return weeks ago", async () => {
 			const twoWeeksAgo = new Date(Date.now() - 2 * 7 * 24 * 60 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(twoWeeksAgo);
 			expect(result).toBe("2 weeks ago");
 		});
 
-		test("should return '1 week ago' for singular", () => {
+		test("should return '1 week ago' for singular", async () => {
 			const oneWeekAgo = new Date(Date.now() - 1 * 7 * 24 * 60 * 60 * 1000).toISOString();
 			const result = formatRelativeTime(oneWeekAgo);
 			expect(result).toBe("1 week ago");

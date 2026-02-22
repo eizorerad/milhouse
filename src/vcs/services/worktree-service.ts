@@ -162,13 +162,10 @@ export class WorktreeService implements IWorktreeService {
 			originalDir,
 		);
 
-		const removeFailed =
-			!removeResult.ok || removeResult.value.exitCode !== 0;
+		const removeFailed = !removeResult.ok || removeResult.value.exitCode !== 0;
 
 		if (removeFailed) {
-			const reason = !removeResult.ok
-				? removeResult.error.message
-				: removeResult.value.stderr;
+			const reason = !removeResult.ok ? removeResult.error.message : removeResult.value.stderr;
 			logDebug(`Failed to remove worktree ${worktreePath}: ${reason}`);
 		}
 

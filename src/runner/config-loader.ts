@@ -78,7 +78,8 @@ function applyCLIOverrides(config: ResolvedConfig, cli: RuntimeOptions): Resolve
 	if (cli.isolate !== undefined) result.isolate = cli.isolate;
 	else if (cli.branchPerTask) result.isolate = true;
 	if (cli.skipMerge !== undefined) result.skipMerge = cli.skipMerge;
-	if (cli.maxValidationRetries !== undefined) result.maxValidationRetries = cli.maxValidationRetries;
+	if (cli.maxValidationRetries !== undefined)
+		result.maxValidationRetries = cli.maxValidationRetries;
 	if (cli.retryUnvalidated !== undefined) result.retryUnvalidated = cli.retryUnvalidated;
 	if (cli.tmux !== undefined) result.tmux = cli.tmux;
 	if (cli.tmuxAutoAttach !== undefined) result.tmuxAutoAttach = cli.tmuxAutoAttach;

@@ -20,12 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { saveJsonFile } from "./json-io.ts";
 import { MILHOUSE_DIR, getMilhouseDir } from "./paths.ts";
-import {
-	type ExecutionRecord,
-	type GateResult,
-	STATE_FILES,
-	type Task,
-} from "./types.ts";
+import { type ExecutionRecord, type GateResult, STATE_FILES, type Task } from "./types.ts";
 
 // Import task functions for internal use
 import { updateTask as _updateTask } from "./tasks.ts";

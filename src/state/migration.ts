@@ -33,13 +33,13 @@ function getPlansDir(workDir = process.cwd()): string {
  * @param options - Migration options
  * @returns The created run metadata, or null if no legacy state exists
  */
-export function migrateLegacyToRun(
+export async function migrateLegacyToRun(
 	options: {
 		scope?: string;
 		name?: string;
 		workDir?: string;
 	} = {},
-): RunMeta | null {
+): Promise<RunMeta | null> {
 	const workDir = options.workDir ?? process.cwd();
 	const legacyStateDir = join(getMilhouseDir(workDir), "state");
 
@@ -55,7 +55,7 @@ export function migrateLegacyToRun(
 	}
 
 	// Create new run
-	const run = createRun({
+	const run = await createRun({
 		scope: options.scope || "migrated from legacy",
 		name: options.name || "legacy-migration",
 		workDir,
@@ -191,14 +191,14 @@ export function cleanupLegacyState(workDir = process.cwd()): boolean {
  * @param workDir - Working directory (defaults to cwd)
  * @returns The created run metadata, or null if source run doesn't exist
  */
-export function cloneRunState(
+export async function cloneRunState(
 	sourceRunId: string,
 	options: {
 		scope?: string;
 		name?: string;
 	} = {},
 	workDir = process.cwd(),
-): RunMeta | null {
+): Promise<RunMeta | null> {
 	const sourceStateDir = getRunStateDir(sourceRunId, workDir);
 
 	if (!existsSync(sourceStateDir)) {
@@ -206,7 +206,7 @@ export function cloneRunState(
 	}
 
 	// Create new run
-	const run = createRun({
+	const run = await createRun({
 		scope: options.scope || `cloned from ${sourceRunId}`,
 		name: options.name,
 		workDir,

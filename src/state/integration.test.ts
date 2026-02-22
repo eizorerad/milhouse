@@ -59,7 +59,7 @@ describe("Integration Tests", () => {
 	describe("Complete Pipeline Flow", () => {
 		test("should complete full flow: createRun → saveIssues → saveTasks → updateTaskStatus → saveValidationReport", async () => {
 			// Step 1: Create a run
-			const run = createRun({
+			const run = await createRun({
 				scope: "Integration test scope",
 				name: "integration-test",
 				workDir: testDir,
@@ -222,7 +222,7 @@ describe("Integration Tests", () => {
 		});
 
 		test("should handle task failure and dependent blocking", async () => {
-			const run = createRun({ scope: "failure test", workDir: testDir });
+			const run = await createRun({ scope: "failure test", workDir: testDir });
 
 			const now = new Date().toISOString();
 			const tasks: Task[] = [
@@ -270,9 +270,9 @@ describe("Integration Tests", () => {
 	});
 
 	describe("State Consistency", () => {
-		test("should maintain consistency between run meta and index", () => {
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const _run2 = createRun({ scope: "run 2", workDir: testDir });
+		test("should maintain consistency between run meta and index", async () => {
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const _run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			// Update run1 phase
 			updateRunPhaseInMeta(run1.id, "exec", testDir);
@@ -286,8 +286,8 @@ describe("Integration Tests", () => {
 			expect(indexEntry?.phase).toBe("exec");
 		});
 
-		test("should maintain consistency between issues and tasks", () => {
-			createRun({ scope: "consistency test", workDir: testDir });
+		test("should maintain consistency between issues and tasks", async () => {
+			await createRun({ scope: "consistency test", workDir: testDir });
 
 			const now = new Date().toISOString();
 			const issues: Issue[] = [
@@ -346,8 +346,8 @@ describe("Integration Tests", () => {
 			expect(issueTasks.length).toBe(2);
 		});
 
-		test("should maintain validation index consistency", () => {
-			const run = createRun({ scope: "validation test", workDir: testDir });
+		test("should maintain validation index consistency", async () => {
+			const run = await createRun({ scope: "validation test", workDir: testDir });
 
 			// Add validation reports
 			updateValidationIndex(run.id, "ISSUE-1", "reports/issue-1.json", "valid", testDir);
@@ -369,11 +369,11 @@ describe("Integration Tests", () => {
 	});
 
 	describe("Event Emissions", () => {
-		test("should emit events during state changes", () => {
+		test("should emit events during state changes", async () => {
 			// This test verifies that stateEvents functions exist and can be called
 			// In a real scenario, we'd use spies to verify emissions
 
-			const run = createRun({ scope: "event test", workDir: testDir });
+			const run = await createRun({ scope: "event test", workDir: testDir });
 
 			// These should not throw
 			expect(() => {
@@ -387,8 +387,8 @@ describe("Integration Tests", () => {
 	});
 
 	describe("History and Rollback Integration", () => {
-		test("should create snapshots and allow rollback", () => {
-			const run = createRun({ scope: "history test", workDir: testDir });
+		test("should create snapshots and allow rollback", async () => {
+			const run = await createRun({ scope: "history test", workDir: testDir });
 
 			const now = new Date().toISOString();
 			const initialIssues: Issue[] = [
@@ -444,7 +444,7 @@ describe("Integration Tests", () => {
 		});
 
 		test("should list and manage multiple snapshots", async () => {
-			const run = createRun({ scope: "multi-snapshot test", workDir: testDir });
+			const run = await createRun({ scope: "multi-snapshot test", workDir: testDir });
 
 			const now = new Date().toISOString();
 			const issues: Issue[] = [
@@ -485,11 +485,11 @@ describe("Integration Tests", () => {
 	});
 
 	describe("Multi-Run Operations", () => {
-		test("should handle multiple runs independently", () => {
+		test("should handle multiple runs independently", async () => {
 			// Create multiple runs
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
-			const run3 = createRun({ scope: "run 3", workDir: testDir });
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2", workDir: testDir });
+			const run3 = await createRun({ scope: "run 3", workDir: testDir });
 
 			// Verify all runs exist
 			const runs = listRuns(testDir);
@@ -503,16 +503,16 @@ describe("Integration Tests", () => {
 			expect(getCurrentRun(testDir)?.id).toBe(run2.id);
 
 			// Delete a run
-			deleteRun(run3.id, testDir);
+			await deleteRun(run3.id, testDir);
 
 			const remainingRuns = listRuns(testDir);
 			expect(remainingRuns.length).toBe(2);
 			expect(remainingRuns.some((r) => r.id === run3.id)).toBe(false);
 		});
 
-		test("should isolate state between runs", () => {
-			const run1 = createRun({ scope: "isolated run 1", workDir: testDir });
-			const run2 = createRun({ scope: "isolated run 2", workDir: testDir });
+		test("should isolate state between runs", async () => {
+			const run1 = await createRun({ scope: "isolated run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "isolated run 2", workDir: testDir });
 
 			// Add issues to run1
 			setCurrentRun(run1.id, testDir);
@@ -574,8 +574,8 @@ describe("Integration Tests", () => {
 	});
 
 	describe("Error Recovery", () => {
-		test("should handle missing state files gracefully", () => {
-			const _run = createRun({ scope: "error recovery", workDir: testDir });
+		test("should handle missing state files gracefully", async () => {
+			const _run = await createRun({ scope: "error recovery", workDir: testDir });
 
 			// Try to load non-existent state
 			const issues = loadIssues(testDir);
@@ -591,8 +591,8 @@ describe("Integration Tests", () => {
 			}).not.toThrow();
 		});
 
-		test("should handle corrupted state files", () => {
-			const run = createRun({ scope: "corruption test", workDir: testDir });
+		test("should handle corrupted state files", async () => {
+			const run = await createRun({ scope: "corruption test", workDir: testDir });
 			const stateDir = getRunStateDir(run.id, testDir);
 
 			// Write corrupted JSON

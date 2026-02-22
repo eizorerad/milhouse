@@ -253,3 +253,10 @@ MIT
 ```
 npm install -g milhouse-cli
 ```
+
+
+**dev mode**
+
+```bash
+bun run src/index.ts --run "fix data flow bugs" --severity CRITICAL,HIGH
+```

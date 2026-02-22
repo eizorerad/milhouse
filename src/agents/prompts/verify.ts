@@ -7,7 +7,6 @@
 
 import type { PhaseContext } from "../../runner/types.ts";
 import { AGENT_ROLES, type Task } from "../../state/types.ts";
-import { appendUserConfig } from "./common.ts";
 
 /**
  * Pre-check issue found by automated gates.

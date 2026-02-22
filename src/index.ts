@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 import { parseArgs } from "./cli/args.ts";
 import { addRule, showConfig } from "./cli/commands/config.ts";
-import { runExecPipeline } from "./cli/commands/pipeline/exec.ts";
 import { parseFormats, runExport } from "./cli/commands/export.ts";
 import { runInit } from "./cli/commands/init.ts";
 import { runConsolidatePipeline } from "./cli/commands/pipeline/consolidate.ts";
+import { runExecPipeline } from "./cli/commands/pipeline/exec.ts";
 import { runPlanPipeline } from "./cli/commands/pipeline/plan.ts";
 import { runScanPipeline } from "./cli/commands/pipeline/scan.ts";
 import { runValidatePipeline } from "./cli/commands/pipeline/validate.ts";

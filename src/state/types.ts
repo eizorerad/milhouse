@@ -250,16 +250,7 @@ export type RunState = z.infer<typeof RunStateSchema>;
 /**
  * Agent role types
  */
-export const AgentRoleSchema = z.enum([
-	"LI",
-	"IV",
-	"PL",
-	"PR",
-	"CDM",
-	"EX",
-	"TV",
-	"RL",
-]);
+export const AgentRoleSchema = z.enum(["LI", "IV", "PL", "PR", "CDM", "EX", "TV", "RL"]);
 
 export type AgentRole = z.infer<typeof AgentRoleSchema>;
 

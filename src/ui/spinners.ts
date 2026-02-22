@@ -5,7 +5,7 @@ import { formatPhase, theme } from "./theme";
 
 export type SpinnerInstance = ReturnType<typeof createSpinner>;
 
-export type SpinnerType = "pipeline" | "phase" | "task" | "engine" | "git" | "gate" | "probe";
+export type SpinnerType = "pipeline" | "phase" | "task" | "engine" | "git" | "probe";
 
 // Spinner configurations for different contexts
 const spinnerConfigs: Record<SpinnerType, { spinner: string; color: Color }> = {
@@ -14,7 +14,6 @@ const spinnerConfigs: Record<SpinnerType, { spinner: string; color: Color }> = {
 	task: { spinner: "dots2", color: "blue" },
 	engine: { spinner: "dots3", color: "yellow" },
 	git: { spinner: "dots4", color: "green" },
-	gate: { spinner: "dots5", color: "red" },
 	probe: { spinner: "dots6", color: "white" },
 };
 
@@ -194,22 +193,6 @@ export function initSpinnerEventHandlers(): void {
 		spinners.warn(
 			`git-merge-${source}`,
 			`Merge conflict ${theme.code(source)} → ${theme.code(target)}: ${files.length} files`,
-		);
-	});
-
-	// Gate events
-	bus.on("gate:start", ({ name, taskId }) => {
-		spinners.start(`gate-${taskId}-${name}`, `Running gate: ${theme.highlight(name)}`, "gate");
-	});
-
-	bus.on("gate:pass", ({ name, taskId }) => {
-		spinners.succeed(`gate-${taskId}-${name}`, `Gate passed: ${theme.highlight(name)}`);
-	});
-
-	bus.on("gate:fail", ({ name, taskId, reason }) => {
-		spinners.fail(
-			`gate-${taskId}-${name}`,
-			`Gate failed: ${theme.highlight(name)} - ${theme.error(reason)}`,
 		);
 	});
 

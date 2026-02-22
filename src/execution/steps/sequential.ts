@@ -351,18 +351,3 @@ export async function runSequentialSteps(
 
 	return batch;
 }
-
-// ============================================================================
-// Backward Compatibility
-// ============================================================================
-
-/**
- * Run tasks sequentially (legacy interface)
- *
- * @deprecated Use runSequentialSteps() instead
- */
-export async function runSequential(
-	options: MilhouseStepOptions,
-): Promise<MilhouseStepBatchResult> {
-	return await runSequentialSteps(options);
-}

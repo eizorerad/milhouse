@@ -44,16 +44,16 @@ describe("Validation Index Module Tests", () => {
 	});
 
 	describe("Path Functions", () => {
-		test("getValidationIndexPath should return correct path", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getValidationIndexPath should return correct path", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const path = getValidationIndexPath(run.id, testDir);
 
 			expect(path).toContain(run.id);
 			expect(path).toEndWith("validation-index.json");
 		});
 
-		test("getValidationReportsDir should return correct path", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getValidationReportsDir should return correct path", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const dir = getValidationReportsDir(run.id, testDir);
 
 			expect(dir).toContain(run.id);
@@ -62,8 +62,8 @@ describe("Validation Index Module Tests", () => {
 	});
 
 	describe("Index Operations", () => {
-		test("loadValidationIndex should return empty index when file does not exist", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("loadValidationIndex should return empty index when file does not exist", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const index = loadValidationIndex(run.id, testDir);
 
 			expect(index.run_id).toBe(run.id);
@@ -71,8 +71,8 @@ describe("Validation Index Module Tests", () => {
 			expect(index.updated_at).toBeDefined();
 		});
 
-		test("saveValidationIndex should create index file", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("saveValidationIndex should create index file", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			saveValidationIndex(
 				{
@@ -87,8 +87,8 @@ describe("Validation Index Module Tests", () => {
 			expect(existsSync(indexPath)).toBe(true);
 		});
 
-		test("saveValidationIndex should update updated_at timestamp", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("saveValidationIndex should update updated_at timestamp", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const oldTimestamp = "2024-01-01T00:00:00.000Z";
 
 			saveValidationIndex(
@@ -104,8 +104,8 @@ describe("Validation Index Module Tests", () => {
 			expect(loaded.updated_at).not.toBe(oldTimestamp);
 		});
 
-		test("addValidationReportToIndex should add new report", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("addValidationReportToIndex should add new report", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			addValidationReportToIndex(
 				run.id,
@@ -124,8 +124,8 @@ describe("Validation Index Module Tests", () => {
 			expect(index.reports[0].created_at).toBeDefined();
 		});
 
-		test("addValidationReportToIndex should update existing report", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("addValidationReportToIndex should update existing report", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			// Add initial report
 			addValidationReportToIndex(
@@ -154,8 +154,8 @@ describe("Validation Index Module Tests", () => {
 			expect(index.reports[0].status).toBe("valid");
 		});
 
-		test("updateValidationIndex should add report with correct status", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("updateValidationIndex should add report with correct status", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "reports/issue-1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "reports/issue-2.json", "invalid", testDir);
@@ -167,8 +167,8 @@ describe("Validation Index Module Tests", () => {
 	});
 
 	describe("Query Operations", () => {
-		test("getValidationReportsForRun should return all reports", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getValidationReportsForRun should return all reports", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "r2.json", "invalid", testDir);
@@ -177,8 +177,8 @@ describe("Validation Index Module Tests", () => {
 			expect(reports.length).toBe(2);
 		});
 
-		test("getValidationReportsByIssue should filter by issue ID", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getValidationReportsByIssue should filter by issue ID", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-1", "r1-v2.json", "valid", testDir);
@@ -192,7 +192,7 @@ describe("Validation Index Module Tests", () => {
 		});
 
 		test("getLatestValidationReport should return most recent report", async () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			addValidationReportToIndex(
 				run.id,
@@ -222,15 +222,15 @@ describe("Validation Index Module Tests", () => {
 			expect(latest?.status).toBe("valid");
 		});
 
-		test("getLatestValidationReport should return null when no reports", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getLatestValidationReport should return null when no reports", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const latest = getLatestValidationReport(run.id, "ISSUE-1", testDir);
 
 			expect(latest).toBeNull();
 		});
 
-		test("getValidationReportsByStatus should filter by status", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getValidationReportsByStatus should filter by status", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "r2.json", "valid", testDir);
@@ -247,8 +247,8 @@ describe("Validation Index Module Tests", () => {
 			expect(partialReports.length).toBe(1);
 		});
 
-		test("countValidationReportsByStatus should return correct counts", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("countValidationReportsByStatus should return correct counts", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "r2.json", "valid", testDir);
@@ -263,8 +263,8 @@ describe("Validation Index Module Tests", () => {
 			expect(counts.total).toBe(4);
 		});
 
-		test("isIssueValidated should return true when issue has reports", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("isIssueValidated should return true when issue has reports", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 
@@ -272,8 +272,8 @@ describe("Validation Index Module Tests", () => {
 			expect(isIssueValidated(run.id, "ISSUE-2", testDir)).toBe(false);
 		});
 
-		test("getUnvalidatedIssueIds should return issues without reports", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getUnvalidatedIssueIds should return issues without reports", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-3", "r3.json", "invalid", testDir);
@@ -286,8 +286,8 @@ describe("Validation Index Module Tests", () => {
 	});
 
 	describe("Cleanup Operations", () => {
-		test("removeValidationReportFromIndex should remove specific report", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("removeValidationReportFromIndex should remove specific report", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "r2.json", "invalid", testDir);
@@ -300,15 +300,15 @@ describe("Validation Index Module Tests", () => {
 			expect(index.reports[0].issue_id).toBe("ISSUE-2");
 		});
 
-		test("removeValidationReportFromIndex should return false when not found", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("removeValidationReportFromIndex should return false when not found", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			const removed = removeValidationReportFromIndex(run.id, "ISSUE-1", "r1.json", testDir);
 			expect(removed).toBe(false);
 		});
 
-		test("clearValidationIndex should remove all reports", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("clearValidationIndex should remove all reports", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "r2.json", "invalid", testDir);
@@ -322,8 +322,8 @@ describe("Validation Index Module Tests", () => {
 	});
 
 	describe("Rebuild Index", () => {
-		test("rebuildValidationIndex should create empty index when no reports dir", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("rebuildValidationIndex should create empty index when no reports dir", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			const count = rebuildValidationIndex(run.id, testDir);
 			expect(count).toBe(0);
@@ -332,8 +332,8 @@ describe("Validation Index Module Tests", () => {
 			expect(index.reports.length).toBe(0);
 		});
 
-		test("rebuildValidationIndex should index existing report files", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("rebuildValidationIndex should index existing report files", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const reportsDir = getValidationReportsDir(run.id, testDir);
 			mkdirSync(reportsDir, { recursive: true });
 
@@ -370,8 +370,8 @@ describe("Validation Index Module Tests", () => {
 			expect(issue2Report?.status).toBe("invalid");
 		});
 
-		test("rebuildValidationIndex should handle invalid report files", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("rebuildValidationIndex should handle invalid report files", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const reportsDir = getValidationReportsDir(run.id, testDir);
 			mkdirSync(reportsDir, { recursive: true });
 
@@ -388,8 +388,8 @@ describe("Validation Index Module Tests", () => {
 			expect(count).toBe(1); // Only valid report indexed
 		});
 
-		test("rebuildValidationIndex should extract issue_id from filename if not in content", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("rebuildValidationIndex should extract issue_id from filename if not in content", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const reportsDir = getValidationReportsDir(run.id, testDir);
 			mkdirSync(reportsDir, { recursive: true });
 
@@ -404,15 +404,15 @@ describe("Validation Index Module Tests", () => {
 	});
 
 	describe("Edge Cases", () => {
-		test("should handle empty issue IDs array in getUnvalidatedIssueIds", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("should handle empty issue IDs array in getUnvalidatedIssueIds", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const unvalidated = getUnvalidatedIssueIds(run.id, [], testDir);
 
 			expect(unvalidated).toEqual([]);
 		});
 
-		test("should handle multiple reports for same issue with different paths", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("should handle multiple reports for same issue with different paths", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1-v1.json", "partial", testDir);
 			updateValidationIndex(run.id, "ISSUE-1", "r1-v2.json", "valid", testDir);
@@ -421,8 +421,8 @@ describe("Validation Index Module Tests", () => {
 			expect(reports.length).toBe(2);
 		});
 
-		test("should preserve report order when adding multiple reports", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("should preserve report order when adding multiple reports", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			updateValidationIndex(run.id, "ISSUE-1", "r1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "r2.json", "invalid", testDir);

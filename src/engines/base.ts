@@ -1,5 +1,3 @@
-import type { ProgressCallback } from "./types.ts";
-
 /**
  * Detailed step information from AI engine output
  */

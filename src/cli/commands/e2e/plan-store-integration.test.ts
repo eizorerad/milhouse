@@ -124,8 +124,8 @@ function setupLegacyPlans(workDir: string, files: Record<string, string>): void 
 /**
  * Creates a run and sets it as current
  */
-function setupRun(workDir: string, _runId?: string): string {
-	const run = createRun({ workDir, scope: "test scope" });
+async function setupRun(workDir: string, _runId?: string): Promise<string> {
+	const run = await createRun({ workDir, scope: "test scope" });
 	return run.id;
 }
 
@@ -153,9 +153,9 @@ describe("Plan Store Integration", () => {
 	// ==========================================================================
 
 	describe("Pipeline Flow (scan → validate → plan → consolidate)", () => {
-		test("plans are written to runs/<runId>/plans when run is active", () => {
+		test("plans are written to runs/<runId>/plans when run is active", async () => {
 			// Create a run
-			const runId = setupRun(tempDir);
+			const runId = await setupRun(tempDir);
 
 			// Verify run is active
 			expect(getCurrentRunId(tempDir)).toBe(runId);
@@ -173,8 +173,8 @@ describe("Plan Store Integration", () => {
 			expect(content).toBe(problemBrief);
 		});
 
-		test("issue WBS plans are written to run-scoped directory", () => {
-			const runId = setupRun(tempDir);
+		test("issue WBS plans are written to run-scoped directory", async () => {
+			const runId = await setupRun(tempDir);
 
 			// Write WBS plan for an issue (simulating plan command)
 			const issueId = "ISS-001";
@@ -190,8 +190,8 @@ describe("Plan Store Integration", () => {
 			expect(content).toBe(wbsPlan);
 		});
 
-		test("execution plan is written to run-scoped directory", () => {
-			const runId = setupRun(tempDir);
+		test("execution plan is written to run-scoped directory", async () => {
+			const runId = await setupRun(tempDir);
 
 			// Write execution plan (simulating consolidate command)
 			const executionPlan = "# Execution Plan\n\n## Phase 1\n- Step 1\n- Step 2";
@@ -206,21 +206,21 @@ describe("Plan Store Integration", () => {
 			expect(content).toBe(executionPlan);
 		});
 
-		test("getCurrentPlansDir returns run-scoped path when run is active", () => {
-			const runId = setupRun(tempDir);
+		test("getCurrentPlansDir returns run-scoped path when run is active", async () => {
+			const runId = await setupRun(tempDir);
 
 			const plansDir = getCurrentPlansDir(tempDir);
 			expect(plansDir).toBe(join(tempDir, ".milhouse", "runs", runId, "plans"));
 		});
 
-		test("getCurrentPlansDir returns legacy path when no run is active", () => {
+		test("getCurrentPlansDir returns legacy path when no run is active", async () => {
 			// No run created
 			const plansDir = getCurrentPlansDir(tempDir);
 			expect(plansDir).toBe(join(tempDir, ".milhouse", "plans"));
 		});
 
-		test("full pipeline writes all artifacts to run-scoped directory", () => {
-			const runId = setupRun(tempDir);
+		test("full pipeline writes all artifacts to run-scoped directory", async () => {
+			const runId = await setupRun(tempDir);
 
 			// Simulate full pipeline
 			// 1. Scan - writes problem brief
@@ -252,8 +252,8 @@ describe("Plan Store Integration", () => {
 	// ==========================================================================
 
 	describe("View Synchronization", () => {
-		test("syncLegacyPlansView creates symlink to run plans", () => {
-			const runId = setupRun(tempDir);
+		test("syncLegacyPlansView creates symlink to run plans", async () => {
+			const runId = await setupRun(tempDir);
 
 			// Write some plans
 			writeProblemBrief(tempDir, "# Problem Brief");
@@ -281,8 +281,8 @@ describe("Plan Store Integration", () => {
 			}
 		});
 
-		test("legacy view reflects current run plans", () => {
-			const _runId = setupRun(tempDir);
+		test("legacy view reflects current run plans", async () => {
+			const _runId = await setupRun(tempDir);
 
 			// Write plans
 			writeProblemBrief(tempDir, "# Problem Brief from Run");
@@ -300,14 +300,14 @@ describe("Plan Store Integration", () => {
 			expect(wbsPlan).toBe("# WBS from Run");
 		});
 
-		test("view updates when switching runs", () => {
+		test("view updates when switching runs", async () => {
 			// Create first run
-			const run1 = createRun({ workDir: tempDir, scope: "run 1" });
+			const run1 = await createRun({ workDir: tempDir, scope: "run 1" });
 			writeProblemBrief(tempDir, "# Problem Brief from Run 1");
 			syncLegacyPlansView(tempDir);
 
 			// Create second run
-			const _run2 = createRun({ workDir: tempDir, scope: "run 2" });
+			const _run2 = await createRun({ workDir: tempDir, scope: "run 2" });
 			writeProblemBrief(tempDir, "# Problem Brief from Run 2");
 			syncLegacyPlansView(tempDir);
 
@@ -325,8 +325,8 @@ describe("Plan Store Integration", () => {
 			expect(content1).toBe("# Problem Brief from Run 1");
 		});
 
-		test("sync is idempotent", () => {
-			const _runId = setupRun(tempDir);
+		test("sync is idempotent", async () => {
+			const _runId = await setupRun(tempDir);
 			writeProblemBrief(tempDir, "# Problem Brief");
 
 			// Sync multiple times
@@ -339,7 +339,7 @@ describe("Plan Store Integration", () => {
 			expect(existsSync(legacyPlansDir)).toBe(true);
 		});
 
-		test("sync replaces existing directory with symlink", () => {
+		test("sync replaces existing directory with symlink", async () => {
 			// Create legacy plans directory with files first
 			setupLegacyPlans(tempDir, {
 				"old_plan.md": "# Old Plan",
@@ -347,7 +347,7 @@ describe("Plan Store Integration", () => {
 			});
 
 			// Now create a run
-			const _runId = setupRun(tempDir);
+			const _runId = await setupRun(tempDir);
 			writeProblemBrief(tempDir, "# New Problem Brief");
 
 			// Sync should replace the directory
@@ -370,7 +370,7 @@ describe("Plan Store Integration", () => {
 	// ==========================================================================
 
 	describe("Legacy Migration", () => {
-		test("hasLegacyPlansToImport returns true when legacy plans exist", () => {
+		test("hasLegacyPlansToImport returns true when legacy plans exist", async () => {
 			// Create legacy plans first (before run)
 			setupLegacyPlans(tempDir, {
 				"problem_brief.md": "# Legacy Problem Brief",
@@ -390,14 +390,14 @@ describe("Plan Store Integration", () => {
 			expect(hasLegacyPlansToImport(tempDir)).toBe(true);
 		});
 
-		test("hasLegacyPlansToImport returns false when no legacy plans", () => {
-			const _runId = setupRun(tempDir);
+		test("hasLegacyPlansToImport returns false when no legacy plans", async () => {
+			const _runId = await setupRun(tempDir);
 
 			// No legacy plans exist
 			expect(hasLegacyPlansToImport(tempDir)).toBe(false);
 		});
 
-		test("hasLegacyPlansToImport returns false when run already has plans", () => {
+		test("hasLegacyPlansToImport returns false when run already has plans", async () => {
 			// Create legacy plans first
 			setupLegacyPlans(tempDir, {
 				"problem_brief.md": "# Legacy Brief",
@@ -421,7 +421,7 @@ describe("Plan Store Integration", () => {
 			expect(hasLegacyPlansToImport(tempDir)).toBe(false);
 		});
 
-		test("importLegacyPlans copies files to current run", () => {
+		test("importLegacyPlans copies files to current run", async () => {
 			// Create legacy plans
 			setupLegacyPlans(tempDir, {
 				"problem_brief.md": "# Legacy Problem Brief",
@@ -455,7 +455,7 @@ describe("Plan Store Integration", () => {
 			expect(content).toBe("# Legacy Problem Brief");
 		});
 
-		test("importLegacyPlans creates marker file", () => {
+		test("importLegacyPlans creates marker file", async () => {
 			// Create legacy plans
 			setupLegacyPlans(tempDir, {
 				"problem_brief.md": "# Legacy Brief",
@@ -485,7 +485,7 @@ describe("Plan Store Integration", () => {
 			expect(marker.files_imported).toBe(1);
 		});
 
-		test("importLegacyPlans returns 0 when legacy dir is already a symlink", () => {
+		test("importLegacyPlans returns 0 when legacy dir is already a symlink", async () => {
 			// Symlinks may not be supported on Windows without elevated permissions
 			const canSymlink = (() => {
 				try {
@@ -504,7 +504,7 @@ describe("Plan Store Integration", () => {
 			if (!canSymlink) return;
 
 			// Create run and write plans
-			const _runId = setupRun(tempDir);
+			const _runId = await setupRun(tempDir);
 			writeProblemBrief(tempDir, "# Run Brief");
 
 			// Sync creates symlink
@@ -515,7 +515,7 @@ describe("Plan Store Integration", () => {
 			expect(imported).toBe(0);
 		});
 
-		test("dry-run mode lists files without importing", () => {
+		test("dry-run mode lists files without importing", async () => {
 			// Create legacy plans
 			setupLegacyPlans(tempDir, {
 				"problem_brief.md": "# Legacy Brief",
@@ -552,8 +552,8 @@ describe("Plan Store Integration", () => {
 	// ==========================================================================
 
 	describe("Executor Integration", () => {
-		test("plans are read from run-scoped directory", () => {
-			const runId = setupRun(tempDir);
+		test("plans are read from run-scoped directory", async () => {
+			const runId = await setupRun(tempDir);
 
 			// Write plans to run
 			const wbsContent = "# WBS Plan\n\n## Tasks\n- Implement feature X";
@@ -568,8 +568,8 @@ describe("Plan Store Integration", () => {
 			expect(currentPlansDir).toContain(runId);
 		});
 
-		test("listPlanFiles returns files from run-scoped directory", () => {
-			const _runId = setupRun(tempDir);
+		test("listPlanFiles returns files from run-scoped directory", async () => {
+			const _runId = await setupRun(tempDir);
 
 			// Write multiple plans
 			writeProblemBrief(tempDir, "# Brief");
@@ -586,8 +586,8 @@ describe("Plan Store Integration", () => {
 			expect(files).toContain("execution_plan.md");
 		});
 
-		test("executor reads correct WBS for each issue", () => {
-			const _runId = setupRun(tempDir);
+		test("executor reads correct WBS for each issue", async () => {
+			const _runId = await setupRun(tempDir);
 
 			// Write different WBS plans for different issues
 			writeIssueWbsPlan(tempDir, "ISS-001", "# WBS for Issue 1\n\nFix authentication bug");
@@ -604,14 +604,14 @@ describe("Plan Store Integration", () => {
 			expect(wbs3).toContain("database layer");
 		});
 
-		test("plans directory is isolated per run", () => {
+		test("plans directory is isolated per run", async () => {
 			// Create first run with plans
-			const run1 = createRun({ workDir: tempDir, scope: "run 1" });
+			const run1 = await createRun({ workDir: tempDir, scope: "run 1" });
 			writeProblemBrief(tempDir, "# Brief for Run 1");
 			writeIssueWbsPlan(tempDir, "ISS-001", "# WBS for Run 1");
 
 			// Create second run with different plans
-			const run2 = createRun({ workDir: tempDir, scope: "run 2" });
+			const run2 = await createRun({ workDir: tempDir, scope: "run 2" });
 			writeProblemBrief(tempDir, "# Brief for Run 2");
 			writeIssueWbsPlan(tempDir, "ISS-002", "# WBS for Run 2");
 
@@ -652,14 +652,14 @@ describe("Plan Store Integration", () => {
 	// ==========================================================================
 
 	describe("Edge Cases", () => {
-		test("handles missing .milhouse directory gracefully", () => {
+		test("handles missing .milhouse directory gracefully", async () => {
 			// Don't create any .milhouse structure
 			// getCurrentPlansDir should return legacy path without error
 			const plansDir = getCurrentPlansDir(tempDir);
 			expect(plansDir).toBe(join(tempDir, ".milhouse", "plans"));
 		});
 
-		test("handles corrupted runs-index.json gracefully", () => {
+		test("handles corrupted runs-index.json gracefully", async () => {
 			// Create corrupted runs-index.json
 			const milhouse = join(tempDir, ".milhouse");
 			mkdirSync(milhouse, { recursive: true });
@@ -670,7 +670,7 @@ describe("Plan Store Integration", () => {
 			expect(plansDir).toBe(join(tempDir, ".milhouse", "plans"));
 		});
 
-		test("handles empty runs-index.json gracefully", () => {
+		test("handles empty runs-index.json gracefully", async () => {
 			// Create empty runs-index.json
 			const milhouse = join(tempDir, ".milhouse");
 			mkdirSync(milhouse, { recursive: true });
@@ -681,7 +681,7 @@ describe("Plan Store Integration", () => {
 			expect(plansDir).toBe(join(tempDir, ".milhouse", "plans"));
 		});
 
-		test("handles run with null current_run", () => {
+		test("handles run with null current_run", async () => {
 			// Create runs-index with null current_run
 			const milhouse = join(tempDir, ".milhouse");
 			mkdirSync(milhouse, { recursive: true });
@@ -695,7 +695,7 @@ describe("Plan Store Integration", () => {
 			expect(plansDir).toBe(join(tempDir, ".milhouse", "plans"));
 		});
 
-		test("sync handles missing run plans directory", () => {
+		test("sync handles missing run plans directory", async () => {
 			// Create run but don't create plans directory
 			const milhouse = join(tempDir, ".milhouse");
 			mkdirSync(milhouse, { recursive: true });
@@ -716,8 +716,8 @@ describe("Plan Store Integration", () => {
 			expect(existsSync(runPlansDir)).toBe(true);
 		});
 
-		test("read returns null for non-existent plan files", () => {
-			const _runId = setupRun(tempDir);
+		test("read returns null for non-existent plan files", async () => {
+			const _runId = await setupRun(tempDir);
 
 			// Try to read non-existent files
 			expect(readProblemBrief(tempDir)).toBeNull();

@@ -73,7 +73,10 @@ export function createProgram(): Command {
 		.option("--run", "Run full pipeline (phases configured in .milhouse/config.ts)")
 		.option("--resume", "Resume pipeline from where it left off")
 		.option("--run-id <id>", "Use a specific run ID (full or partial match)")
-		.option("--start-phase <phase>", "Start from this phase (scan|validate|plan|consolidate|exec|verify)")
+		.option(
+			"--start-phase <phase>",
+			"Start from this phase (scan|validate|plan|consolidate|exec|verify)",
+		)
 		.option("--end-phase <phase>", "Stop after this phase")
 		.option("--force", "Re-run even if phases already completed")
 		.option("--fail-fast", "Stop on first phase failure (default: true)")
@@ -158,7 +161,9 @@ export function createProgram(): Command {
 		.option("--unsafe-dod-checks", "Skip DoD command safety checks (SECURITY RISK)")
 		.option("-v, --verbose", "Verbose output");
 
-	program.addHelpText("after", `
+	program.addHelpText(
+		"after",
+		`
 Examples:
   $ milhouse --init                          # Create .milhouse/config.ts
   $ milhouse --scan --scope "auth bugs"      # Scan repo for issues
@@ -172,7 +177,8 @@ Pipeline:  scan → validate → plan → consolidate → exec → verify
 
 Config:    Edit .milhouse/config.ts to configure phases, workers, rules,
            gates, cost budgets, and more. CLI flags override config per run.
-`);
+`,
+	);
 
 	return program;
 }

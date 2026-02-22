@@ -56,8 +56,8 @@ describe("Concurrent run operations", () => {
 	describe("Task update isolation between runs", () => {
 		it("should update tasks only in the specified run", async () => {
 			// Create two separate runs
-			const run1 = createRun({ scope: "run 1 scope", workDir: testDir });
-			const run2 = createRun({ scope: "run 2 scope", workDir: testDir });
+			const run1 = await createRun({ scope: "run 1 scope", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2 scope", workDir: testDir });
 
 			// Create tasks in each run
 			const task1 = createTaskForRun(run1.id, createTestTaskData("RUN1-ISSUE-1"), testDir);
@@ -87,8 +87,8 @@ describe("Concurrent run operations", () => {
 
 		it("should not allow cross-run writes when updating tasks", async () => {
 			// Create two runs
-			const run1 = createRun({ scope: "isolated run 1", workDir: testDir });
-			const run2 = createRun({ scope: "isolated run 2", workDir: testDir });
+			const run1 = await createRun({ scope: "isolated run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "isolated run 2", workDir: testDir });
 
 			// Create a task in run1
 			const task1 = createTaskForRun(run1.id, createTestTaskData("ISOLATED-1"), testDir);
@@ -107,8 +107,8 @@ describe("Concurrent run operations", () => {
 
 		it("should handle parallel updates to different runs without interference", async () => {
 			// Create two runs
-			const run1 = createRun({ scope: "parallel run 1", workDir: testDir });
-			const run2 = createRun({ scope: "parallel run 2", workDir: testDir });
+			const run1 = await createRun({ scope: "parallel run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "parallel run 2", workDir: testDir });
 
 			// Create a few tasks in each run (reduced from 5 to avoid timeout)
 			const run1Tasks: Task[] = [];
@@ -168,8 +168,8 @@ describe("Concurrent run operations", () => {
 
 		it("should create follow-up tasks in the correct run", async () => {
 			// Create two runs
-			const run1 = createRun({ scope: "follow-up run 1", workDir: testDir });
-			const run2 = createRun({ scope: "follow-up run 2", workDir: testDir });
+			const run1 = await createRun({ scope: "follow-up run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "follow-up run 2", workDir: testDir });
 
 			// Create initial task in run1
 			const parentTask = createTaskForRun(run1.id, createTestTaskData("PARENT-ISSUE-1"), testDir);
@@ -197,8 +197,8 @@ describe("Concurrent run operations", () => {
 	});
 
 	describe("readTaskForRun function", () => {
-		it("should return the correct task from the specified run", () => {
-			const run = createRun({ scope: "read test", workDir: testDir });
+		it("should return the correct task from the specified run", async () => {
+			const run = await createRun({ scope: "read test", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("READ-ISSUE-1"), testDir);
 
 			const readTask = readTaskForRun(run.id, task.id, testDir);
@@ -208,17 +208,17 @@ describe("Concurrent run operations", () => {
 			expect(readTask?.issue_id).toBe("READ-ISSUE-1");
 		});
 
-		it("should return null for non-existent task", () => {
-			const run = createRun({ scope: "non-existent test", workDir: testDir });
+		it("should return null for non-existent task", async () => {
+			const run = await createRun({ scope: "non-existent test", workDir: testDir });
 
 			const readTask = readTaskForRun(run.id, "NON-EXISTENT-TASK-ID", testDir);
 
 			expect(readTask).toBeNull();
 		});
 
-		it("should return null for task in different run", () => {
-			const run1 = createRun({ scope: "run with task", workDir: testDir });
-			const run2 = createRun({ scope: "run without task", workDir: testDir });
+		it("should return null for task in different run", async () => {
+			const run1 = await createRun({ scope: "run with task", workDir: testDir });
+			const run2 = await createRun({ scope: "run without task", workDir: testDir });
 
 			const task = createTaskForRun(run1.id, createTestTaskData("CROSS-RUN-ISSUE"), testDir);
 
@@ -228,7 +228,7 @@ describe("Concurrent run operations", () => {
 			expect(readTask).toBeNull();
 		});
 
-		it("should return null for non-existent run", () => {
+		it("should return null for non-existent run", async () => {
 			const readTask = readTaskForRun("non-existent-run-id", "any-task-id", testDir);
 
 			expect(readTask).toBeNull();
@@ -237,7 +237,7 @@ describe("Concurrent run operations", () => {
 
 	describe("Concurrent task updates within same run", () => {
 		it("should handle concurrent updates to the same task safely", async () => {
-			const run = createRun({ scope: "concurrent same task", workDir: testDir });
+			const run = await createRun({ scope: "concurrent same task", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("CONCURRENT-ISSUE"), testDir);
 
 			// Perform a few concurrent updates (reduced from 10 to avoid timeout)
@@ -257,7 +257,7 @@ describe("Concurrent run operations", () => {
 		});
 
 		it("should handle concurrent updates to different tasks in same run", async () => {
-			const run = createRun({ scope: "concurrent different tasks", workDir: testDir });
+			const run = await createRun({ scope: "concurrent different tasks", workDir: testDir });
 
 			// Create a few tasks (reduced from 5 to avoid timeout)
 			const tasks = Array.from({ length: 3 }, (_, i) =>

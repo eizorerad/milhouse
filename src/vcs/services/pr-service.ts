@@ -238,9 +238,7 @@ export class PrService implements IPrService {
 			const data = JSON.parse(stdout);
 			const rawState = (data.state as string)?.toLowerCase();
 			const state: "open" | "closed" | "merged" =
-				rawState === "open" || rawState === "closed" || rawState === "merged"
-					? rawState
-					: "open";
+				rawState === "open" || rawState === "closed" || rawState === "merged" ? rawState : "open";
 			return ok({
 				exists: true,
 				state,

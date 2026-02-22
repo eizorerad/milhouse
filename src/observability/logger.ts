@@ -28,7 +28,5 @@ export const loggers = {
 	engine: createLogger("engine"),
 	task: createLogger("task"),
 	git: createLogger("git"),
-	gate: createLogger("gate"),
-	probe: createLogger("probe"),
 	cli: createLogger("cli"),
 };

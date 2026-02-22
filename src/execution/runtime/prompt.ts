@@ -21,7 +21,6 @@ import {
 	createBrowserConfig,
 	generateCompactBrowserInstructions,
 	getBrowserInstructionsIfAvailable,
-	legacyFlagToBrowserMode,
 } from "./browser.ts";
 import type {
 	BrowserMode,
@@ -348,4 +347,3 @@ ${instructions.join("\n")}
 Do NOT modify PRD.md or mark tasks complete - that will be handled separately.
 Focus only on implementing: ${task}`;
 }
-

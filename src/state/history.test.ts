@@ -44,16 +44,16 @@ describe("History Module Tests", () => {
 	});
 
 	describe("Directory Functions", () => {
-		test("getHistoryDir should return correct path", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getHistoryDir should return correct path", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const historyDir = getHistoryDir(run.id, testDir);
 
 			expect(historyDir).toContain(run.id);
 			expect(historyDir).toContain("history");
 		});
 
-		test("getStateHistoryDir should return correct path for state type", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getStateHistoryDir should return correct path for state type", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const issuesHistoryDir = getStateHistoryDir(run.id, "issues", testDir);
 			const tasksHistoryDir = getStateHistoryDir(run.id, "tasks", testDir);
 
@@ -61,8 +61,8 @@ describe("History Module Tests", () => {
 			expect(tasksHistoryDir).toContain("tasks");
 		});
 
-		test("ensureHistoryDir should create directory if not exists", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("ensureHistoryDir should create directory if not exists", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const dir = ensureHistoryDir(run.id, "issues", testDir);
 
 			expect(existsSync(dir)).toBe(true);
@@ -70,7 +70,7 @@ describe("History Module Tests", () => {
 	});
 
 	describe("Snapshot ID Functions", () => {
-		test("generateSnapshotId should create filesystem-safe ID", () => {
+		test("generateSnapshotId should create filesystem-safe ID", async () => {
 			const id = generateSnapshotId();
 
 			// Should not contain colons or periods (filesystem-safe)
@@ -81,14 +81,14 @@ describe("History Module Tests", () => {
 			expect(id).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/);
 		});
 
-		test("generateSnapshotId should use provided timestamp", () => {
+		test("generateSnapshotId should use provided timestamp", async () => {
 			const timestamp = new Date("2024-01-15T10:30:45.123Z");
 			const id = generateSnapshotId(timestamp);
 
 			expect(id).toBe("2024-01-15T10-30-45-123Z");
 		});
 
-		test("parseSnapshotId should convert back to Date", () => {
+		test("parseSnapshotId should convert back to Date", async () => {
 			const original = new Date("2024-01-15T10:30:45.123Z");
 			const id = generateSnapshotId(original);
 			const parsed = parseSnapshotId(id);
@@ -98,8 +98,8 @@ describe("History Module Tests", () => {
 	});
 
 	describe("Snapshot Operations", () => {
-		test("saveStateSnapshot should create snapshot file", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("saveStateSnapshot should create snapshot file", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const data = { test: "data" };
 
 			const meta = saveStateSnapshot(run.id, "issues", data, {
@@ -116,8 +116,8 @@ describe("History Module Tests", () => {
 			expect(existsSync(join(historyDir, `${meta.id}.json`))).toBe(true);
 		});
 
-		test("saveStateSnapshot should include agent_id when provided", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("saveStateSnapshot should include agent_id when provided", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			const meta = saveStateSnapshot(
 				run.id,
@@ -132,8 +132,8 @@ describe("History Module Tests", () => {
 			expect(meta.agent_id).toBe("agent-123");
 		});
 
-		test("saveStateSnapshot should skip when history is disabled", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("saveStateSnapshot should skip when history is disabled", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			const meta = saveStateSnapshot(
 				run.id,
@@ -152,15 +152,15 @@ describe("History Module Tests", () => {
 			expect(existsSync(historyDir)).toBe(false);
 		});
 
-		test("listSnapshots should return empty array when no snapshots", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("listSnapshots should return empty array when no snapshots", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const snapshots = listSnapshots(run.id, "issues", testDir);
 
 			expect(snapshots).toEqual([]);
 		});
 
 		test("listSnapshots should return snapshots sorted by date (newest first)", async () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			saveStateSnapshot(run.id, "issues", { v: 1 }, { reason: "First", workDir: testDir });
 			await new Promise((r) => setTimeout(r, 10));
@@ -175,8 +175,8 @@ describe("History Module Tests", () => {
 			expect(snapshots[2].reason).toBe("First");
 		});
 
-		test("loadSnapshot should return snapshot data", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("loadSnapshot should return snapshot data", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const originalData = { key: "value", nested: { a: 1 } };
 
 			const meta = saveStateSnapshot(run.id, "issues", originalData, { workDir: testDir });
@@ -187,15 +187,15 @@ describe("History Module Tests", () => {
 			expect(snapshot?.data).toEqual(originalData);
 		});
 
-		test("loadSnapshot should return null for non-existent snapshot", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("loadSnapshot should return null for non-existent snapshot", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const snapshot = loadSnapshot(run.id, "issues", "non-existent", testDir);
 
 			expect(snapshot).toBeNull();
 		});
 
 		test("getLatestSnapshot should return most recent snapshot", async () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			saveStateSnapshot(run.id, "issues", { v: 1 }, { reason: "Old", workDir: testDir });
 			await new Promise((r) => setTimeout(r, 10));
@@ -208,8 +208,8 @@ describe("History Module Tests", () => {
 			expect(latest?.data).toEqual({ v: 2 });
 		});
 
-		test("getLatestSnapshot should return null when no snapshots", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getLatestSnapshot should return null when no snapshots", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const latest = getLatestSnapshot(run.id, "issues", testDir);
 
 			expect(latest).toBeNull();
@@ -217,8 +217,8 @@ describe("History Module Tests", () => {
 	});
 
 	describe("Rollback Operations", () => {
-		test("rollbackState should restore state from snapshot", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("rollbackState should restore state from snapshot", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const stateDir = getRunStateDir(run.id, testDir);
 
 			// Create initial state
@@ -246,7 +246,7 @@ describe("History Module Tests", () => {
 		});
 
 		test("rollbackState should create backup before rollback", async () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const stateDir = getRunStateDir(run.id, testDir);
 
 			// Create initial state and snapshot
@@ -270,8 +270,8 @@ describe("History Module Tests", () => {
 			expect(snapshots[0].reason).toContain("Pre-rollback backup");
 		});
 
-		test("rollbackState should skip backup when requested", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("rollbackState should skip backup when requested", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const stateDir = getRunStateDir(run.id, testDir);
 
 			const initialData = [{ id: "1" }];
@@ -288,8 +288,8 @@ describe("History Module Tests", () => {
 			expect(snapshots.length).toBe(1);
 		});
 
-		test("rollbackState should return null for non-existent snapshot", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("rollbackState should return null for non-existent snapshot", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const result = rollbackState(run.id, "issues", "non-existent", { workDir: testDir });
 
 			expect(result).toBeNull();
@@ -298,7 +298,7 @@ describe("History Module Tests", () => {
 
 	describe("Snapshot Cleanup", () => {
 		test("enforceSnapshotLimit should remove oldest snapshots", async () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			// Create 5 snapshots
 			for (let i = 0; i < 5; i++) {
@@ -323,8 +323,8 @@ describe("History Module Tests", () => {
 			expect(remaining[0].reason).toBe("Snapshot 4");
 		});
 
-		test("enforceSnapshotLimit should return 0 when under limit", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("enforceSnapshotLimit should return 0 when under limit", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			saveStateSnapshot(run.id, "issues", { v: 1 }, { workDir: testDir });
 			saveStateSnapshot(run.id, "issues", { v: 2 }, { workDir: testDir });
@@ -334,8 +334,8 @@ describe("History Module Tests", () => {
 			expect(removed).toBe(0);
 		});
 
-		test("deleteSnapshot should remove specific snapshot", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("deleteSnapshot should remove specific snapshot", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			const meta = saveStateSnapshot(run.id, "issues", { v: 1 }, { workDir: testDir });
 			const deleted = deleteSnapshot(run.id, "issues", meta.id, testDir);
@@ -346,15 +346,15 @@ describe("History Module Tests", () => {
 			expect(snapshots.length).toBe(0);
 		});
 
-		test("deleteSnapshot should return false for non-existent snapshot", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("deleteSnapshot should return false for non-existent snapshot", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 			const deleted = deleteSnapshot(run.id, "issues", "non-existent", testDir);
 
 			expect(deleted).toBe(false);
 		});
 
 		test("clearSnapshots should remove all snapshots for state type", async () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			saveStateSnapshot(run.id, "issues", { v: 1 }, { workDir: testDir });
 			await new Promise((r) => setTimeout(r, 10));
@@ -370,8 +370,8 @@ describe("History Module Tests", () => {
 			expect(remaining.length).toBe(0);
 		});
 
-		test("clearAllHistory should remove entire history directory", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("clearAllHistory should remove entire history directory", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			saveStateSnapshot(run.id, "issues", { v: 1 }, { workDir: testDir });
 			saveStateSnapshot(run.id, "tasks", { v: 1 }, { workDir: testDir });
@@ -385,7 +385,7 @@ describe("History Module Tests", () => {
 
 	describe("History Statistics", () => {
 		test("getHistoryStats should return stats for all state types", async () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			saveStateSnapshot(run.id, "issues", { v: 1 }, { workDir: testDir });
 			await new Promise((r) => setTimeout(r, 10));
@@ -406,8 +406,8 @@ describe("History Module Tests", () => {
 			expect(metaStats?.snapshotCount).toBe(0);
 		});
 
-		test("getHistoryStats should include size information", () => {
-			const run = createRun({ scope: "test", workDir: testDir });
+		test("getHistoryStats should include size information", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
 
 			const largeData = { data: "x".repeat(1000) };
 			saveStateSnapshot(run.id, "issues", largeData, { workDir: testDir });
@@ -420,7 +420,7 @@ describe("History Module Tests", () => {
 	});
 
 	describe("Default Configuration", () => {
-		test("DEFAULT_HISTORY_CONFIG should have sensible defaults", () => {
+		test("DEFAULT_HISTORY_CONFIG should have sensible defaults", async () => {
 			expect(DEFAULT_HISTORY_CONFIG.enabled).toBe(true);
 			expect(DEFAULT_HISTORY_CONFIG.maxSnapshots).toBe(10);
 		});

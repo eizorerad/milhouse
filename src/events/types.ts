@@ -45,11 +45,6 @@ export type MilhouseEvents = {
 	"git:rebase:complete": { source: string; target: string } & MilhouseEventContext;
 	"git:rebase:conflict": { source: string; target: string; files: string[] } & MilhouseEventContext;
 
-	// Gate checks
-	"gate:start": { name: string; taskId: string } & MilhouseEventContext;
-	"gate:pass": { name: string; taskId: string } & MilhouseEventContext;
-	"gate:fail": { name: string; taskId: string; reason: string } & MilhouseEventContext;
-
 	// Probe checks
 	"probe:start": { name: string } & MilhouseEventContext;
 	"probe:complete": { name: string; result: unknown } & MilhouseEventContext;

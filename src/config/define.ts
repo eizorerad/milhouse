@@ -69,17 +69,15 @@ export interface Config {
 		skipMerge?: boolean;
 	};
 
-	gates?: {
-		evidence?: boolean;
-		diffHygiene?: boolean;
-		placeholder?: boolean;
-		dod?: boolean;
-	};
-
 	/** Extra instructions appended to agent prompts per phase */
-	prompts?: Partial<Record<PhaseName, {
-		extraInstructions?: string;
-	}>>;
+	prompts?: Partial<
+		Record<
+			PhaseName,
+			{
+				extraInstructions?: string;
+			}
+		>
+	>;
 
 	report?: {
 		enabled?: boolean;
@@ -106,12 +104,12 @@ export const DEFAULTS = {
 	failFast: false,
 
 	phases: {
-		scan:        { model: "opus", workers: 1, retries: 2, retryDelay: 5000, timeout: 60_000 },
-		validate:    { model: "opus", workers: 5, retries: 2, retryDelay: 3000, timeout: 120_000 },
-		plan:        { model: "opus", workers: 5, retries: 3, retryDelay: 5000, timeout: 180_000 },
+		scan: { model: "opus", workers: 1, retries: 2, retryDelay: 5000, timeout: 60_000 },
+		validate: { model: "opus", workers: 5, retries: 2, retryDelay: 3000, timeout: 120_000 },
+		plan: { model: "opus", workers: 5, retries: 3, retryDelay: 5000, timeout: 180_000 },
 		consolidate: { model: "opus", workers: 1, retries: 2, retryDelay: 5000, timeout: 180_000 },
-		exec:        { model: "opus", workers: 3, retries: 3, retryDelay: 5000, timeout: 4_000_000 },
-		verify:      { model: "opus", workers: 1, retries: 1, retryDelay: 3000, timeout: 120_000 },
+		exec: { model: "opus", workers: 3, retries: 3, retryDelay: 5000, timeout: 4_000_000 },
+		verify: { model: "opus", workers: 1, retries: 1, retryDelay: 3000, timeout: 120_000 },
 	},
 
 	cost: { inputPerMillion: 5, outputPerMillion: 25, budgetLimit: 0 },
@@ -127,13 +125,6 @@ export const DEFAULTS = {
 		createPr: false,
 		draftPr: true,
 		skipMerge: false,
-	},
-
-	gates: {
-		evidence: true,
-		diffHygiene: true,
-		placeholder: true,
-		dod: true,
 	},
 
 	report: { enabled: true, format: "json", autoGenerate: true },
@@ -158,8 +149,13 @@ export interface ResolvedFullConfig {
 	commands: { test: string; lint: string; build: string; compile: string };
 	rules: string[];
 	boundaries: { neverTouch: string[] };
-	execution: { mode: string; autoCommit: boolean; createPr: boolean; draftPr: boolean; skipMerge: boolean };
-	gates: { evidence: boolean; diffHygiene: boolean; placeholder: boolean; dod: boolean };
+	execution: {
+		mode: string;
+		autoCommit: boolean;
+		createPr: boolean;
+		draftPr: boolean;
+		skipMerge: boolean;
+	};
 	report: { enabled: boolean; format: string; autoGenerate: boolean };
 	skipTests: boolean;
 	skipLint: boolean;
@@ -198,7 +194,6 @@ export function resolveConfig(user: Config): ResolvedFullConfig {
 		rules: user.rules ?? DEFAULTS.rules,
 		boundaries: { ...DEFAULTS.boundaries, ...strip(user.boundaries) },
 		execution: { ...DEFAULTS.execution, ...strip(user.execution) },
-		gates: { ...DEFAULTS.gates, ...strip(user.gates) },
 		report: { ...DEFAULTS.report, ...strip(user.report) },
 
 		skipTests: user.skipTests ?? DEFAULTS.skipTests,

@@ -130,7 +130,7 @@ export async function runPhase<TItem, TResult>(
 	if (!runId) {
 		if (phaseConfig.name === "scan") {
 			// For scan phase, create a new run
-			const run = createRun({ scope: options.scope, workDir });
+			const run = await createRun({ scope: options.scope, workDir });
 			runId = run.id;
 		} else {
 			// For other phases, find the latest run
@@ -243,7 +243,11 @@ export async function runPhase<TItem, TResult>(
 
 		// Set phase breakdown (totals already updated incrementally in executePool)
 		const phaseCost = calculateCost({ input: totalInput, output: totalOutput }, config.cost);
-		runCost.byPhase[phaseConfig.name] = { inputTokens: totalInput, outputTokens: totalOutput, cost: phaseCost };
+		runCost.byPhase[phaseConfig.name] = {
+			inputTokens: totalInput,
+			outputTokens: totalOutput,
+			cost: phaseCost,
+		};
 		runCost.inputCost += (totalInput / 1_000_000) * config.cost.inputPerMillion;
 		runCost.outputCost += (totalOutput / 1_000_000) * config.cost.outputPerMillion;
 

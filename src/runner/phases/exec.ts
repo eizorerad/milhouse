@@ -29,14 +29,7 @@ import {
 } from "../../state/tasks.ts";
 import type { Issue, RunPhase } from "../../state/types.ts";
 import { AGENT_ROLES, type Task } from "../../state/types.ts";
-import {
-	formatDuration,
-	formatTokens,
-	logDebug,
-	logInfo,
-	logSuccess,
-	logWarn,
-} from "../../ui/logger.ts";
+import { formatTokens, logDebug, logInfo, logSuccess, logWarn } from "../../ui/logger.ts";
 import { ProgressSpinner } from "../../ui/spinners.ts";
 import {
 	createTaskBranch,
@@ -187,7 +180,12 @@ export function getReadyTasksForRun(runId: string, workDir: string): Task[] {
 function writeIssueReport(
 	issueId: string,
 	issue: Issue | undefined,
-	issueResult: { success: boolean; completedTasks: string[]; failedTasks: string[]; error?: string },
+	issueResult: {
+		success: boolean;
+		completedTasks: string[];
+		failedTasks: string[];
+		error?: string;
+	},
 	workDir: string,
 ): void {
 	const milDir = getMilhouseDir(workDir);
@@ -196,17 +194,25 @@ function writeIssueReport(
 
 	const timestamp = new Date().toISOString();
 	const separator = "=".repeat(60);
-	const lines: string[] = ["", separator, `[${timestamp}] ISSUE EXECUTION REPORT: ${issueId}`, separator];
+	const lines: string[] = [
+		"",
+		separator,
+		`[${timestamp}] ISSUE EXECUTION REPORT: ${issueId}`,
+		separator,
+	];
 
 	if (issue) {
 		lines.push(`Symptom: ${issue.symptom}`);
 		lines.push(`Hypothesis: ${issue.hypothesis}`);
 		lines.push(`Severity: ${issue.severity}`);
 		lines.push(`Status: ${issue.status}`);
-		if (issue.corrected_description) lines.push(`Corrected Description: ${issue.corrected_description}`);
+		if (issue.corrected_description)
+			lines.push(`Corrected Description: ${issue.corrected_description}`);
 		const fileEvidence = issue.evidence.find((e) => e.type === "file" && e.file);
 		if (fileEvidence?.file) {
-			lines.push(`Source File: ${fileEvidence.file}${fileEvidence.line_start ? `:${fileEvidence.line_start}` : ""}`);
+			lines.push(
+				`Source File: ${fileEvidence.file}${fileEvidence.line_start ? `:${fileEvidence.line_start}` : ""}`,
+			);
 		}
 	}
 
@@ -234,7 +240,13 @@ async function executeSingleTask(
 	workDir: string,
 	modelOverride: string | undefined,
 	spinner: ProgressSpinner,
-): Promise<{ success: boolean; inputTokens: number; outputTokens: number; response?: string; error?: string }> {
+): Promise<{
+	success: boolean;
+	inputTokens: number;
+	outputTokens: number;
+	response?: string;
+	error?: string;
+}> {
 	const prompt = buildExecutorPrompt(task, workDir);
 	logDebug(`Executing task ${task.id}: ${task.title}`);
 
@@ -261,10 +273,21 @@ async function executeSingleTask(
 			result = await engine.execute(prompt, workDir, { modelOverride });
 		}
 	} catch (error) {
-		return { success: false, inputTokens: 0, outputTokens: 0, error: error instanceof Error ? error.message : String(error) };
+		return {
+			success: false,
+			inputTokens: 0,
+			outputTokens: 0,
+			error: error instanceof Error ? error.message : String(error),
+		};
 	}
 
-	return { success: result.success, inputTokens: result.inputTokens, outputTokens: result.outputTokens, response: result.response, error: result.error };
+	return {
+		success: result.success,
+		inputTokens: result.inputTokens,
+		outputTokens: result.outputTokens,
+		response: result.response,
+		error: result.error,
+	};
 }
 
 async function executeTaskWithTracking(
@@ -281,7 +304,14 @@ async function executeTaskWithTracking(
 	updateTaskForRun(runId, task.id, { status: "running" }, workDir);
 
 	const executionRecord = createExecution(
-		{ task_id: task.id, started_at: new Date().toISOString(), agent_role: "EX", input_tokens: 0, output_tokens: 0, follow_up_task_ids: [] },
+		{
+			task_id: task.id,
+			started_at: new Date().toISOString(),
+			agent_role: "EX",
+			input_tokens: 0,
+			output_tokens: 0,
+			follow_up_task_ids: [],
+		},
 		workDir,
 	);
 
@@ -304,12 +334,24 @@ async function executeTaskWithTracking(
 
 	updateExecution(
 		executionRecord.id,
-		{ completed_at: new Date().toISOString(), success: result.success, error: result.error, input_tokens: result.inputTokens, output_tokens: result.outputTokens, branch },
+		{
+			completed_at: new Date().toISOString(),
+			success: result.success,
+			error: result.error,
+			input_tokens: result.inputTokens,
+			output_tokens: result.outputTokens,
+			branch,
+		},
 		workDir,
 	);
 
 	if (result.success) {
-		updateTaskForRun(runId, task.id, { status: "done", completed_at: new Date().toISOString() }, workDir);
+		updateTaskForRun(
+			runId,
+			task.id,
+			{ status: "done", completed_at: new Date().toISOString() },
+			workDir,
+		);
 
 		if (config.createPr && branch && config.baseBranch) {
 			const prResult = await createPullRequest(
@@ -348,11 +390,20 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 	defaultParallel: 3,
 
 	// Not used — customExecute replaces the standard flow
-	loadItems() { throw new Error("exec uses customExecute"); },
-	buildPrompt() { throw new Error("exec uses customExecute"); },
-	parseResponse() { throw new Error("exec uses customExecute"); },
+	loadItems() {
+		throw new Error("exec uses customExecute");
+	},
+	buildPrompt() {
+		throw new Error("exec uses customExecute");
+	},
+	parseResponse() {
+		throw new Error("exec uses customExecute");
+	},
 
-	async customExecute(ctx: PhaseContext, runCost: RunCost): Promise<PhaseItemResult<ExecTaskResult>[]> {
+	async customExecute(
+		ctx: PhaseContext,
+		runCost: RunCost,
+	): Promise<PhaseItemResult<ExecTaskResult>[]> {
 		const { runId, workDir, engine, config } = ctx;
 		const modelOverride = resolvePhaseModel(config, "exec");
 
@@ -388,7 +439,8 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 
 		logInfo(`Pending tasks: ${pendingTasks.length}`);
 		if (config.minSeverity) logInfo(`Minimum severity: ${config.minSeverity}`);
-		if (config.severityFilter?.length) logInfo(`Severity filter: ${config.severityFilter.join(", ")}`);
+		if (config.severityFilter?.length)
+			logInfo(`Severity filter: ${config.severityFilter.join(", ")}`);
 		if (useParallel) logInfo(`Running up to ${maxParallel} tasks in parallel`);
 		console.log("");
 
@@ -402,10 +454,18 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		if (config.taskId) {
 			const specificTask = readTask(config.taskId, workDir);
 			if (!specificTask) throw new Error(`Task not found: ${config.taskId}`);
-			if (specificTask.status !== "pending") throw new Error(`Task not pending (status: ${specificTask.status}): ${config.taskId}`);
+			if (specificTask.status !== "pending")
+				throw new Error(`Task not pending (status: ${specificTask.status}): ${config.taskId}`);
 
 			const spinner = new ProgressSpinner("Executing tasks", ["EX"]);
-			const result = await executeTaskWithTracking(runId, specificTask, engine, workDir, config, spinner);
+			const result = await executeTaskWithTracking(
+				runId,
+				specificTask,
+				engine,
+				workDir,
+				config,
+				spinner,
+			);
 			totalInputTokens += result.inputTokens;
 			totalOutputTokens += result.outputTokens;
 
@@ -459,7 +519,8 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 			let currentBranch = config.baseBranch;
 			if (!currentBranch) {
 				const branchResult = await getCurrentBranch(workDir);
-				if (!branchResult.ok) throw new Error(`Failed to get current branch: ${branchResult.error.message}`);
+				if (!branchResult.ok)
+					throw new Error(`Failed to get current branch: ${branchResult.error.message}`);
 				currentBranch = branchResult.value;
 			}
 			logInfo(`Base branch: ${currentBranch}`);
@@ -483,16 +544,53 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 				tmuxConfig: { autoAttach: config.tmuxAutoAttach, showAttachCommand: true },
 				onIssueComplete: async (issueId: string, result: IssueExecutionResult) => {
 					for (const taskId of result.completedTasks) {
-						await updateTaskForRunSafe(runId, taskId, { status: "done", completed_at: new Date().toISOString() }, workDir);
-						createExecution({ task_id: taskId, started_at: new Date().toISOString(), completed_at: new Date().toISOString(), agent_role: "EX", success: true, input_tokens: 0, output_tokens: 0, follow_up_task_ids: [] }, workDir);
+						await updateTaskForRunSafe(
+							runId,
+							taskId,
+							{ status: "done", completed_at: new Date().toISOString() },
+							workDir,
+						);
+						createExecution(
+							{
+								task_id: taskId,
+								started_at: new Date().toISOString(),
+								completed_at: new Date().toISOString(),
+								agent_role: "EX",
+								success: true,
+								input_tokens: 0,
+								output_tokens: 0,
+								follow_up_task_ids: [],
+							},
+							workDir,
+						);
 					}
 					for (const taskId of result.failedTasks) {
-						await updateTaskForRunSafe(runId, taskId, { status: "failed", error: result.error }, workDir);
-						createExecution({ task_id: taskId, started_at: new Date().toISOString(), completed_at: new Date().toISOString(), agent_role: "EX", success: false, error: result.error, input_tokens: 0, output_tokens: 0, follow_up_task_ids: [] }, workDir);
+						await updateTaskForRunSafe(
+							runId,
+							taskId,
+							{ status: "failed", error: result.error },
+							workDir,
+						);
+						createExecution(
+							{
+								task_id: taskId,
+								started_at: new Date().toISOString(),
+								completed_at: new Date().toISOString(),
+								agent_role: "EX",
+								success: false,
+								error: result.error,
+								input_tokens: 0,
+								output_tokens: 0,
+								follow_up_task_ids: [],
+							},
+							workDir,
+						);
 					}
 					const issue = validIssues.find((i) => i.id === issueId);
 					writeIssueReport(issueId, issue, result, workDir);
-					logInfo(`Issue ${issueId}: ${result.completedTasks.length} completed, ${result.failedTasks.length} failed`);
+					logInfo(
+						`Issue ${issueId}: ${result.completedTasks.length} completed, ${result.failedTasks.length} failed`,
+					);
 				},
 				onMergeComplete: async (mergeResults: MergeBranchResult[]) => {
 					logInfo(`onMergeComplete callback invoked with ${mergeResults.length} merge result(s)`);
@@ -504,10 +602,21 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 								(t: Task) => t.issue_id === failedMerge.issueId && t.status === "done",
 							);
 							for (const task of tasksForIssue) {
-								await updateTaskForRunSafe(runId, task.id, { status: "merge_error", error: `Merge failed: ${failedMerge.error || "Unknown error"}`, completed_at: undefined }, workDir);
+								await updateTaskForRunSafe(
+									runId,
+									task.id,
+									{
+										status: "merge_error",
+										error: `Merge failed: ${failedMerge.error || "Unknown error"}`,
+										completed_at: undefined,
+									},
+									workDir,
+								);
 								logDebug(`Task ${task.id} status changed from "done" to "merge_error"`);
 							}
-							logWarn(`Issue ${failedMerge.issueId}: ${tasksForIssue.length} task(s) marked as merge_error`);
+							logWarn(
+								`Issue ${failedMerge.issueId}: ${tasksForIssue.length} task(s) marked as merge_error`,
+							);
 						}
 					}
 				},
@@ -529,7 +638,8 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 			let currentBranch = config.baseBranch;
 			if (!currentBranch) {
 				const branchResult = await getCurrentBranch(workDir);
-				if (!branchResult.ok) throw new Error(`Failed to get current branch: ${branchResult.error.message}`);
+				if (!branchResult.ok)
+					throw new Error(`Failed to get current branch: ${branchResult.error.message}`);
 				currentBranch = branchResult.value;
 			}
 			logInfo(`Base branch: ${currentBranch}`);
@@ -550,11 +660,33 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 				skipMerge: config.skipMerge,
 				failFast: config.failFast,
 				onTaskComplete: async (taskId: string, success: boolean) => {
-					await updateTaskForRunSafe(runId, taskId, { status: success ? "done" : "failed", completed_at: success ? new Date().toISOString() : undefined }, workDir);
-					createExecution({ task_id: taskId, started_at: new Date().toISOString(), completed_at: new Date().toISOString(), agent_role: "EX", success, input_tokens: 0, output_tokens: 0, follow_up_task_ids: [] }, workDir);
+					await updateTaskForRunSafe(
+						runId,
+						taskId,
+						{
+							status: success ? "done" : "failed",
+							completed_at: success ? new Date().toISOString() : undefined,
+						},
+						workDir,
+					);
+					createExecution(
+						{
+							task_id: taskId,
+							started_at: new Date().toISOString(),
+							completed_at: new Date().toISOString(),
+							agent_role: "EX",
+							success,
+							input_tokens: 0,
+							output_tokens: 0,
+							follow_up_task_ids: [],
+						},
+						workDir,
+					);
 				},
 				onGroupComplete: (group, groupResult) => {
-					logInfo(`Group ${group} complete: ${groupResult.completedTasks.length} completed, ${groupResult.failedTasks.length} failed`);
+					logInfo(
+						`Group ${group} complete: ${groupResult.completedTasks.length} completed, ${groupResult.failedTasks.length} failed`,
+					);
 				},
 			});
 
@@ -576,8 +708,11 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 			while (iteration < maxIterations) {
 				const readyTasks = getReadyTasksForRun(runId, workDir);
 				if (readyTasks.length === 0) {
-					const remaining = loadTasksForRun(runId, workDir).filter((t: Task) => t.status === "pending");
-					if (remaining.length > 0) logWarn(`${remaining.length} tasks blocked due to failed dependencies`);
+					const remaining = loadTasksForRun(runId, workDir).filter(
+						(t: Task) => t.status === "pending",
+					);
+					if (remaining.length > 0)
+						logWarn(`${remaining.length} tasks blocked due to failed dependencies`);
 					break;
 				}
 
@@ -607,16 +742,16 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		}
 
 		// Update runCost for budget tracking
-		const execCost = calculateCost({ input: totalInputTokens, output: totalOutputTokens }, config.cost);
+		const execCost = calculateCost(
+			{ input: totalInputTokens, output: totalOutputTokens },
+			config.cost,
+		);
 		runCost.totalCost += execCost;
 		runCost.inputTokens += totalInputTokens;
 		runCost.outputTokens += totalOutputTokens;
 		runCost.totalTokens += totalInputTokens + totalOutputTokens;
 
-		updateProgress(
-			`Execution: ${tasksCompleted} completed, ${tasksFailed} failed`,
-			workDir,
-		);
+		updateProgress(`Execution: ${tasksCompleted} completed, ${tasksFailed} failed`, workDir);
 
 		// Store counters for formatSummary
 		ctx.store.tasksCompleted = tasksCompleted;
@@ -656,7 +791,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		return results;
 	},
 
-	async saveResults(results, ctx) {
+	async saveResults(_results, ctx) {
 		const finalTasks = loadTasksForRun(ctx.runId, ctx.workDir);
 		await updateRunStatsWithLock(
 			ctx.runId,
@@ -698,8 +833,10 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 
 		if (remainingPending > 0 || remainingMergeError > 0) {
 			console.log("");
-			if (remainingPending > 0) logInfo(`Remaining pending tasks: ${pc.yellow(String(remainingPending))}`);
-			if (remainingMergeError > 0) logWarn(`Tasks with merge errors: ${pc.yellow(String(remainingMergeError))}`);
+			if (remainingPending > 0)
+				logInfo(`Remaining pending tasks: ${pc.yellow(String(remainingPending))}`);
+			if (remainingMergeError > 0)
+				logWarn(`Tasks with merge errors: ${pc.yellow(String(remainingMergeError))}`);
 		}
 
 		console.log("");
@@ -708,7 +845,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		console.log("");
 	},
 
-	nextPhase(results, ctx): RunPhase {
+	nextPhase(_results, ctx): RunPhase {
 		const finalTasks = loadTasksForRun(ctx.runId, ctx.workDir);
 		const allDone = finalTasks.every((t: Task) => t.status === "done" || t.status === "skipped");
 		const anyFailed = finalTasks.some((t: Task) => t.status === "failed");

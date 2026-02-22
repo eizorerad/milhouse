@@ -27,7 +27,7 @@ import {
 	STATE_FILES,
 } from "./types.ts";
 
-import { MILHOUSE_DIR, getMilhouseDir } from "./paths.ts";
+import { getMilhouseDir } from "./paths.ts";
 
 // ============================================================================
 // RUNS DIRECTORY FUNCTIONS
@@ -200,13 +200,14 @@ export function generateRunId(nameHint?: string): string {
 // ============================================================================
 
 /**
- * Create a new run
+ * Create a new run (concurrent-safe).
+ * Uses saveRunsIndexWithLock to prevent data loss under concurrent calls.
  */
-export function createRun(options: {
+export async function createRun(options: {
 	scope?: string;
 	name?: string;
 	workDir?: string;
-}): RunMeta {
+}): Promise<RunMeta> {
 	const workDir = options.workDir ?? process.cwd();
 	const now = new Date().toISOString();
 
@@ -242,16 +243,17 @@ export function createRun(options: {
 	// Save run metadata
 	saveRunMeta(meta, workDir);
 
-	// Update runs index — new run is appended at the end (making it "latest")
-	const index = loadRunsIndex(workDir);
-	index.runs.push({
-		id: runId,
-		name: options.name,
-		scope: options.scope,
-		created_at: now,
-		phase: "scan",
-	});
-	saveRunsIndex(index, workDir);
+	// Update runs index with locking — new run is appended at the end (making it "latest")
+	await saveRunsIndexWithLock((index) => {
+		index.runs.push({
+			id: runId,
+			name: options.name,
+			scope: options.scope,
+			created_at: now,
+			phase: "scan",
+		});
+		return index;
+	}, workDir);
 
 	// Emit run:created event
 	stateEvents.emitRunCreated(runId, options.scope, options.name);
@@ -260,21 +262,20 @@ export function createRun(options: {
 }
 
 /**
- * Delete a run
+ * Delete a run (concurrent-safe).
+ * Uses saveRunsIndexWithLock to prevent data loss under concurrent calls.
  */
-export function deleteRun(runId: string, workDir = process.cwd()): boolean {
+export async function deleteRun(runId: string, workDir = process.cwd()): Promise<boolean> {
+	// Check existence first (before taking lock)
 	const index = loadRunsIndex(workDir);
-
-	// Check if run exists
-	const runIndex = index.runs.findIndex((r) => r.id === runId);
-	if (runIndex === -1) {
+	if (!index.runs.some((r) => r.id === runId)) {
 		return false;
 	}
 
-	// Remove from index
-	index.runs.splice(runIndex, 1);
-
-	saveRunsIndex(index, workDir);
+	// Remove from index with locking
+	await saveRunsIndexWithLock((idx) => {
+		return { ...idx, runs: idx.runs.filter((r) => r.id !== runId) };
+	}, workDir);
 
 	// Delete run directory
 	const runDir = getRunDir(runId, workDir);
@@ -559,7 +560,7 @@ export interface CleanupResult {
  * const result = cleanupOldRuns({ keepLast: 3, dryRun: true });
  * console.log('Would delete:', result.deleted);
  */
-export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResult {
+export async function cleanupOldRuns(options: CleanupOldRunsOptions = {}): Promise<CleanupResult> {
 	const workDir = options.workDir ?? process.cwd();
 
 	const result: CleanupResult = {
@@ -633,7 +634,7 @@ export function cleanupOldRuns(options: CleanupOldRunsOptions = {}): CleanupResu
 	// If not a dry run, actually delete the runs
 	if (!options.dryRun) {
 		for (const run of runsToDelete) {
-			deleteRun(run.id, workDir);
+			await deleteRun(run.id, workDir);
 		}
 	}
 

@@ -38,9 +38,9 @@ describe("Immutability Tests", () => {
 	});
 
 	describe("Run State Immutability", () => {
-		test("updateRunStats should not mutate input RunMeta", () => {
+		test("updateRunStats should not mutate input RunMeta", async () => {
 			// Create a run
-			const run = createRun({ scope: "test immutability", workDir: testDir });
+			const run = await createRun({ scope: "test immutability", workDir: testDir });
 
 			// Load the run meta and create a deep copy for comparison
 			const originalMeta = loadRunMeta(run.id, testDir);
@@ -79,8 +79,8 @@ describe("Immutability Tests", () => {
 			expect(updated).not.toBe(originalMeta);
 		});
 
-		test("updateRunPhaseInMeta should not mutate input RunMeta", () => {
-			const run = createRun({ scope: "test phase immutability", workDir: testDir });
+		test("updateRunPhaseInMeta should not mutate input RunMeta", async () => {
+			const run = await createRun({ scope: "test phase immutability", workDir: testDir });
 
 			// Load original meta
 			const originalMeta = loadRunMeta(run.id, testDir);
@@ -100,10 +100,10 @@ describe("Immutability Tests", () => {
 			expect(originalMeta?.phase).toBe(originalPhase);
 		});
 
-		test("setCurrentRun should not mutate input RunsIndex", () => {
+		test("setCurrentRun should not mutate input RunsIndex", async () => {
 			// Create multiple runs
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const _run2 = createRun({ scope: "run 2", workDir: testDir });
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const _run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			// Load original index
 			const originalIndex = loadRunsIndex(testDir);
@@ -122,8 +122,8 @@ describe("Immutability Tests", () => {
 			expect(newIndex.runs[newIndex.runs.length - 1].id).toBe(run1.id);
 		});
 
-		test("saveRunsIndex should not mutate input index object", () => {
-			createRun({ scope: "test save index", workDir: testDir });
+		test("saveRunsIndex should not mutate input index object", async () => {
+			await createRun({ scope: "test save index", workDir: testDir });
 
 			// Load index and create a copy
 			const index = loadRunsIndex(testDir);
@@ -144,8 +144,8 @@ describe("Immutability Tests", () => {
 	});
 
 	describe("Task State Immutability", () => {
-		test("updateTask should not mutate input Task", () => {
-			createRun({ scope: "test task immutability", workDir: testDir });
+		test("updateTask should not mutate input Task", async () => {
+			await createRun({ scope: "test task immutability", workDir: testDir });
 
 			// Create a task
 			const task = createTask(
@@ -187,8 +187,8 @@ describe("Immutability Tests", () => {
 			expect(task.description).toBe(originalDescription);
 		});
 
-		test("saveTasks should not mutate input tasks array", () => {
-			createRun({ scope: "test save tasks", workDir: testDir });
+		test("saveTasks should not mutate input tasks array", async () => {
+			await createRun({ scope: "test save tasks", workDir: testDir });
 
 			// Create some tasks
 			const _task1 = createTask(
@@ -228,8 +228,8 @@ describe("Immutability Tests", () => {
 			expect(tasks[0]?.title).toBe(originalFirstTaskTitle);
 		});
 
-		test("loadTasks should return independent copies", () => {
-			createRun({ scope: "test load tasks independence", workDir: testDir });
+		test("loadTasks should return independent copies", async () => {
+			await createRun({ scope: "test load tasks independence", workDir: testDir });
 
 			createTask(
 				{
@@ -263,8 +263,8 @@ describe("Immutability Tests", () => {
 	});
 
 	describe("Issue State Immutability", () => {
-		test("updateIssue should not mutate input Issue", () => {
-			createRun({ scope: "test issue immutability", workDir: testDir });
+		test("updateIssue should not mutate input Issue", async () => {
+			await createRun({ scope: "test issue immutability", workDir: testDir });
 
 			// Create an issue
 			const now = new Date().toISOString();
@@ -309,8 +309,8 @@ describe("Immutability Tests", () => {
 			expect(originalIssue.hypothesis).toBe(originalHypothesis);
 		});
 
-		test("saveIssues should not mutate input issues array", () => {
-			createRun({ scope: "test save issues", workDir: testDir });
+		test("saveIssues should not mutate input issues array", async () => {
+			await createRun({ scope: "test save issues", workDir: testDir });
 
 			const now = new Date().toISOString();
 			const issues: Issue[] = [
@@ -339,8 +339,8 @@ describe("Immutability Tests", () => {
 			expect(issues[0].symptom).toBe(originalSymptom);
 		});
 
-		test("loadIssues should return independent copies", () => {
-			createRun({ scope: "test load issues independence", workDir: testDir });
+		test("loadIssues should return independent copies", async () => {
+			await createRun({ scope: "test load issues independence", workDir: testDir });
 
 			const now = new Date().toISOString();
 			const issues: Issue[] = [
@@ -376,8 +376,8 @@ describe("Immutability Tests", () => {
 	});
 
 	describe("Nested Object Immutability", () => {
-		test("updating task should not mutate nested depends_on array", () => {
-			createRun({ scope: "test nested immutability", workDir: testDir });
+		test("updating task should not mutate nested depends_on array", async () => {
+			await createRun({ scope: "test nested immutability", workDir: testDir });
 
 			const task = createTask(
 				{
@@ -417,8 +417,8 @@ describe("Immutability Tests", () => {
 			expect(task.files).toEqual(originalFiles);
 		});
 
-		test("updating issue should not mutate nested evidence array", () => {
-			createRun({ scope: "test evidence immutability", workDir: testDir });
+		test("updating issue should not mutate nested evidence array", async () => {
+			await createRun({ scope: "test evidence immutability", workDir: testDir });
 
 			const now = new Date().toISOString();
 			const originalEvidence = [
@@ -475,7 +475,7 @@ describe("Immutability Tests", () => {
 	});
 
 	describe("Spread Operator Usage Verification", () => {
-		test("createRun should use spread operator for options", () => {
+		test("createRun should use spread operator for options", async () => {
 			const options = {
 				scope: "test scope",
 				name: "test name",
@@ -487,7 +487,7 @@ describe("Immutability Tests", () => {
 			const originalName = options.name;
 
 			// Create run
-			const run = createRun(options);
+			const run = await createRun(options);
 
 			// Verify options were not mutated
 			expect(options.scope).toBe(originalScope);
@@ -498,8 +498,8 @@ describe("Immutability Tests", () => {
 			expect(run.name).toBe(originalName);
 		});
 
-		test("updateRunStats should use spread operator for stats", () => {
-			const run = createRun({ scope: "test spread", workDir: testDir });
+		test("updateRunStats should use spread operator for stats", async () => {
+			const run = await createRun({ scope: "test spread", workDir: testDir });
 
 			const stats = {
 				issues_found: 5,

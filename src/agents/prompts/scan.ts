@@ -7,7 +7,6 @@
 
 import type { PhaseContext } from "../../runner/types.ts";
 import { AGENT_ROLES } from "../../state/types.ts";
-import { appendUserConfig } from "./common.ts";
 
 /**
  * Build the scan prompt for the Lead Investigator agent.

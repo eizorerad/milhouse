@@ -61,8 +61,8 @@ describe("Run-aware task functions", () => {
 	}
 
 	describe("readTaskForRun", () => {
-		it("should return the correct task from the specified run", () => {
-			const run = createRun({ scope: "read task test", workDir: testDir });
+		it("should return the correct task from the specified run", async () => {
+			const run = await createRun({ scope: "read task test", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			const result = readTaskForRun(run.id, task.id, testDir);
@@ -74,8 +74,8 @@ describe("Run-aware task functions", () => {
 			expect(result?.status).toBe("pending");
 		});
 
-		it("should return null for non-existent task ID", () => {
-			const run = createRun({ scope: "non-existent task", workDir: testDir });
+		it("should return null for non-existent task ID", async () => {
+			const run = await createRun({ scope: "non-existent task", workDir: testDir });
 			// Create a task so the run has a tasks.json file
 			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
@@ -84,22 +84,22 @@ describe("Run-aware task functions", () => {
 			expect(result).toBeNull();
 		});
 
-		it("should return null for non-existent run ID", () => {
+		it("should return null for non-existent run ID", async () => {
 			const result = readTaskForRun("non-existent-run-id", "any-task-id", testDir);
 
 			expect(result).toBeNull();
 		});
 
-		it("should return null when run exists but has no tasks", () => {
-			const run = createRun({ scope: "empty run", workDir: testDir });
+		it("should return null when run exists but has no tasks", async () => {
+			const run = await createRun({ scope: "empty run", workDir: testDir });
 
 			const result = readTaskForRun(run.id, "any-task-id", testDir);
 
 			expect(result).toBeNull();
 		});
 
-		it("should return the correct task when multiple tasks exist", () => {
-			const run = createRun({ scope: "multiple tasks", workDir: testDir });
+		it("should return the correct task when multiple tasks exist", async () => {
+			const run = await createRun({ scope: "multiple tasks", workDir: testDir });
 
 			const _task1 = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 			const task2 = createTaskForRun(run.id, createTestTaskData("ISSUE-2"), testDir);
@@ -113,9 +113,9 @@ describe("Run-aware task functions", () => {
 			expect(result?.issue_id).toBe("ISSUE-2");
 		});
 
-		it("should not find task from a different run", () => {
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+		it("should not find task from a different run", async () => {
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			const taskInRun1 = createTaskForRun(run1.id, createTestTaskData("RUN1-ISSUE"), testDir);
 
@@ -127,22 +127,22 @@ describe("Run-aware task functions", () => {
 	});
 
 	describe("loadTasksForRun", () => {
-		it("should return empty array for non-existent run", () => {
+		it("should return empty array for non-existent run", async () => {
 			const result = loadTasksForRun("non-existent-run", testDir);
 
 			expect(result).toEqual([]);
 		});
 
-		it("should return empty array for run with no tasks", () => {
-			const run = createRun({ scope: "empty run", workDir: testDir });
+		it("should return empty array for run with no tasks", async () => {
+			const run = await createRun({ scope: "empty run", workDir: testDir });
 
 			const result = loadTasksForRun(run.id, testDir);
 
 			expect(result).toEqual([]);
 		});
 
-		it("should return all tasks for a run", () => {
-			const run = createRun({ scope: "tasks run", workDir: testDir });
+		it("should return all tasks for a run", async () => {
+			const run = await createRun({ scope: "tasks run", workDir: testDir });
 
 			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 			createTaskForRun(run.id, createTestTaskData("ISSUE-2"), testDir);
@@ -154,9 +154,9 @@ describe("Run-aware task functions", () => {
 			expect(result.map((t) => t.issue_id).sort()).toEqual(["ISSUE-1", "ISSUE-2", "ISSUE-3"]);
 		});
 
-		it("should only return tasks from the specified run", () => {
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+		it("should only return tasks from the specified run", async () => {
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			createTaskForRun(run1.id, createTestTaskData("RUN1-ISSUE-1"), testDir);
 			createTaskForRun(run1.id, createTestTaskData("RUN1-ISSUE-2"), testDir);
@@ -174,8 +174,8 @@ describe("Run-aware task functions", () => {
 	});
 
 	describe("saveTasksForRun", () => {
-		it("should save tasks to the correct run", () => {
-			const run = createRun({ scope: "save test", workDir: testDir });
+		it("should save tasks to the correct run", async () => {
+			const run = await createRun({ scope: "save test", workDir: testDir });
 
 			const tasks: Task[] = [
 				{
@@ -201,9 +201,9 @@ describe("Run-aware task functions", () => {
 			expect(loaded[0].id).toBe("SAVE-T1");
 		});
 
-		it("should not affect tasks in other runs", () => {
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+		it("should not affect tasks in other runs", async () => {
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			// Create task in run1
 			createTaskForRun(run1.id, createTestTaskData("RUN1-ISSUE"), testDir);
@@ -241,8 +241,8 @@ describe("Run-aware task functions", () => {
 	});
 
 	describe("createTaskForRun", () => {
-		it("should create task with generated ID", () => {
-			const run = createRun({ scope: "create test", workDir: testDir });
+		it("should create task with generated ID", async () => {
+			const run = await createRun({ scope: "create test", workDir: testDir });
 
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
@@ -251,8 +251,8 @@ describe("Run-aware task functions", () => {
 			expect(task.updated_at).toBeDefined();
 		});
 
-		it("should generate sequential task IDs for same issue", () => {
-			const run = createRun({ scope: "sequential IDs", workDir: testDir });
+		it("should generate sequential task IDs for same issue", async () => {
+			const run = await createRun({ scope: "sequential IDs", workDir: testDir });
 
 			const task1 = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 			const task2 = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
@@ -263,9 +263,9 @@ describe("Run-aware task functions", () => {
 			expect(task3.id).toBe("ISSUE-1-T3");
 		});
 
-		it("should create task in the correct run only", () => {
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+		it("should create task in the correct run only", async () => {
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			const task = createTaskForRun(run1.id, createTestTaskData("ISSUE-1"), testDir);
 
@@ -280,8 +280,8 @@ describe("Run-aware task functions", () => {
 	});
 
 	describe("updateTaskForRun", () => {
-		it("should update task in the specified run", () => {
-			const run = createRun({ scope: "update test", workDir: testDir });
+		it("should update task in the specified run", async () => {
+			const run = await createRun({ scope: "update test", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			const updated = updateTaskForRun(
@@ -300,17 +300,17 @@ describe("Run-aware task functions", () => {
 			);
 		});
 
-		it("should return null for non-existent task", () => {
-			const run = createRun({ scope: "non-existent update", workDir: testDir });
+		it("should return null for non-existent task", async () => {
+			const run = await createRun({ scope: "non-existent update", workDir: testDir });
 
 			const result = updateTaskForRun(run.id, "NON-EXISTENT-TASK", { status: "done" }, testDir);
 
 			expect(result).toBeNull();
 		});
 
-		it("should not update task in different run", () => {
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+		it("should not update task in different run", async () => {
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			const task = createTaskForRun(run1.id, createTestTaskData("ISSUE-1"), testDir);
 
@@ -385,7 +385,7 @@ describe("Run-aware task functions", () => {
 
 	describe("updateTaskForRunSafe", () => {
 		it("should update task with file locking", async () => {
-			const run = createRun({ scope: "safe update test", workDir: testDir });
+			const run = await createRun({ scope: "safe update test", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			const updated = await updateTaskForRunSafe(run.id, task.id, { status: "running" }, testDir);
@@ -395,7 +395,7 @@ describe("Run-aware task functions", () => {
 		});
 
 		it("should handle concurrent updates safely", async () => {
-			const run = createRun({ scope: "concurrent safe update", workDir: testDir });
+			const run = await createRun({ scope: "concurrent safe update", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			// Perform a few concurrent updates (reduced from 10 to avoid timeout)
@@ -414,7 +414,7 @@ describe("Run-aware task functions", () => {
 		});
 
 		it("should return null for non-existent task", async () => {
-			const run = createRun({ scope: "safe non-existent", workDir: testDir });
+			const run = await createRun({ scope: "safe non-existent", workDir: testDir });
 
 			const result = await updateTaskForRunSafe(
 				run.id,
@@ -427,8 +427,8 @@ describe("Run-aware task functions", () => {
 		});
 
 		it("should not update task in different run", async () => {
-			const run1 = createRun({ scope: "run 1", workDir: testDir });
-			const run2 = createRun({ scope: "run 2", workDir: testDir });
+			const run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			const task = createTaskForRun(run1.id, createTestTaskData("ISSUE-1"), testDir);
 

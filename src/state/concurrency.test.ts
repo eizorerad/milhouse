@@ -48,7 +48,7 @@ describe("Concurrency Tests", () => {
 	describe("updateRunMetaWithLock", () => {
 		test("should handle concurrent updates correctly", async () => {
 			// Create a run first
-			const run = createRun({ scope: "test concurrent updates", workDir: testDir });
+			const run = await createRun({ scope: "test concurrent updates", workDir: testDir });
 
 			// Simulate multiple parallel updates
 			const updates = Array.from({ length: 10 }, (_, i) => ({
@@ -72,7 +72,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should serialize rapid sequential updates", async () => {
-			const run = createRun({ scope: "test sequential", workDir: testDir });
+			const run = await createRun({ scope: "test sequential", workDir: testDir });
 
 			// Perform rapid sequential updates
 			for (let i = 0; i < 5; i++) {
@@ -85,7 +85,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should preserve data integrity under concurrent load", async () => {
-			const run = createRun({ scope: "test integrity", workDir: testDir });
+			const run = await createRun({ scope: "test integrity", workDir: testDir });
 
 			// Create many concurrent updates with different fields
 			const concurrentUpdates = [
@@ -113,7 +113,7 @@ describe("Concurrency Tests", () => {
 
 	describe("updateRunPhaseInMetaWithLock", () => {
 		test("should handle concurrent phase updates", async () => {
-			const run = createRun({ scope: "test phase updates", workDir: testDir });
+			const run = await createRun({ scope: "test phase updates", workDir: testDir });
 
 			// Try to update phase concurrently with valid phases
 			const phases: RunPhase[] = ["validate", "plan", "exec", "verify", "completed"];
@@ -132,7 +132,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should update both meta and index atomically", async () => {
-			const run = createRun({ scope: "test atomic phase", workDir: testDir });
+			const run = await createRun({ scope: "test atomic phase", workDir: testDir });
 
 			await updateRunPhaseInMetaWithLock(run.id, "exec", testDir);
 
@@ -148,7 +148,7 @@ describe("Concurrency Tests", () => {
 
 	describe("updateRunStatsWithLock", () => {
 		test("should handle concurrent stats updates", async () => {
-			const run = createRun({ scope: "test stats", workDir: testDir });
+			const run = await createRun({ scope: "test stats", workDir: testDir });
 
 			// Simulate multiple agents updating stats concurrently
 			const statsUpdates = [
@@ -175,7 +175,7 @@ describe("Concurrency Tests", () => {
 	describe("saveRunsIndexWithLock", () => {
 		test("should handle concurrent index updates", async () => {
 			// Create initial run
-			createRun({ scope: "initial run", workDir: testDir });
+			await createRun({ scope: "initial run", workDir: testDir });
 
 			// Simulate concurrent index updates (no-op identity updates)
 			const updates = Array.from({ length: 5 }, () =>
@@ -196,9 +196,9 @@ describe("Concurrency Tests", () => {
 
 		test("should preserve index integrity with multiple runs", async () => {
 			// Create multiple runs
-			const _run1 = createRun({ scope: "run 1", workDir: testDir });
-			const _run2 = createRun({ scope: "run 2", workDir: testDir });
-			const run3 = createRun({ scope: "run 3", workDir: testDir });
+			const _run1 = await createRun({ scope: "run 1", workDir: testDir });
+			const _run2 = await createRun({ scope: "run 2", workDir: testDir });
+			const run3 = await createRun({ scope: "run 3", workDir: testDir });
 
 			// Concurrent no-op updates to the index
 			await Promise.all([
@@ -219,7 +219,7 @@ describe("Concurrency Tests", () => {
 	describe("updateTaskWithLock", () => {
 		test("should handle concurrent task updates correctly", async () => {
 			// Create a run and task
-			createRun({ scope: "test task updates", workDir: testDir });
+			await createRun({ scope: "test task updates", workDir: testDir });
 			const task = createTask(
 				{
 					title: "Test Task",
@@ -255,7 +255,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should serialize status transitions correctly", async () => {
-			createRun({ scope: "test status transitions", workDir: testDir });
+			await createRun({ scope: "test status transitions", workDir: testDir });
 			const task = createTask(
 				{
 					title: "Status Test Task",
@@ -283,7 +283,7 @@ describe("Concurrency Tests", () => {
 
 	describe("updateTaskStatusWithLock", () => {
 		test("should handle concurrent status updates", async () => {
-			createRun({ scope: "test concurrent status", workDir: testDir });
+			await createRun({ scope: "test concurrent status", workDir: testDir });
 			const task = createTask(
 				{
 					title: "Concurrent Status Task",
@@ -323,7 +323,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should mark dependent tasks as blocked when task fails", async () => {
-			createRun({ scope: "test dependent blocking", workDir: testDir });
+			await createRun({ scope: "test dependent blocking", workDir: testDir });
 
 			// Create parent task
 			const parentTask = createTask(
@@ -367,7 +367,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should set completed_at when task is done", async () => {
-			createRun({ scope: "test completed_at", workDir: testDir });
+			await createRun({ scope: "test completed_at", workDir: testDir });
 			const task = createTask(
 				{
 					title: "Completion Test Task",
@@ -392,7 +392,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should set error when task fails", async () => {
-			createRun({ scope: "test error field", workDir: testDir });
+			await createRun({ scope: "test error field", workDir: testDir });
 			const task = createTask(
 				{
 					title: "Error Test Task",
@@ -419,7 +419,7 @@ describe("Concurrency Tests", () => {
 
 	describe("Data Integrity Under Load", () => {
 		test("should maintain data integrity with many concurrent operations", async () => {
-			const run = createRun({ scope: "load test", workDir: testDir });
+			const run = await createRun({ scope: "load test", workDir: testDir });
 
 			// Create multiple tasks
 			const taskPromises = Array.from({ length: 5 }, (_, i) =>
@@ -483,7 +483,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should not corrupt JSON files under concurrent writes", async () => {
-			const run = createRun({ scope: "json integrity test", workDir: testDir });
+			const run = await createRun({ scope: "json integrity test", workDir: testDir });
 
 			// Perform rapid concurrent updates
 			const rapidUpdates = Array.from({ length: 20 }, (_, i) =>
@@ -511,7 +511,7 @@ describe("Concurrency Tests", () => {
 
 	describe("Run-Aware Task Functions (updateTaskForRunSafe)", () => {
 		test("should handle concurrent updates to tasks in the same run", async () => {
-			const run = createRun({ scope: "run-aware concurrent", workDir: testDir });
+			const run = await createRun({ scope: "run-aware concurrent", workDir: testDir });
 			const task = createTaskForRun(
 				run.id,
 				{
@@ -548,8 +548,8 @@ describe("Concurrency Tests", () => {
 
 		test("should isolate updates between different runs", async () => {
 			// Create two separate runs
-			const run1 = createRun({ scope: "isolation run 1", workDir: testDir });
-			const run2 = createRun({ scope: "isolation run 2", workDir: testDir });
+			const run1 = await createRun({ scope: "isolation run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "isolation run 2", workDir: testDir });
 
 			// Create tasks in each run
 			const task1 = createTaskForRun(
@@ -607,8 +607,8 @@ describe("Concurrency Tests", () => {
 
 		test("should handle parallel updates to different runs simultaneously", async () => {
 			// Create two runs
-			const run1 = createRun({ scope: "parallel run 1", workDir: testDir });
-			const run2 = createRun({ scope: "parallel run 2", workDir: testDir });
+			const run1 = await createRun({ scope: "parallel run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "parallel run 2", workDir: testDir });
 
 			// Create a few tasks in each run (reduced from 5 to avoid timeout)
 			const run1Tasks = Array.from({ length: 2 }, (_, i) =>
@@ -686,7 +686,7 @@ describe("Concurrency Tests", () => {
 		});
 
 		test("should return null for non-existent task in run", async () => {
-			const run = createRun({ scope: "non-existent task test", workDir: testDir });
+			const run = await createRun({ scope: "non-existent task test", workDir: testDir });
 
 			const result = await updateTaskForRunSafe(
 				run.id,

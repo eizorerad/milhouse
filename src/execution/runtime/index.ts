@@ -115,9 +115,7 @@ export {
 	shouldRetryTask,
 } from "./retry.ts";
 
-export type {
-	FollowUpTaskConfig,
-} from "./retry.ts";
+export type { FollowUpTaskConfig } from "./retry.ts";
 
 // ============================================================================
 // Conflict Resolution

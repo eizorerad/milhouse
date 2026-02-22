@@ -52,7 +52,6 @@ import type {
 	MilhouseParallelGroup,
 	MilhouseParallelStepOptions,
 	MilhouseStepBatchResult,
-	MilhouseStepOptions,
 	WorktreeAgentResult,
 } from "./types.ts";
 import { createEmptyBatchResult } from "./types.ts";
@@ -965,24 +964,4 @@ export async function runParallelWithGroupOrdering(
 		totalDurationMs: 0,
 		allSucceeded: totalFailed === 0,
 	};
-}
-
-// ============================================================================
-// Backward Compatibility
-// ============================================================================
-
-/**
- * Run tasks in parallel using worktrees (legacy interface)
- *
- * @deprecated Use runParallelSteps() instead
- */
-export async function runParallel(
-	options: MilhouseStepOptions & {
-		maxParallel: number;
-		prdSource: string;
-		prdFile: string;
-		prdIsFolder?: boolean;
-	},
-): Promise<MilhouseStepBatchResult> {
-	return await runParallelSteps(options as MilhouseParallelStepOptions);
 }

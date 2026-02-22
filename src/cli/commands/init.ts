@@ -96,7 +96,7 @@ function ensureGitignoreRules(workDir: string): void {
 
 	// Remove blanket .milhouse/ ignore if present, replace with selective rules
 	const lines = content.split("\n");
-	const filtered = lines.filter(l => l.trim() !== ".milhouse/" && l.trim() !== ".milhouse");
+	const filtered = lines.filter((l) => l.trim() !== ".milhouse/" && l.trim() !== ".milhouse");
 	filtered.push(
 		"",
 		"# Milhouse — track config, ignore runtime data",

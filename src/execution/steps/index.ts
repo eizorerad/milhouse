@@ -52,12 +52,7 @@ export {
 // ============================================================================
 // Sequential Execution
 // ============================================================================
-export {
-	// Main runner
-	runSequentialSteps,
-	// Backward compatibility
-	runSequential,
-} from "./sequential.ts";
+export { runSequentialSteps } from "./sequential.ts";
 
 // ============================================================================
 // Parallel Execution
@@ -78,6 +73,4 @@ export {
 	createGroupResult,
 	runParallelGroup,
 	runParallelWithGroupOrdering,
-	// Backward compatibility
-	runParallel,
 } from "./parallel.ts";

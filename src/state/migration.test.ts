@@ -38,22 +38,22 @@ describe("Migration Tests", () => {
 	});
 
 	describe("hasLegacyState", () => {
-		test("should return false when no legacy state exists", () => {
+		test("should return false when no legacy state exists", async () => {
 			expect(hasLegacyState(testDir)).toBe(false);
 		});
 
-		test("should return false when legacy state directory is empty", () => {
+		test("should return false when legacy state directory is empty", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			expect(hasLegacyState(testDir)).toBe(false);
 		});
 
-		test("should return true when legacy state has files", () => {
+		test("should return true when legacy state has files", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 			expect(hasLegacyState(testDir)).toBe(true);
 		});
 
-		test("should return true when legacy state has multiple files", () => {
+		test("should return true when legacy state has multiple files", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 			writeFileSync(join(legacyStateDir, "tasks.json"), "[]");
@@ -63,12 +63,12 @@ describe("Migration Tests", () => {
 	});
 
 	describe("getLegacyStateFiles", () => {
-		test("should return empty array when no legacy state exists", () => {
+		test("should return empty array when no legacy state exists", async () => {
 			const files = getLegacyStateFiles(testDir);
 			expect(files).toEqual([]);
 		});
 
-		test("should return file paths when legacy state exists", () => {
+		test("should return file paths when legacy state exists", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 			writeFileSync(join(legacyStateDir, "tasks.json"), "[]");
@@ -81,18 +81,18 @@ describe("Migration Tests", () => {
 	});
 
 	describe("migrateLegacyToRun", () => {
-		test("should return null when no legacy state exists", () => {
-			const result = migrateLegacyToRun({ workDir: testDir });
+		test("should return null when no legacy state exists", async () => {
+			const result = await migrateLegacyToRun({ workDir: testDir });
 			expect(result).toBeNull();
 		});
 
-		test("should return null when legacy state directory is empty", () => {
+		test("should return null when legacy state directory is empty", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
-			const result = migrateLegacyToRun({ workDir: testDir });
+			const result = await migrateLegacyToRun({ workDir: testDir });
 			expect(result).toBeNull();
 		});
 
-		test("should migrate legacy state to a new run", () => {
+		test("should migrate legacy state to a new run", async () => {
 			// Create legacy state
 			mkdirSync(legacyStateDir, { recursive: true });
 
@@ -130,7 +130,7 @@ describe("Migration Tests", () => {
 			writeFileSync(join(legacyStateDir, "tasks.json"), JSON.stringify(legacyTasks, null, 2));
 
 			// Migrate
-			const run = migrateLegacyToRun({
+			const run = await migrateLegacyToRun({
 				scope: "migrated scope",
 				name: "migrated run",
 				workDir: testDir,
@@ -156,7 +156,7 @@ describe("Migration Tests", () => {
 			expect(migratedTasks[0].id).toBe("TASK-1");
 		});
 
-		test("should migrate legacy plans to new run", () => {
+		test("should migrate legacy plans to new run", async () => {
 			// Create legacy state and plans
 			mkdirSync(legacyStateDir, { recursive: true });
 			mkdirSync(legacyPlansDir, { recursive: true });
@@ -166,7 +166,7 @@ describe("Migration Tests", () => {
 			writeFileSync(join(legacyPlansDir, "execution_plan.md"), "# Execution Plan\n\nTest plan");
 
 			// Migrate
-			const run = migrateLegacyToRun({ workDir: testDir });
+			const run = await migrateLegacyToRun({ workDir: testDir });
 
 			// Verify plans were copied
 			const runPlansDir = join(getRunDir(run?.id ?? "", testDir), "plans");
@@ -178,11 +178,11 @@ describe("Migration Tests", () => {
 			expect(briefContent).toContain("# Problem Brief");
 		});
 
-		test("should set migrated run as latest run", () => {
+		test("should set migrated run as latest run", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 
-			const run = migrateLegacyToRun({ workDir: testDir });
+			const run = await migrateLegacyToRun({ workDir: testDir });
 
 			const index = loadRunsIndex(testDir);
 			// The migrated run should be the last (latest) in the runs list
@@ -191,12 +191,12 @@ describe("Migration Tests", () => {
 	});
 
 	describe("cleanupLegacyState", () => {
-		test("should return false when no legacy state exists", () => {
+		test("should return false when no legacy state exists", async () => {
 			const result = cleanupLegacyState(testDir);
 			expect(result).toBe(false);
 		});
 
-		test("should delete legacy state directory", () => {
+		test("should delete legacy state directory", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 
@@ -210,14 +210,14 @@ describe("Migration Tests", () => {
 	});
 
 	describe("cloneRunState", () => {
-		test("should return null when source run does not exist", () => {
-			const result = cloneRunState("non-existent-run", {}, testDir);
+		test("should return null when source run does not exist", async () => {
+			const result = await cloneRunState("non-existent-run", {}, testDir);
 			expect(result).toBeNull();
 		});
 
-		test("should create independent copy of run state", () => {
+		test("should create independent copy of run state", async () => {
 			// Create source run with state
-			const sourceRun = createRun({ scope: "source run", workDir: testDir });
+			const sourceRun = await createRun({ scope: "source run", workDir: testDir });
 
 			// Add some state to source run
 			const sourceStateDir = getRunStateDir(sourceRun.id, testDir);
@@ -238,7 +238,7 @@ describe("Migration Tests", () => {
 			writeFileSync(join(sourceStateDir, "issues.json"), JSON.stringify(issues, null, 2));
 
 			// Clone the run
-			const clonedRun = cloneRunState(
+			const clonedRun = await cloneRunState(
 				sourceRun.id,
 				{ scope: "cloned run", name: "clone" },
 				testDir,
@@ -261,14 +261,14 @@ describe("Migration Tests", () => {
 			expect(clonedIssues[0].status).toBe("CONFIRMED");
 		});
 
-		test("should clone plans directory", () => {
+		test("should clone plans directory", async () => {
 			// Create source run with plans
-			const sourceRun = createRun({ scope: "source with plans", workDir: testDir });
+			const sourceRun = await createRun({ scope: "source with plans", workDir: testDir });
 			const sourcePlansDir = join(getRunDir(sourceRun.id, testDir), "plans");
 			writeFileSync(join(sourcePlansDir, "problem_brief.md"), "# Source Brief");
 
 			// Clone
-			const clonedRun = cloneRunState(sourceRun.id, {}, testDir);
+			const clonedRun = await cloneRunState(sourceRun.id, {}, testDir);
 
 			// Verify plans were copied
 			const clonedPlansDir = join(getRunDir(clonedRun?.id ?? "", testDir), "plans");
@@ -278,9 +278,9 @@ describe("Migration Tests", () => {
 			expect(content).toBe("# Source Brief");
 		});
 
-		test("should create truly independent copy (modifications don't affect source)", () => {
+		test("should create truly independent copy (modifications don't affect source)", async () => {
 			// Create source run
-			const sourceRun = createRun({ scope: "source", workDir: testDir });
+			const sourceRun = await createRun({ scope: "source", workDir: testDir });
 			const sourceStateDir = getRunStateDir(sourceRun.id, testDir);
 
 			const now = new Date().toISOString();
@@ -300,7 +300,7 @@ describe("Migration Tests", () => {
 			writeFileSync(join(sourceStateDir, "issues.json"), JSON.stringify(originalIssues, null, 2));
 
 			// Clone
-			const clonedRun = cloneRunState(sourceRun.id, {}, testDir);
+			const clonedRun = await cloneRunState(sourceRun.id, {}, testDir);
 			const clonedStateDir = getRunStateDir(clonedRun?.id ?? "", testDir);
 
 			// Modify cloned state
@@ -327,7 +327,7 @@ describe("Migration Tests", () => {
 	});
 
 	describe("getMigrationStatus", () => {
-		test("should report no state when nothing exists", () => {
+		test("should report no state when nothing exists", async () => {
 			const status = getMigrationStatus(testDir);
 
 			expect(status.hasLegacy).toBe(false);
@@ -337,7 +337,7 @@ describe("Migration Tests", () => {
 			expect(status.recommendation).toContain("No state found");
 		});
 
-		test("should recommend migration when only legacy exists", () => {
+		test("should recommend migration when only legacy exists", async () => {
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 			writeFileSync(join(legacyStateDir, "tasks.json"), "[]");
@@ -351,13 +351,13 @@ describe("Migration Tests", () => {
 			expect(status.recommendation).toContain("migrate");
 		});
 
-		test("should recommend cleanup when both legacy and runs exist", () => {
+		test("should recommend cleanup when both legacy and runs exist", async () => {
 			// Create legacy state
 			mkdirSync(legacyStateDir, { recursive: true });
 			writeFileSync(join(legacyStateDir, "issues.json"), "[]");
 
 			// Create a run
-			createRun({ scope: "test run", workDir: testDir });
+			await createRun({ scope: "test run", workDir: testDir });
 
 			const status = getMigrationStatus(testDir);
 
@@ -368,8 +368,8 @@ describe("Migration Tests", () => {
 			expect(status.recommendation).toContain("cleaning up");
 		});
 
-		test("should report no migration needed when only runs exist", () => {
-			createRun({ scope: "test run", workDir: testDir });
+		test("should report no migration needed when only runs exist", async () => {
+			await createRun({ scope: "test run", workDir: testDir });
 
 			const status = getMigrationStatus(testDir);
 
@@ -382,7 +382,7 @@ describe("Migration Tests", () => {
 	});
 
 	describe("Full Migration Workflow", () => {
-		test("should complete full migration workflow: detect → migrate → cleanup", () => {
+		test("should complete full migration workflow: detect → migrate → cleanup", async () => {
 			// Step 1: Create legacy state
 			mkdirSync(legacyStateDir, { recursive: true });
 			mkdirSync(legacyPlansDir, { recursive: true });
@@ -429,7 +429,7 @@ describe("Migration Tests", () => {
 			expect(initialStatus.hasRuns).toBe(false);
 
 			// Step 3: Migrate
-			const run = migrateLegacyToRun({
+			const run = await migrateLegacyToRun({
 				scope: "migrated from legacy",
 				name: "legacy-migration",
 				workDir: testDir,

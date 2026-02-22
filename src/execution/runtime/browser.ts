@@ -234,4 +234,3 @@ export function getBrowserInstructionsIfAvailable(config: BrowserConfig, compact
 
 	return compact ? generateCompactBrowserInstructions() : generateBrowserInstructions();
 }
-

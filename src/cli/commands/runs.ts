@@ -138,7 +138,7 @@ export async function deleteRunCommand(runId: string, options: RunsOptions): Pro
 		return;
 	}
 
-	const success = deleteRun(runId, options.workDir);
+	const success = await deleteRun(runId, options.workDir);
 
 	if (success) {
 		logSuccess(`Deleted run: ${runId}`);
@@ -156,7 +156,7 @@ export async function migrateRunCommand(options: RunsOptions): Promise<void> {
 		return;
 	}
 
-	const run = migrateLegacyToRun({ workDir: options.workDir });
+	const run = await migrateLegacyToRun({ workDir: options.workDir });
 
 	if (run) {
 		logSuccess(`Migrated legacy state to run: ${run.id}`);
@@ -190,7 +190,7 @@ export async function cleanupRunsCommand(options: CleanupCommandOptions): Promis
 	}
 
 	// Run cleanup
-	const result = cleanupOldRuns({
+	const result = await cleanupOldRuns({
 		olderThan,
 		keepLast: options.keepLast,
 		workDir: options.workDir,

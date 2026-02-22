@@ -143,7 +143,7 @@ export const DEFAULT_GATE_PROFILES_CONFIG: GateProfilesConfig = {
 				evidence_required: true,
 				diff_hygiene: true,
 				placeholder_check: true,
-			
+
 				dod_verification: true,
 			},
 		},
@@ -154,7 +154,7 @@ export const DEFAULT_GATE_PROFILES_CONFIG: GateProfilesConfig = {
 				evidence_required: true,
 				diff_hygiene: true,
 				placeholder_check: true,
-			
+
 				dod_verification: true,
 			},
 		},
@@ -165,7 +165,7 @@ export const DEFAULT_GATE_PROFILES_CONFIG: GateProfilesConfig = {
 				evidence_required: false,
 				diff_hygiene: true,
 				placeholder_check: false,
-			
+
 				dod_verification: false,
 			},
 		},

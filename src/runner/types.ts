@@ -1,6 +1,6 @@
 import type { AIEngine } from "../engines/types.ts";
-import type { RunCost } from "./cost.ts";
 import type { AgentRole, RunPhase, Severity } from "../state/types.ts";
+import type { RunCost } from "./cost.ts";
 
 /** Per-phase model override */
 export interface PhaseModelConfig {
