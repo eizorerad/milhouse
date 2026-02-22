@@ -34,9 +34,9 @@ import {
 import { AGENT_ROLES, type Issue, type Task as StateTask } from "../state/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { DynamicAgentSpinner } from "../ui/spinners.ts";
-import { checkMergeReadiness, popStash, stashChanges } from "../vcs/services/merge-service.ts";
+import { mergeInIsolatedWorktree } from "../vcs/services/merge-service.ts";
 import { cleanupWorktree, createWorktree } from "../vcs/services/worktree-service.ts";
-import { type IssueInfo, mergeCompletedBranches } from "./merge/index.ts";
+import { type BranchMergeResult, type IssueInfo, mergeCompletedBranches } from "./merge/index.ts";
 import { executeWithRetry, isRetryableError } from "./runtime/retry.ts";
 import { DEFAULT_RETRY_CONFIG, type MilhouseRetryConfig } from "./runtime/types.ts";
 import type { ExecutionResult } from "./steps/types.ts";
@@ -1068,100 +1068,102 @@ export async function runParallelByIssue(
 			.join(", ")}`,
 	);
 
-	// Track whether we stashed changes for later restoration
-	let wasStashed = false;
-
 	if (!options.skipMerge && branchesToMerge.length > 0) {
-		// Pre-flight check: if workDir has uncommitted changes, auto-stash them
-		const readinessResult = await checkMergeReadiness(workDir);
-		if (readinessResult.ok && !readinessResult.value.ready) {
-			logWarn(`⚠️ Detected dirty worktree: ${readinessResult.value.reason}`);
-			logInfo("   Attempting auto-stash to enable merge...");
+		logInfo(`\n${"=".repeat(60)}`);
+		logInfo("Starting deferred merge phase (worktree-isolated)...");
+		logInfo(`${branchesToMerge.length} branch(es) queued for merge into ${baseBranch}`);
+		logInfo(`${"=".repeat(60)}\n`);
 
-			// Auto-stash uncommitted changes
-			const stashResult = await stashChanges(workDir, "milhouse-auto-stash-before-merge");
-			if (stashResult.ok && stashResult.value.stashed) {
-				wasStashed = true;
-				logSuccess("   ✓ Changes stashed successfully. Will restore after merge.");
-			} else {
-				logWarn("   ⚠️ Could not stash changes. Merge may fail.");
-				logWarn(`   ${readinessResult.value.suggestion}`);
+		// Run all merge operations in an isolated worktree, then fast-forward baseBranch.
+		// This avoids stash/pop entirely for the common case; dirty worktree is never touched
+		// during rebase/merge. Only the final ff-only step interacts with the main worktree.
+		let mergeResults: BranchMergeResult[] = [];
+
+		const isolatedResult = await mergeInIsolatedWorktree({
+			workDir,
+			baseBranch,
+			operation: async (tempWorkDir, tempBranch) => {
+				mergeResults = await mergeCompletedBranches({
+					branches: branchesToMerge,
+					targetBranch: tempBranch,
+					engine,
+					workDir: tempWorkDir,
+					branchToIssueInfo,
+					modelOverride,
+				});
+			},
+		});
+
+		logDebug(`mergeCompletedBranches returned ${mergeResults.length} results`);
+
+		// Update branch statuses with merge results
+		for (const mergeResult of mergeResults) {
+			const branchStatus = allBranchStatuses.find((b) => b.branch === mergeResult.branch);
+			if (branchStatus) {
+				branchStatus.merged = mergeResult.success;
+				if (!mergeResult.success && mergeResult.error) {
+					branchStatus.error = mergeResult.error;
+				}
 			}
 		}
 
-		try {
-			logInfo(`\n${"=".repeat(60)}`);
-			logInfo("Starting deferred merge phase...");
-			logInfo(`${branchesToMerge.length} branch(es) queued for merge into ${baseBranch}`);
-			logInfo(`${"=".repeat(60)}\n`);
+		// Log merge summary
+		const mergeSucceeded = mergeResults.filter((r) => r.success).length;
+		const mergeFailed = mergeResults.filter((r) => !r.success).length;
 
-			const mergeResults = await mergeCompletedBranches({
-				branches: branchesToMerge,
-				targetBranch: baseBranch,
-				engine,
-				workDir,
-				branchToIssueInfo,
-				modelOverride,
-			});
-
-			logDebug(`mergeCompletedBranches returned ${mergeResults.length} results`);
-
-			// Update branch statuses with merge results
-			for (const mergeResult of mergeResults) {
-				const branchStatus = allBranchStatuses.find((b) => b.branch === mergeResult.branch);
-				if (branchStatus) {
-					branchStatus.merged = mergeResult.success;
-					if (!mergeResult.success && mergeResult.error) {
-						branchStatus.error = mergeResult.error;
-					}
-				}
-			}
-
-			// Log merge summary
-			const mergeSucceeded = mergeResults.filter((r) => r.success).length;
-			const mergeFailed = mergeResults.filter((r) => !r.success).length;
-
-			if (mergeFailed > 0) {
-				logWarn(
-					`\nMerge phase completed: ${mergeSucceeded}/${branchesToMerge.length} branches merged successfully`,
-				);
-				logWarn(`${mergeFailed} branch(es) failed to merge and are preserved for manual inspection:`);
-				for (const failedResult of mergeResults.filter((r) => !r.success)) {
-					logError(`  - ${failedResult.branch}: ${failedResult.error}`);
-				}
-			} else {
-				logSuccess(`\nMerge phase completed: All ${mergeSucceeded} branch(es) merged successfully!`);
-			}
-
-			// Call onMergeComplete callback with enhanced results including issueId (await for async-safe updates)
-			logDebug(
-				`Checking onMergeComplete callback: ${options.onMergeComplete ? "defined" : "undefined"}`,
+		if (mergeFailed > 0) {
+			logWarn(
+				`\nMerge phase completed: ${mergeSucceeded}/${branchesToMerge.length} branches merged successfully`,
 			);
-			if (options.onMergeComplete) {
-				logDebug("Building mergeResultsWithIssue...");
-				const mergeResultsWithIssue: MergeBranchResult[] = mergeResults.map((r) => ({
-					branch: r.branch,
-					success: r.success,
-					issueId: branchToIssueMap.get(r.branch) || "UNKNOWN",
-					error: r.error,
-				}));
-				logDebug(
-					`Calling onMergeComplete with ${mergeResultsWithIssue.length} results: ${JSON.stringify(mergeResultsWithIssue)}`,
+			logWarn(
+				`${mergeFailed} branch(es) failed to merge and are preserved for manual inspection:`,
+			);
+			for (const failedResult of mergeResults.filter((r) => !r.success)) {
+				logError(`  - ${failedResult.branch}: ${failedResult.error}`);
+			}
+		} else {
+			logSuccess(
+				`\nMerge phase completed: All ${mergeSucceeded} branch(es) merged successfully!`,
+			);
+		}
+
+		// Report on fast-forward step
+		if (isolatedResult.ok) {
+			const iv = isolatedResult.value;
+			if (iv.stashWasNeeded) {
+				logInfo("   Note: Uncommitted changes were stashed and restored during fast-forward.");
+			}
+			if (iv.stashConflictsResolved.length > 0) {
+				logWarn(
+					`   Stash conflicts auto-resolved in ${iv.stashConflictsResolved.length} file(s) (kept merged version):`,
 				);
-				await options.onMergeComplete(mergeResultsWithIssue);
-				logDebug("onMergeComplete callback completed");
-			}
-		} finally {
-			// Restore stashed changes even if merge phase throws
-			if (wasStashed) {
-				logInfo("Restoring stashed changes...");
-				const popResult = await popStash(workDir);
-				if (popResult.ok && popResult.value) {
-					logSuccess("   ✓ Stashed changes restored successfully.");
-				} else {
-					logWarn("   ⚠️ Could not restore stashed changes. Run 'git stash pop' manually.");
+				for (const file of iv.stashConflictsResolved) {
+					logWarn(`     - ${file}`);
 				}
+				logWarn("   Your pre-merge changes to these files were overridden by the merged fixes.");
 			}
+		} else {
+			logError(`   Fast-forward merge into ${baseBranch} failed: ${isolatedResult.error.message}`);
+			logWarn("   The merged branches may need manual integration.");
+		}
+
+		// Call onMergeComplete callback with enhanced results including issueId (await for async-safe updates)
+		logDebug(
+			`Checking onMergeComplete callback: ${options.onMergeComplete ? "defined" : "undefined"}`,
+		);
+		if (options.onMergeComplete) {
+			logDebug("Building mergeResultsWithIssue...");
+			const mergeResultsWithIssue: MergeBranchResult[] = mergeResults.map((r) => ({
+				branch: r.branch,
+				success: r.success,
+				issueId: branchToIssueMap.get(r.branch) || "UNKNOWN",
+				error: r.error,
+			}));
+			logDebug(
+				`Calling onMergeComplete with ${mergeResultsWithIssue.length} results: ${JSON.stringify(mergeResultsWithIssue)}`,
+			);
+			await options.onMergeComplete(mergeResultsWithIssue);
+			logDebug("onMergeComplete callback completed");
 		}
 	} else if (options.skipMerge) {
 		logInfo("Merge phase skipped (--skip-merge flag)");

@@ -7,6 +7,7 @@
  * @module vcs/services/merge-service
  */
 
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { bus } from "../../events/bus.ts";
 import { logDebug } from "../../ui/logger.ts";
@@ -826,6 +827,161 @@ export class MergeService implements IMergeService {
 
 		return ok({ succeeded, failed, conflicted });
 	}
+
+	/**
+	 * Execute a merge operation in an isolated worktree, then fast-forward
+	 * the base branch in the main worktree.
+	 *
+	 * This avoids the stash/pop pattern entirely for the common case.
+	 * If the main worktree has dirty files that overlap with merged changes,
+	 * falls back to stash with automatic conflict resolution.
+	 *
+	 * @param options - Isolated merge options
+	 * @returns Result with success status and any stash conflict details
+	 */
+	async mergeInIsolatedWorktree(
+		options: IsolatedMergeOptions,
+	): Promise<VcsResult<IsolatedMergeResult>> {
+		const { workDir, baseBranch, operation } = options;
+		const mergeId = `mh-merge-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+		const tempBranch = `mh/temp-merge/${mergeId}`;
+		const tempWorktreePath = join(workDir, ".milhouse", "work", "merge-worktrees", mergeId);
+
+		// Prune stale worktrees before creating a new one
+		await runGitCommand(["worktree", "prune"], workDir);
+
+		// Ensure parent directory exists
+		const parentDir = join(workDir, ".milhouse", "work", "merge-worktrees");
+		if (!existsSync(parentDir)) {
+			mkdirSync(parentDir, { recursive: true });
+		}
+
+		// Create temp worktree with a temp branch forked from baseBranch
+		const createResult = await runGitCommand(
+			["worktree", "add", "-b", tempBranch, tempWorktreePath, baseBranch],
+			workDir,
+		);
+
+		if (!createResult.ok || createResult.value.exitCode !== 0) {
+			return err(
+				createVcsError("COMMAND_FAILED", "Failed to create merge worktree", {
+					context: {
+						stderr: createResult.ok ? createResult.value.stderr : createResult.error.message,
+					},
+				}),
+			);
+		}
+
+		try {
+			// Run the merge operation in the isolated worktree
+			await operation(tempWorktreePath, tempBranch);
+
+			// Fast-forward baseBranch to tempBranch in the main worktree
+			const ffResult = await runGitCommand(["merge", "--ff-only", tempBranch], workDir);
+
+			if (ffResult.ok && ffResult.value.exitCode === 0) {
+				return ok({
+					success: true,
+					stashWasNeeded: false,
+					stashConflictsResolved: [],
+				});
+			}
+
+			// ff-only failed — likely dirty files overlap with merged changes
+			// Fall back to stash → ff-only → pop with auto-resolution
+			logDebug("Fast-forward merge blocked by dirty files. Falling back to stash...");
+
+			const stashResult = await this.stashChanges(workDir, "milhouse-merge-ff-fallback");
+			if (!stashResult.ok || !stashResult.value.stashed) {
+				return err(
+					createVcsError(
+						"COMMAND_FAILED",
+						"Fast-forward merge failed and could not stash changes",
+						{
+							context: { ffStderr: ffResult.ok ? ffResult.value.stderr : "" },
+						},
+					),
+				);
+			}
+
+			// Retry ff-only with clean worktree
+			const ffRetryResult = await runGitCommand(["merge", "--ff-only", tempBranch], workDir);
+			if (!ffRetryResult.ok || ffRetryResult.value.exitCode !== 0) {
+				// Restore stash and report failure
+				await this.popStash(workDir);
+				return err(
+					createVcsError("MERGE_FAILED", "Fast-forward merge failed even after stashing", {
+						context: {
+							stderr: ffRetryResult.ok ? ffRetryResult.value.stderr : "",
+						},
+					}),
+				);
+			}
+
+			// Pop stash to restore user's changes
+			const popResult = await runGitCommand(["stash", "pop"], workDir);
+			if (popResult.ok && popResult.value.exitCode === 0) {
+				return ok({
+					success: true,
+					stashWasNeeded: true,
+					stashConflictsResolved: [],
+				});
+			}
+
+			// Stash pop had conflicts — auto-resolve with --ours (keep merged version)
+			const conflictedResult = await this.getConflictedFiles(workDir);
+			if (conflictedResult.ok && conflictedResult.value.length > 0) {
+				const resolvedFiles = conflictedResult.value;
+				for (const file of resolvedFiles) {
+					await runGitCommand(["checkout", "--ours", "--", file], workDir);
+					await runGitCommand(["add", "--", file], workDir);
+				}
+				// After conflicted stash pop, the stash entry is NOT auto-dropped
+				await runGitCommand(["stash", "drop"], workDir);
+				// Reset index so resolved files don't stay staged
+				await runGitCommand(["reset", "HEAD"], workDir);
+
+				return ok({
+					success: true,
+					stashWasNeeded: true,
+					stashConflictsResolved: resolvedFiles,
+				});
+			}
+
+			// Unknown stash pop failure
+			return err(
+				createVcsError("COMMAND_FAILED", "Stash pop failed for unknown reason", {
+					context: { stderr: popResult.ok ? popResult.value.stderr : "" },
+				}),
+			);
+		} catch (opError) {
+			return err(
+				createVcsError(
+					"COMMAND_FAILED",
+					`Merge operation failed: ${opError instanceof Error ? opError.message : String(opError)}`,
+				),
+			);
+		} finally {
+			// Always clean up temp worktree and branch
+			const removeResult = await runGitCommand(
+				["worktree", "remove", "--force", tempWorktreePath],
+				workDir,
+			);
+			if (!removeResult.ok || removeResult.value.exitCode !== 0) {
+				// Force-remove directory if git couldn't
+				try {
+					if (existsSync(tempWorktreePath)) {
+						rmSync(tempWorktreePath, { recursive: true, force: true });
+					}
+				} catch {
+					logDebug(`Failed to remove merge worktree directory: ${tempWorktreePath}`);
+				}
+			}
+
+			await runGitCommand(["worktree", "prune"], workDir);
+			await runGitCommand(["branch", "-D", tempBranch], workDir);
+		}
+	}
 }
 
 /**
@@ -892,6 +1048,34 @@ export interface SafeMergeResult {
 	hasConflicts: boolean;
 	conflictedFiles: string[];
 	mergeCommit?: string;
+}
+
+/**
+ * Options for worktree-isolated merge operations.
+ *
+ * Instead of stashing user changes and merging in the main worktree,
+ * this runs merge operations in a temporary worktree and then
+ * fast-forwards the base branch in the main worktree.
+ */
+export interface IsolatedMergeOptions {
+	/** Working directory of the main repo */
+	workDir: string;
+	/** Base branch currently checked out in main worktree */
+	baseBranch: string;
+	/** Operation to run in the isolated worktree. Receives tempWorkDir and tempBranch. */
+	operation: (tempWorkDir: string, tempBranch: string) => Promise<void>;
+}
+
+/**
+ * Result of worktree-isolated merge
+ */
+export interface IsolatedMergeResult {
+	/** Whether the merge into baseBranch succeeded */
+	success: boolean;
+	/** Whether stash was needed for the fast-forward step */
+	stashWasNeeded: boolean;
+	/** Files where stash pop conflicts were auto-resolved (kept merged version) */
+	stashConflictsResolved: string[];
 }
 
 /**
@@ -1110,4 +1294,15 @@ export async function withAutoStash<T>(
 	operation: () => Promise<T>,
 ): Promise<VcsResult<AutoStashResult<T>>> {
 	return defaultService.withAutoStash(workDir, operation);
+}
+
+/**
+ * Execute a merge operation in an isolated worktree, then fast-forward
+ * the base branch. Avoids stash/pop conflicts with dirty worktrees.
+ * @see MergeService.mergeInIsolatedWorktree
+ */
+export async function mergeInIsolatedWorktree(
+	options: IsolatedMergeOptions,
+): Promise<VcsResult<IsolatedMergeResult>> {
+	return defaultService.mergeInIsolatedWorktree(options);
 }

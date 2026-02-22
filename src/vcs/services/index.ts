@@ -52,6 +52,7 @@ export {
 	checkMergeReadiness,
 	safeMergeInWorktree,
 	batchMergeWithRetry,
+	mergeInIsolatedWorktree,
 	// Types
 	type RebaseResult,
 	type MergeReadinessResult,
@@ -59,6 +60,8 @@ export {
 	type SafeMergeResult,
 	type BatchMergeWithRetryOptions,
 	type BatchMergeWithRetryResult,
+	type IsolatedMergeOptions,
+	type IsolatedMergeResult,
 } from "./merge-service.ts";
 
 export {
