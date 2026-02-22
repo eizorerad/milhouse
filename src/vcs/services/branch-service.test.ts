@@ -365,4 +365,172 @@ describe("BranchService.createTaskBranch", () => {
 		expect(result.ok).toBe(true);
 		expect(stashCalls.length).toBe(0);
 	});
+
+	test("stashRestored is true when stash pop succeeds", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// getCurrentBranch
+			if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
+				return successResult("main");
+			}
+
+			// hasUncommittedChanges - return some changes
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("M  some-file.ts");
+			}
+
+			// stash push
+			if (args[0] === "stash" && args[1] === "push") {
+				return successResult();
+			}
+
+			// checkout base branch
+			if (args[0] === "checkout" && args[1] === "main") {
+				return successResult();
+			}
+
+			// pull
+			if (args[0] === "pull") {
+				return successResult();
+			}
+
+			// branchExists (rev-parse --verify)
+			if (args[0] === "rev-parse" && args[1] === "--verify") {
+				return failedResult(128);
+			}
+
+			// create branch
+			if (args[0] === "checkout" && args[1] === "-b") {
+				return successResult();
+			}
+
+			// stash pop - succeeds
+			if (args[0] === "stash" && args[1] === "pop") {
+				return successResult();
+			}
+
+			return successResult();
+		});
+
+		const result = await branchService.createTaskBranch({
+			task: "test-task",
+			baseBranch: "main",
+			workDir: "/tmp/test",
+			stashChanges: true,
+		});
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.stashed).toBe(true);
+			expect(result.value.stashRestored).toBe(true);
+		}
+	});
+
+	test("stashRestored is false when stash pop fails", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// getCurrentBranch
+			if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
+				return successResult("main");
+			}
+
+			// hasUncommittedChanges - return some changes
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("M  some-file.ts");
+			}
+
+			// stash push
+			if (args[0] === "stash" && args[1] === "push") {
+				return successResult();
+			}
+
+			// checkout base branch
+			if (args[0] === "checkout" && args[1] === "main") {
+				return successResult();
+			}
+
+			// pull
+			if (args[0] === "pull") {
+				return successResult();
+			}
+
+			// branchExists (rev-parse --verify)
+			if (args[0] === "rev-parse" && args[1] === "--verify") {
+				return failedResult(128);
+			}
+
+			// create branch
+			if (args[0] === "checkout" && args[1] === "-b") {
+				return successResult();
+			}
+
+			// stash pop - fails
+			if (args[0] === "stash" && args[1] === "pop") {
+				return failedResult(1, "CONFLICT: merge conflict in file.ts");
+			}
+
+			return successResult();
+		});
+
+		const result = await branchService.createTaskBranch({
+			task: "test-task",
+			baseBranch: "main",
+			workDir: "/tmp/test",
+			stashChanges: true,
+		});
+
+		// Result should still be ok (partial success)
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.stashed).toBe(true);
+			expect(result.value.stashRestored).toBe(false);
+		}
+	});
+
+	test("no stash needed returns stashed false and stashRestored false", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// getCurrentBranch
+			if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
+				return successResult("main");
+			}
+
+			// hasUncommittedChanges - NO changes
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("");
+			}
+
+			// checkout base branch
+			if (args[0] === "checkout" && args[1] === "main") {
+				return successResult();
+			}
+
+			// pull
+			if (args[0] === "pull") {
+				return successResult();
+			}
+
+			// branchExists
+			if (args[0] === "rev-parse" && args[1] === "--verify") {
+				return failedResult(128);
+			}
+
+			// create branch
+			if (args[0] === "checkout" && args[1] === "-b") {
+				return successResult();
+			}
+
+			return successResult();
+		});
+
+		const result = await branchService.createTaskBranch({
+			task: "test-task",
+			baseBranch: "main",
+			workDir: "/tmp/test",
+			stashChanges: true,
+		});
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.stashed).toBe(false);
+			expect(result.value.stashRestored).toBe(false);
+		}
+	});
 });

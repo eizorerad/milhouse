@@ -291,6 +291,9 @@ async function executeTaskWithTracking(
 		if (branchResult.ok) {
 			branch = branchResult.value.branchName;
 			logDebug(`Created branch: ${branch}`);
+			if (branchResult.value.stashed && !branchResult.value.stashRestored) {
+				logWarn("Stashed changes could not be restored after branch creation. Run 'git stash pop' manually.");
+			}
 			updateTaskForRun(runId, task.id, { branch }, workDir);
 		} else {
 			logDebug(`Failed to create branch: ${branchResult.error.message}`);
