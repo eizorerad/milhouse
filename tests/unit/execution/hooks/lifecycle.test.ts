@@ -75,4 +75,22 @@ describe("withTimeout", () => {
 
 		expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
 	});
+
+	it("clears all timers under parallel hook load", async () => {
+		const invocationCount = 50;
+		const hooks: ExecutionHooks = {
+			onTaskStart: async () => {
+				await new Promise((resolve) => setTimeout(resolve, 1));
+			},
+		};
+
+		const wrapped = withTimeout(hooks, 5000);
+		const calls = Array.from({ length: invocationCount }, () =>
+			wrapped.onTaskStart!({} as any, {} as any),
+		);
+
+		await Promise.all(calls);
+
+		expect(clearTimeoutSpy).toHaveBeenCalledTimes(invocationCount);
+	});
 });
