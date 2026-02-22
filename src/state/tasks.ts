@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { StateWriteError } from "./errors.ts";
 import { stateEvents } from "./events.ts";
 import { AsyncMutex, withFileLock } from "./file-lock.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
@@ -157,15 +158,19 @@ export function loadTasksForRun(runId: string, workDir = process.cwd()): Task[] 
 /**
  * Save tasks array to state file
  *
- * Note: Warns if saving empty array when file has existing data.
- * This provides defense-in-depth for bulk operations but allows
- * intentional clearing (callers may want to reset tasks).
+ * Note: Throws StateWriteError if saving empty array when file has existing data,
+ * unless options.force is true. This prevents accidental data loss from schema
+ * changes silently stripping all tasks.
  *
  * @deprecated Use saveTasksForRun() with explicit runId to avoid race conditions
  * when multiple milhouse processes run in parallel. This function relies on
  * getCurrentRunId() which can return the wrong run in concurrent scenarios.
  */
-export function saveTasks(tasks: Task[], workDir = process.cwd()): void {
+export function saveTasks(
+	tasks: Task[],
+	workDir = process.cwd(),
+	options?: { force?: boolean },
+): void {
 	const filePath = getTasksPath(workDir);
 	const dir = join(filePath, "..");
 
@@ -173,14 +178,14 @@ export function saveTasks(tasks: Task[], workDir = process.cwd()): void {
 		mkdirSync(dir, { recursive: true });
 	}
 
-	// Warn on suspicious empty write (but allow it - callers may intentionally clear)
-	if (tasks.length === 0 && existsSync(filePath)) {
+	// Guard against accidental data loss when saving empty array over non-empty file
+	if (tasks.length === 0 && !options?.force && existsSync(filePath)) {
 		const rawTasks = loadRawTasks(workDir);
 		if (rawTasks.length > 0) {
-			console.error(
-				`[WARN] saveTasks: Saving empty array but file has ${rawTasks.length} raw entries`,
+			throw new StateWriteError(
+				`saveTasks: Refusing to overwrite ${rawTasks.length} existing entries with empty array. Pass { force: true } to confirm.`,
+				{ filePath },
 			);
-			console.error("[WARN] This may indicate unintended data loss. Check callers.");
 		}
 	}
 
@@ -211,15 +216,20 @@ function loadRawTasksForRun(runId: string, workDir = process.cwd()): unknown[] {
  * This is the run-aware version that accepts an explicit runId parameter,
  * avoiding race conditions when multiple milhouse processes run in parallel.
  *
- * Note: Warns if saving empty array when file has existing data.
- * This provides defense-in-depth for bulk operations but allows
- * intentional clearing (callers may want to reset tasks).
+ * Note: Throws StateWriteError if saving empty array when file has existing data,
+ * unless options.force is true. This prevents accidental data loss from schema
+ * changes silently stripping all tasks.
  *
  * @param runId - The run ID to save tasks to
  * @param tasks - Array of tasks to save
  * @param workDir - Working directory (defaults to process.cwd())
  */
-export function saveTasksForRun(runId: string, tasks: Task[], workDir = process.cwd()): void {
+export function saveTasksForRun(
+	runId: string,
+	tasks: Task[],
+	workDir = process.cwd(),
+	options?: { force?: boolean },
+): void {
 	const filePath = getTasksPathForRun(runId, workDir);
 	const dir = dirname(filePath);
 
@@ -227,14 +237,14 @@ export function saveTasksForRun(runId: string, tasks: Task[], workDir = process.
 		mkdirSync(dir, { recursive: true });
 	}
 
-	// Warn on suspicious empty write (but allow it - callers may intentionally clear)
-	if (tasks.length === 0 && existsSync(filePath)) {
+	// Guard against accidental data loss when saving empty array over non-empty file
+	if (tasks.length === 0 && !options?.force && existsSync(filePath)) {
 		const rawTasks = loadRawTasksForRun(runId, workDir);
 		if (rawTasks.length > 0) {
-			console.error(
-				`[WARN] saveTasksForRun: Saving empty array but file has ${rawTasks.length} raw entries`,
+			throw new StateWriteError(
+				`saveTasksForRun: Refusing to overwrite ${rawTasks.length} existing entries with empty array. Pass { force: true } to confirm.`,
+				{ filePath },
 			);
-			console.error("[WARN] This may indicate unintended data loss. Check callers.");
 		}
 	}
 
@@ -440,7 +450,7 @@ export function deleteTask(id: string, workDir = process.cwd()): boolean {
 	}
 
 	const newTasks = [...tasks.slice(0, index), ...tasks.slice(index + 1)];
-	saveTasks(newTasks, workDir);
+	saveTasks(newTasks, workDir, { force: true });
 	return true;
 }
 
