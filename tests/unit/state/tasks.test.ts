@@ -10,9 +10,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { StateWriteError } from "../../../src/state/errors.ts";
 import { createRun } from "../../../src/state/runs.ts";
 import {
 	createTaskForRun,
+	deleteTask,
 	loadTasksForRun,
 	readTaskForRun,
 	saveTasksForRun,
@@ -320,6 +322,64 @@ describe("Run-aware task functions", () => {
 			// Verify task in run1 is unchanged
 			const taskInRun1 = readTaskForRun(run1.id, task.id, testDir);
 			expect(taskInRun1?.status).toBe("pending");
+		});
+	});
+
+	describe("StateWriteError guard", () => {
+		it("saveTasksForRun throws StateWriteError when saving empty array over non-empty file", () => {
+			const run = createRun({ scope: "empty write guard", workDir: testDir });
+			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
+
+			expect(() => saveTasksForRun(run.id, [], testDir)).toThrow(StateWriteError);
+		});
+
+		it("saveTasksForRun allows empty write with force: true", () => {
+			const run = createRun({ scope: "force empty write", workDir: testDir });
+			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
+
+			expect(() => saveTasksForRun(run.id, [], testDir, { force: true })).not.toThrow();
+
+			const loaded = loadTasksForRun(run.id, testDir);
+			expect(loaded).toEqual([]);
+		});
+
+		it("saveTasksForRun allows empty write to non-existent file", () => {
+			const run = createRun({ scope: "new run empty write", workDir: testDir });
+
+			expect(() => saveTasksForRun(run.id, [], testDir)).not.toThrow();
+		});
+
+		it("saveTasksForRun allows non-empty write without force", () => {
+			const run = createRun({ scope: "non-empty write", workDir: testDir });
+			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
+
+			const tasks: Task[] = [
+				{
+					...task,
+					status: "done",
+					updated_at: new Date().toISOString(),
+				},
+			];
+
+			expect(() => saveTasksForRun(run.id, tasks, testDir)).not.toThrow();
+
+			const loaded = loadTasksForRun(run.id, testDir);
+			expect(loaded.length).toBe(1);
+			expect(loaded[0].status).toBe("done");
+		});
+
+		it("deleteTask succeeds when deleting last task", () => {
+			// Create a run so the deprecated saveTasks path resolves correctly
+			const run = createRun({ scope: "delete last task", workDir: testDir });
+			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
+
+			// deleteTask uses the deprecated saveTasks path with force: true
+			const result = deleteTask(task.id, testDir);
+
+			expect(result).toBe(true);
+
+			const loaded = loadTasksForRun(run.id, testDir);
+			expect(loaded).toEqual([]);
 		});
 	});
 
