@@ -20,7 +20,7 @@ import type { AIResult } from "../../engines/types.ts";
 import { bus } from "../../events/index.ts";
 import { logTaskProgress } from "../../services/config/index.ts";
 import type { LegacyTask as Task } from "../../tasks/index.ts";
-import { logDebug, logError, logInfo, logSuccess } from "../../ui/logger.ts";
+import { logDebug, logError, logInfo, logSuccess, logWarn } from "../../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../../ui/notify.ts";
 import { ProgressSpinner } from "../../ui/spinners.ts";
 import { createTaskBranch, returnToBaseBranch } from "../../vcs/services/branch-service.ts";
@@ -109,6 +109,9 @@ async function executeStep(
 		if (branchResult.ok) {
 			branch = branchResult.value.branchName;
 			logDebug(`Created branch: ${branch}`);
+			if (branchResult.value.stashed && !branchResult.value.stashRestored) {
+				logWarn("Stashed changes could not be restored after branch creation. Run 'git stash pop' manually.");
+			}
 			bus.emit("git:branch:create", { name: branch });
 		} else {
 			logError(`Failed to create branch: ${branchResult.error.message}`);
