@@ -228,14 +228,19 @@ export function withTimeout(
 	for (const [name, hook] of Object.entries(hooks)) {
 		if (typeof hook === "function") {
 			(wrapped as Record<string, unknown>)[name] = async (...args: unknown[]) => {
+				let timeoutId: ReturnType<typeof setTimeout>;
 				const timeoutPromise = new Promise<never>((_, reject) => {
-					setTimeout(
+					timeoutId = setTimeout(
 						() => reject(new Error(`Hook ${name} timed out after ${timeoutMs}ms`)),
 						timeoutMs,
 					);
 				});
 
-				await Promise.race([(hook as (...a: unknown[]) => unknown)(...args), timeoutPromise]);
+				try {
+					await Promise.race([(hook as (...a: unknown[]) => unknown)(...args), timeoutPromise]);
+				} finally {
+					clearTimeout(timeoutId!);
+				}
 			};
 		}
 	}
