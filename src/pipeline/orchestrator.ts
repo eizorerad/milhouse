@@ -115,7 +115,10 @@ function formatAge(isoDate: string): string {
 	return `${Math.floor(hours / 24)}d ago`;
 }
 
-/** Select a run to resume. Prompts interactively when multiple incomplete runs exist. */
+/** Auto-select timeout for non-interactive environments (agents, CI). */
+const RESUME_AUTO_SELECT_MS = 5_000;
+
+/** Select a run to resume. Prints the full list, then auto-selects the latest after a timeout. */
 async function selectRunForResume(workDir: string, runId?: string): Promise<string> {
 	if (runId) return runId;
 
@@ -133,22 +136,53 @@ async function selectRunForResume(workDir: string, runId?: string): Promise<stri
 		throw new Error("No incomplete runs to resume. Start a new run with: milhouse --run");
 	}
 
-	if (incompleteRuns.length === 1) {
-		return incompleteRuns[0].id;
-	}
-
-	// Multiple incomplete runs — newest first, let the user pick
+	// Newest first
 	incompleteRuns.sort(
 		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
 	);
 
-	return select({
-		message: "Which run do you want to resume?",
-		choices: incompleteRuns.map((meta) => ({
-			name: formatRunChoice(meta),
-			value: meta.id,
-		})),
-	});
+	if (incompleteRuns.length === 1) {
+		return incompleteRuns[0].id;
+	}
+
+	// Print full list so agents/CI can see all runs in their output context
+	const display = incompleteRuns.slice(0, 20);
+	console.log(pc.bold(`\nIncomplete runs (${incompleteRuns.length}):\n`));
+	for (const [i, meta] of display.entries()) {
+		const marker = i === 0 ? pc.green("*") : " ";
+		console.log(`  ${marker} ${formatRunChoice(meta)}`);
+	}
+	if (incompleteRuns.length > 20) {
+		console.log(pc.dim(`  ... and ${incompleteRuns.length - 20} more`));
+	}
+	console.log("");
+
+	const defaultRun = incompleteRuns[0];
+	const seconds = RESUME_AUTO_SELECT_MS / 1000;
+
+	// Auto-select after timeout (agents never interact, humans can pick faster)
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), RESUME_AUTO_SELECT_MS);
+
+	try {
+		const selected = await select(
+			{
+				message: `Resume which run? (auto-selecting latest in ${seconds}s)`,
+				default: defaultRun.id,
+				choices: display.map((meta) => ({
+					name: formatRunChoice(meta),
+					value: meta.id,
+				})),
+			},
+			{ signal: controller.signal },
+		);
+		clearTimeout(timeout);
+		return selected;
+	} catch {
+		clearTimeout(timeout);
+		logInfo(`Auto-selected latest: ${formatRunChoice(defaultRun)}`);
+		return defaultRun.id;
+	}
 }
 
 /** Determine which phase to resume from based on run metadata. */
