@@ -115,13 +115,10 @@ function formatAge(isoDate: string): string {
 	return `${Math.floor(hours / 24)}d ago`;
 }
 
-/**
- * Check for incomplete runs and prompt the user to resume or start new.
- * Returns { action: "resume", runId } or { action: "new" }.
- */
-async function promptResumeOrNew(
-	workDir: string,
-): Promise<{ action: "resume"; runId: string; startPhase: string } | { action: "new" }> {
+/** Select a run to resume. Prompts interactively when multiple incomplete runs exist. */
+async function selectRunForResume(workDir: string, runId?: string): Promise<string> {
+	if (runId) return runId;
+
 	const index = loadRunsIndex(workDir);
 	const incompleteRuns: RunMeta[] = [];
 
@@ -132,42 +129,26 @@ async function promptResumeOrNew(
 		}
 	}
 
-	if (incompleteRuns.length === 0) return { action: "new" };
+	if (incompleteRuns.length === 0) {
+		throw new Error("No incomplete runs to resume. Start a new run with: milhouse --run");
+	}
 
-	// Sort newest first
+	if (incompleteRuns.length === 1) {
+		return incompleteRuns[0].id;
+	}
+
+	// Multiple incomplete runs — newest first, let the user pick
 	incompleteRuns.sort(
 		(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
 	);
 
-	const choices = [
-		...incompleteRuns.map((meta) => ({
-			name: `Resume: ${formatRunChoice(meta)}`,
-			value: `resume:${meta.id}`,
+	return select({
+		message: "Which run do you want to resume?",
+		choices: incompleteRuns.map((meta) => ({
+			name: formatRunChoice(meta),
+			value: meta.id,
 		})),
-		{ name: pc.green("Start new run"), value: "new" },
-	];
-
-	const answer = await select({
-		message: "Incomplete run(s) found. What would you like to do?",
-		choices,
 	});
-
-	if (answer === "new") return { action: "new" };
-
-	const runId = answer.replace("resume:", "");
-	const meta = loadRunMeta(runId, workDir);
-	const startPhase = meta && PHASE_ORDER.includes(meta.phase) ? meta.phase : "scan";
-	return { action: "resume", runId, startPhase };
-}
-
-/** Select or derive a run ID for resume. Picks latest run when none given. */
-function selectRunForResume(workDir: string, runId?: string): string {
-	if (runId) return runId;
-	const index = loadRunsIndex(workDir);
-	if (index.runs.length === 0) {
-		throw new Error('No runs found. Start with: milhouse --scan --scope "your scope"');
-	}
-	return index.runs[index.runs.length - 1].id;
 }
 
 /** Determine which phase to resume from based on run metadata. */
@@ -202,20 +183,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	const phasesCompleted: string[] = [];
 	let runId = options.runId;
 
-	// Handle explicit --resume flag
+	// --resume: pick an incomplete run (interactive if multiple)
+	// --run (without --resume): always starts fresh, no prompt
 	if (options.resume) {
-		runId = selectRunForResume(workDir, runId);
+		runId = await selectRunForResume(workDir, runId);
 		options.startPhase = options.startPhase ?? getResumeStartPhase(runId, workDir);
 		logInfo(`Resuming run ${runId} from phase "${options.startPhase}"`);
-	}
-	// For new runs: check for incomplete runs and offer to resume
-	else if (!runId && !options.startPhase) {
-		const decision = await promptResumeOrNew(workDir);
-		if (decision.action === "resume") {
-			runId = decision.runId;
-			options.startPhase = decision.startPhase;
-			logInfo(`Resuming run ${runId} from phase "${decision.startPhase}"`);
-		}
 	}
 
 	const phases = resolvePhases(options);
