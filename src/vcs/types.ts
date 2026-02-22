@@ -84,6 +84,8 @@ export interface CreateTaskBranchResult {
 	branchName: string;
 	/** Whether changes were stashed */
 	stashed: boolean;
+	/** Whether stashed changes were successfully restored */
+	stashRestored: boolean;
 	/** Previous branch before operation */
 	previousBranch: string;
 }

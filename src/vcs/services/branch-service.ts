@@ -139,16 +139,20 @@ export class BranchService implements IBranchService {
 			bus.emit("git:branch:create", { name: branchName });
 
 			// Restore stash on success before returning
+			let stashRestored = false;
 			if (stashed) {
 				const popResult = await runGitCommand(["stash", "pop"], workDir);
 				if (!popResult.ok || popResult.value.exitCode !== 0) {
 					logWarn("Failed to restore stashed changes after branch creation. Run 'git stash pop' manually.");
+				} else {
+					stashRestored = true;
 				}
 			}
 
 			return ok({
 				branchName,
 				stashed,
+				stashRestored,
 				previousBranch,
 			});
 		} catch (error) {
