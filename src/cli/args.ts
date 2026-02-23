@@ -80,6 +80,7 @@ export function createProgram(): Command {
 		.option("--end-phase <phase>", "Stop after this phase")
 		.option("--force", "Re-run even if phases already completed")
 		.option("--fail-fast", "Stop on first phase failure (default: true)")
+		.option("--no-fail-fast", "Continue running after phase failures")
 
 		// ── Individual Phases ──────────────────────────────────
 		.option("--scan", "Run scan phase (Lead Investigator)")
