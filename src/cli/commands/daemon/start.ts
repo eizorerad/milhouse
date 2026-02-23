@@ -5,7 +5,7 @@
 import { loadUserConfig } from "../../../config/loader.ts";
 import { DAEMON_DEFAULTS } from "../../../daemon/types.ts";
 import type { DaemonConfig, DaemonStartOptions } from "../../../daemon/types.ts";
-import { runDaemonLoop } from "../../../daemon/loop.ts";
+import { runDaemonLoop } from "../../../daemon/runner.ts";
 import { readDaemonPid } from "../../../daemon/session-state.ts";
 import { logError, logWarn } from "../../../ui/logger.ts";
 import type { DaemonCommandOptions } from "../daemon.ts";
@@ -18,7 +18,8 @@ export async function daemonStart(
 	args: string[],
 	opts: DaemonCommandOptions,
 ): Promise<void> {
-	const { workDir, options: runtimeOpts } = opts;
+	const { workDir } = opts;
+	const runtimeOpts = opts.options;
 
 	// Check if daemon is already running
 	const existingPid = readDaemonPid(workDir);
@@ -31,7 +32,7 @@ export async function daemonStart(
 	}
 
 	// Scope is the first non-flag arg, or from --scope
-	const scope = args.find((a) => !a.startsWith("--")) ?? runtimeOpts.scanFocus ?? "";
+	const scope = args.find((a) => !a.startsWith("--")) ?? runtimeOpts?.scanFocus ?? "";
 	if (!scope) {
 		logWarn(
 			'No scope provided. Usage: milhouse daemon start "fix critical bugs"',
@@ -45,7 +46,7 @@ export async function daemonStart(
 	const daemonConfig = resolveDaemonConfig(daemonUserConfig);
 
 	// Parse --flags from args
-	const startOptions = parseStartFlags(args, scope, workDir, runtimeOpts);
+	const startOptions = parseStartFlags(args, scope, workDir, runtimeOpts ?? null);
 
 	await runDaemonLoop(startOptions, daemonConfig);
 }
@@ -91,7 +92,7 @@ function parseStartFlags(
 	args: string[],
 	scope: string,
 	workDir: string,
-	runtimeOpts: RuntimeOptions,
+	runtimeOpts: RuntimeOptions | null,
 ): DaemonStartOptions {
 	const result: DaemonStartOptions = { scope, workDir };
 
@@ -164,15 +165,17 @@ function parseStartFlags(
 		}
 	}
 
-	// Inherit from runtime options if not set via daemon flags
-	if (!result.engine && runtimeOpts.aiEngine && runtimeOpts.aiEngine !== "claude") {
-		result.engine = runtimeOpts.aiEngine;
-	}
-	if (!result.model && runtimeOpts.modelOverride) {
-		result.model = runtimeOpts.modelOverride;
-	}
-	if (!result.inputPath && runtimeOpts.prdFile && runtimeOpts.prdFile !== "PRD.md") {
-		result.inputPath = runtimeOpts.prdFile;
+	// Inherit from runtime options if available
+	if (runtimeOpts) {
+		if (!result.engine && runtimeOpts.aiEngine && runtimeOpts.aiEngine !== "claude") {
+			result.engine = runtimeOpts.aiEngine;
+		}
+		if (!result.model && runtimeOpts.modelOverride) {
+			result.model = runtimeOpts.modelOverride;
+		}
+		if (!result.inputPath && runtimeOpts.prdFile && runtimeOpts.prdFile !== "PRD.md") {
+			result.inputPath = runtimeOpts.prdFile;
+		}
 	}
 
 	return result;
