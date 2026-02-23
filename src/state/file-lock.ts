@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { check, lock } from "proper-lockfile";
+import { loggers } from "../observability/logger.js";
+import { StateLockError } from "./errors.js";
 
 export interface LockOptions {
 	/** Number of retries when acquiring lock (default: 5) */
@@ -84,11 +86,30 @@ export async function withFileLock<T>(
 			retries: options?.retries ?? 3,
 			stale: options?.stale ?? 10000,
 		});
-	} catch {
-		// If file locking fails (e.g., filesystem doesn't support it, or lock dir creation fails),
-		// fall back to executing without cross-process lock.
-		// In-memory locking in the caller still provides single-process safety.
-		return await operation();
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		const benignCodes = new Set(["ENOSYS", "ENOLCK", "ENOTSUP", "EROFS"]);
+
+		if (code && benignCodes.has(code)) {
+			// Filesystem doesn't support locking — fall back to executing without
+			// cross-process lock. In-memory locking in the caller still provides
+			// single-process safety.
+			loggers.state.warn(
+				{ filePath, errorCode: code },
+				`File lock not supported (${code}), proceeding without cross-process lock`,
+			);
+			return await operation();
+		}
+
+		// Unexpected failure (permissions, disk full, contention, unknown) —
+		// do NOT silently proceed without a lock.
+		throw new StateLockError(
+			`Failed to acquire file lock: ${err instanceof Error ? err.message : String(err)}`,
+			{
+				filePath,
+				cause: err instanceof Error ? err : new Error(String(err)),
+			},
+		);
 	}
 
 	try {
