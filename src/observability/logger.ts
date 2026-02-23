@@ -29,4 +29,5 @@ export const loggers = {
 	task: createLogger("task"),
 	git: createLogger("git"),
 	cli: createLogger("cli"),
+	state: createLogger("state"),
 };
