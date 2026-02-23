@@ -5,9 +5,9 @@
  * to eliminate duplicated read/write/validate patterns.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { StateParseError, logStateError } from "./errors.ts";
+import { StateParseError, StateWriteError, logStateError } from "./errors.ts";
 
 /**
  * Load a JSON file with Zod schema validation.
@@ -62,13 +62,40 @@ export function saveJsonFile(filePath: string, data: unknown, atomic = true): vo
 	const content = JSON.stringify(data, null, 2);
 
 	if (atomic) {
+		const tmpPath = `${filePath}.tmp`;
+		const maxRetries = 3;
+		const retryDelayMs = 50;
+
+		writeFileSync(tmpPath, content);
+
+		let lastError: unknown;
+		for (let attempt = 0; attempt < maxRetries; attempt++) {
+			try {
+				renameSync(tmpPath, filePath);
+				return;
+			} catch (error) {
+				lastError = error;
+				if (attempt < maxRetries - 1) {
+					Bun.sleepSync(retryDelayMs);
+				}
+			}
+		}
+
+		// All retries exhausted — log warning and fall back to direct write
+		const writeError = new StateWriteError(
+			`Atomic write failed for ${filePath}, falling back to direct write`,
+			{
+				filePath,
+				cause: lastError instanceof Error ? lastError : new Error(String(lastError)),
+			},
+		);
+		logStateError(writeError, "warn");
+
+		// Clean up orphaned .tmp file
 		try {
-			const tmpPath = `${filePath}.tmp`;
-			writeFileSync(tmpPath, content);
-			renameSync(tmpPath, filePath);
-			return;
+			unlinkSync(tmpPath);
 		} catch {
-			// Fallback: direct write (rename can fail on Windows or across devices)
+			// .tmp may not exist or already removed — ignore
 		}
 	}
 
