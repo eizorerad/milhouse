@@ -64,7 +64,7 @@ const config: Config = {
   pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
 
   // Stop the entire pipeline on first phase failure.
-  failFast: false,
+  failFast: true,
 
   // ═══════════════════════════════════════════════════════════
   // PER-PHASE CONFIG

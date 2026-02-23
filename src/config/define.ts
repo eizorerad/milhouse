@@ -101,7 +101,7 @@ export const DEFAULTS = {
 	model: "opus",
 
 	pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"] as PhaseName[],
-	failFast: false,
+	failFast: true,
 
 	phases: {
 		scan: { model: "opus", workers: 1, retries: 2, retryDelay: 5000, timeout: 60_000 },
