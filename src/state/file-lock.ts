@@ -88,7 +88,7 @@ export async function withFileLock<T>(
 		});
 	} catch (err) {
 		const code = (err as NodeJS.ErrnoException).code;
-		const benignCodes = new Set(["ENOSYS", "ENOLCK", "ENOTSUP", "EROFS"]);
+		const benignCodes = new Set(["ENOSYS", "ENOLCK", "ENOTSUP", "EROFS", "ENOENT"]);
 
 		if (code && benignCodes.has(code)) {
 			// Filesystem doesn't support locking — fall back to executing without
