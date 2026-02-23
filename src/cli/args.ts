@@ -80,6 +80,7 @@ export function createProgram(): Command {
 		.option("--end-phase <phase>", "Stop after this phase")
 		.option("--force", "Re-run even if phases already completed")
 		.option("--fail-fast", "Stop on first phase failure (default: true)")
+		.option("--no-fail-fast", "Continue running after phase failures")
 
 		// ── Individual Phases ──────────────────────────────────
 		.option("--scan", "Run scan phase (Lead Investigator)")
@@ -424,7 +425,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 		browserEnabled: opts.browser === true ? "true" : opts.browser === false ? "false" : "auto",
 		modelOverride,
 		skipMerge: opts.merge === false,
-		failFast: opts.execFailFast || opts.failFast !== false,
+		failFast: opts.execFailFast === true ? true : opts.failFast,
 		useWorktrees: opts.worktrees || useParallel || false,
 		// execByIssue defaults to true (issue-based parallel execution is the default)
 		// --no-exec-by-issue explicitly sets it to false
@@ -480,7 +481,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 		runMode: opts.run || false,
 		resumeMode: opts.resume || false,
 		forceMode: opts.force || false,
-		failFast: opts.failFast !== false,
+		failFast: opts.failFast ?? true,
 		startPhase: validatePhase(opts.startPhase),
 		endPhase: validatePhase(opts.endPhase),
 		runsMode,

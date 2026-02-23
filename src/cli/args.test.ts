@@ -8,6 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { parseArgs } from "./args";
+import { DEFAULTS, resolveConfig } from "../config/define";
 
 describe("parseArgs", () => {
 	describe("severity parsing", () => {
@@ -130,6 +131,45 @@ describe("parseArgs", () => {
 		test("sets to true when --unsafe-dod-checks is provided", () => {
 			const result = parseArgs(["node", "milhouse", "--unsafe-dod-checks"]);
 			expect(result.options.unsafeDoDChecks).toBe(true);
+		});
+	});
+
+	describe("failFast parsing", () => {
+		test("no flag: options.failFast is undefined, parsed failFast is true", () => {
+			const result = parseArgs(["node", "milhouse"]);
+			expect(result.options.failFast).toBeUndefined();
+			expect(result.failFast).toBe(true);
+		});
+
+		test("--fail-fast: options.failFast is true, parsed failFast is true", () => {
+			const result = parseArgs(["node", "milhouse", "--fail-fast"]);
+			expect(result.options.failFast).toBe(true);
+			expect(result.failFast).toBe(true);
+		});
+
+		test("--no-fail-fast: options.failFast is false, parsed failFast is false", () => {
+			const result = parseArgs(["node", "milhouse", "--no-fail-fast"]);
+			expect(result.options.failFast).toBe(false);
+			expect(result.failFast).toBe(false);
+		});
+
+		test("--exec-fail-fast: options.failFast is true", () => {
+			const result = parseArgs(["node", "milhouse", "--exec-fail-fast"]);
+			expect(result.options.failFast).toBe(true);
+		});
+
+		test("DEFAULTS.failFast is true", () => {
+			expect(DEFAULTS.failFast).toBe(true);
+		});
+
+		test("resolveConfig({}) returns failFast: true", () => {
+			const resolved = resolveConfig({});
+			expect(resolved.failFast).toBe(true);
+		});
+
+		test("resolveConfig({ failFast: false }) returns failFast: false", () => {
+			const resolved = resolveConfig({ failFast: false });
+			expect(resolved.failFast).toBe(false);
 		});
 	});
 });
