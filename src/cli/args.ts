@@ -304,6 +304,12 @@ export interface ParsedArgs {
 	runsSubcommand: string | undefined;
 	/** Additional args for runs subcommand */
 	runsArgs: string[];
+	/** Daemon management mode */
+	daemonMode: boolean;
+	/** Daemon subcommand (start, stop, status, log, report, tick, install, uninstall) */
+	daemonSubcommand: string | undefined;
+	/** Additional args for daemon subcommand */
+	daemonArgs: string[];
 }
 
 /**
@@ -341,6 +347,11 @@ export function parseArgs(args: string[]): ParsedArgs {
 	const runsMode = task === "runs";
 	const runsSubcommand = runsMode ? programArgs[1] : undefined;
 	const runsArgs = runsMode ? programArgs.slice(2) : [];
+
+	// Check for "daemon" subcommand: milhouse daemon start|stop|status|log|...
+	const daemonMode = task === "daemon";
+	const daemonSubcommand = daemonMode ? programArgs[1] : undefined;
+	const daemonArgs = daemonMode ? programArgs.slice(2) : [];
 
 	// Determine AI engine (--sonnet implies --claude)
 	let aiEngine = "claude";
@@ -466,7 +477,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 
 	return {
 		options,
-		task: runsMode ? undefined : task,
+		task: runsMode || daemonMode ? undefined : task,
 		initMode: opts.init || false,
 		showConfig: opts.config || false,
 		addRule: opts.addRule,
@@ -487,6 +498,9 @@ export function parseArgs(args: string[]): ParsedArgs {
 		runsMode,
 		runsSubcommand,
 		runsArgs,
+		daemonMode,
+		daemonSubcommand,
+		daemonArgs,
 	};
 }
 

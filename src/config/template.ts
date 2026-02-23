@@ -229,6 +229,47 @@ const config: Config = {
     format: "json",      // "json" | "markdown" | "both"
     autoGenerate: true,  // generate report automatically after pipeline run
   },
+
+  // ═══════════════════════════════════════════════════════════
+  // DAEMON  (overnight autonomous mode)
+  // ═══════════════════════════════════════════════════════════
+  //
+  // Configure "milhouse daemon start" behavior.
+  // The daemon runs the pipeline in a loop, checking progress between
+  // iterations. An AI orchestrator agent decides when to stop and
+  // what to focus on next.
+  //
+  // Quick start:
+  //   $ milhouse daemon start "fix all critical bugs" --until 08:00
+  //
+  // daemon: {
+  //   orchestrator: {
+  //     enabled: true,           // AI decides next step (false = hardcoded logic)
+  //     engine: "claude",        // engine for orchestrator (can differ from pipeline)
+  //     model: "sonnet",         // lightweight model for fast decisions
+  //   },
+  //   safety: {
+  //     budgetLimit: 50,         // $ per session (hard limit, AI cannot override)
+  //     maxRuns: 20,             // max pipeline iterations
+  //     maxConsecutiveFailures: 3,
+  //     maxSessionDuration: "10h",
+  //   },
+  //   interval: {
+  //     betweenRuns: 15,         // minutes between pipeline runs
+  //   },
+  //   watchdog: {
+  //     activityTimeout: 30,     // kill if no stdout for 30 min
+  //     runTimeout: 180,         // kill if single run exceeds 3h
+  //     onTimeout: "kill-and-retry",
+  //   },
+  //   processDetection: {
+  //     waitFor: ["milhouse", "claude", "aider", "gemini"],
+  //   },
+  //   report: {
+  //     format: "markdown",
+  //     delivery: { desktop: true },
+  //   },
+  // },
 };
 
 export default config;

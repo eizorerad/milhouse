@@ -92,6 +92,42 @@ export interface Config {
 		enabled?: boolean;
 		autoAttach?: boolean;
 	};
+
+	/** Daemon orchestrator settings */
+	daemon?: {
+		orchestrator?: {
+			enabled?: boolean;
+			engine?: string;
+			model?: string;
+			maxTokens?: number;
+		};
+		safety?: {
+			budgetLimit?: number;
+			maxRuns?: number;
+			maxConsecutiveFailures?: number;
+			maxSessionDuration?: string;
+		};
+		interval?: {
+			betweenRuns?: number;
+			processCheckInterval?: number;
+		};
+		watchdog?: {
+			activityTimeout?: number;
+			runTimeout?: number;
+			onTimeout?: "kill-and-retry" | "kill-and-skip" | "kill-and-stop";
+		};
+		processDetection?: {
+			waitFor?: string[];
+		};
+		report?: {
+			format?: "markdown" | "json" | "both";
+			includeTimeline?: boolean;
+			includeOrchestratorDecisions?: boolean;
+			delivery?: {
+				desktop?: boolean;
+			};
+		};
+	};
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────

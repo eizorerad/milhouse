@@ -11,6 +11,7 @@ import { runValidatePipeline } from "./cli/commands/pipeline/validate.ts";
 import { runVerifyPipeline } from "./cli/commands/pipeline/verify.ts";
 import { runReport } from "./cli/commands/report.ts";
 import { runPipelineV2 } from "./cli/commands/run.ts";
+import { daemonCommand } from "./cli/commands/daemon.ts";
 import { runsCommand } from "./cli/commands/runs.ts";
 import { logError } from "./ui/logger.ts";
 
@@ -39,7 +40,19 @@ async function main(): Promise<void> {
 			runsMode,
 			runsSubcommand,
 			runsArgs,
+			daemonMode,
+			daemonSubcommand,
+			daemonArgs,
 		} = parseArgs(process.argv);
+
+		// Handle "milhouse daemon" subcommand
+		if (daemonMode) {
+			await daemonCommand(daemonSubcommand, daemonArgs, {
+				workDir: process.cwd(),
+				options,
+			});
+			return;
+		}
 
 		// Handle "milhouse runs" subcommand
 		if (runsMode) {
