@@ -113,7 +113,38 @@ Respond with JSON in this exact format:
 - **Parallel Groups**: Tasks with no conflicts can run in parallel
 - **Execution Order**: Must respect all dependencies
 - Be conservative - only merge tasks that are truly duplicates
-- Consider the full blast radius when recommending changes`);
+- Consider the full blast radius when recommending changes
+
+## CRITICAL: Cross-Issue File Conflict Prevention
+
+Issues are executed in **parallel worktrees** — each issue gets an independent copy of the repository.
+After all agents finish, branches are merged **sequentially** back into the base branch.
+
+**If two issues modify the same file, they WILL produce merge conflicts during the merge phase.**
+AI conflict resolution has limited success with complex overlapping changes.
+
+Therefore:
+1. **Scan the Files field of every task.** Build a mental map of which issues touch which files.
+2. **If two issues share ANY file**, add a \`cross_dependencies\` entry so the later issue depends on the earlier one.
+   This ensures they execute sequentially with a merge between them, eliminating conflicts.
+3. **Chain multiple issues** that share files: if A, B, C all touch \`loop.ts\`, then B depends on A and C depends on B.
+4. **Only issues with zero file overlap** should be placed in the same parallel group.
+5. When choosing dependency direction, prefer: higher severity first, then smaller change sets first.
+
+Example: If Issue-1 tasks modify \`src/foo.ts\` and Issue-2 tasks also modify \`src/foo.ts\`:
+\`\`\`json
+{
+  "cross_dependencies": [
+    {
+      "task_id": "Issue-2-T1",
+      "depends_on": ["Issue-1-T3"],
+      "reason": "Both issues modify src/foo.ts — must serialize to avoid merge conflicts"
+    }
+  ]
+}
+\`\`\`
+
+This is the MOST IMPORTANT part of consolidation. Missing a shared-file dependency guarantees a merge failure.`);
 
 	return parts.join("\n\n");
 }

@@ -29,6 +29,7 @@ import {
 	rebaseBranch,
 } from "../../vcs/services/merge-service.ts";
 import {
+	type ConflictIssueContext,
 	createMergeConflictInfo,
 	resolveConflictsWithEngine,
 } from "../runtime/conflict-resolution.ts";
@@ -224,11 +225,16 @@ export async function mergeCompletedBranches(
 					branch,
 					targetBranch,
 				);
+				const issueCtx = branchToIssueInfo.get(branch);
+				const conflictIssueCtx: ConflictIssueContext | undefined = issueCtx
+					? { id: issueCtx.id, title: issueCtx.title }
+					: undefined;
 				const resolutionResult = await resolveConflictsWithEngine(
 					engine,
 					conflicts,
 					workDir,
 					modelOverride,
+					conflictIssueCtx,
 				);
 				const resolved = resolutionResult.success;
 
@@ -270,6 +276,7 @@ export async function mergeCompletedBranches(
 						engine,
 						issueInfoForConflict,
 						modelOverride,
+						conflictIssueCtx,
 					);
 					if (directResult.success) {
 						success = true;
@@ -363,6 +370,7 @@ async function tryDirectMerge(
 	engine: AIEngine,
 	issueInfo: IssueInfo | undefined,
 	modelOverride?: string,
+	issueContext?: ConflictIssueContext,
 ): Promise<{ success: boolean }> {
 	logInfo("  Attempting direct merge as fallback...");
 
@@ -393,6 +401,7 @@ async function tryDirectMerge(
 			directConflicts,
 			workDir,
 			modelOverride,
+			issueContext,
 		);
 
 		if (directResolutionResult.success) {

@@ -14,9 +14,11 @@
  * @since 1.0.0
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AIEngine } from "../../engines/types.ts";
 import { bus } from "../../events/index.ts";
-import { logDebug, logError, logInfo } from "../../ui/logger.ts";
+import { logDebug, logError, logInfo, logWarn } from "../../ui/logger.ts";
 import { completeMerge, getConflictedFiles } from "../../vcs/services/merge-service.ts";
 import type {
 	ConflictResolutionResult,
@@ -25,6 +27,16 @@ import type {
 	TokenUsage,
 } from "./types.ts";
 import { createEmptyTokenUsage } from "./types.ts";
+
+/**
+ * Optional issue context passed to the conflict resolver for better AI decisions
+ */
+export interface ConflictIssueContext {
+	/** Issue ID */
+	id: string;
+	/** Human-readable title/description */
+	title: string;
+}
 
 // ============================================================================
 // Conflict Detection
@@ -71,31 +83,89 @@ export function createMergeConflictInfo(
 // ============================================================================
 
 /**
- * Build a prompt for AI-assisted conflict resolution
+ * Read file content safely, returning null if unreadable
+ */
+function safeReadFile(workDir: string, filePath: string): string | null {
+	try {
+		const fullPath = join(workDir, filePath);
+		return readFileSync(fullPath, "utf-8");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Truncate file content if too large for prompt inclusion
+ */
+const MAX_FILE_CONTENT_LENGTH = 15_000;
+function truncateContent(content: string): string {
+	if (content.length <= MAX_FILE_CONTENT_LENGTH) return content;
+	return `${content.slice(0, MAX_FILE_CONTENT_LENGTH)}\n\n... (truncated, ${content.length} chars total — read the full file to see the rest)`;
+}
+
+/**
+ * Build a prompt for AI-assisted conflict resolution.
+ *
+ * Includes actual file contents with conflict markers so the AI
+ * can resolve without needing to read files via tool calls.
  *
  * @param conflicts - Array of merge conflicts
+ * @param workDir - Working directory to read files from
+ * @param issueContext - Optional issue context for semantic understanding
  * @returns Formatted prompt for AI
  */
-export function buildConflictResolutionPrompt(conflicts: MergeConflict[]): string {
-	const fileList = conflicts.map((c) => `  - \`${c.filePath}\``).join("\n");
+export function buildConflictResolutionPrompt(
+	conflicts: MergeConflict[],
+	workDir?: string,
+	issueContext?: ConflictIssueContext,
+): string {
 	const branchName = conflicts[0]?.sourceBranch ?? "unknown";
+	const targetName = conflicts[0]?.targetBranch ?? "unknown";
 
-	return `## Milhouse Conflict Resolution Task
+	const parts: string[] = [];
+
+	parts.push(`## Milhouse Conflict Resolution Task
 
 You are resolving git merge conflicts as part of the Milhouse pipeline.
-The following files have conflicts after merging branch "${branchName}":
+Merging branch \`${branchName}\` into \`${targetName}\`.`);
 
-${fileList}
+	// Include issue context if available
+	if (issueContext) {
+		parts.push(`### Issue Context
 
-### Resolution Protocol
+**${issueContext.id}**: ${issueContext.title}
 
-For each conflicted file:
+The incoming branch implements the fix/change described above. Preserve its intent while keeping any non-conflicting changes from the target branch.`);
+	}
 
-1. **Read** the file to see the conflict markers (\`<<<<<<<\`, \`=======\`, \`>>>>>>>\`)
-2. **Understand** what both versions are trying to accomplish
-3. **Resolve** by combining both changes appropriately
-4. **Clean** - Remove ALL conflict markers (file must be valid code)
-5. **Verify** - Ensure the resulting code is syntactically valid and logically correct
+	parts.push(`### Conflicted Files (${conflicts.length})\n`);
+
+	// Include file contents inline
+	for (const conflict of conflicts) {
+		const content = workDir ? safeReadFile(workDir, conflict.filePath) : null;
+
+		if (content) {
+			parts.push(`#### \`${conflict.filePath}\`
+
+\`\`\`
+${truncateContent(content)}
+\`\`\`
+`);
+		} else {
+			parts.push(`#### \`${conflict.filePath}\`
+*(Could not read file — use \`Read\` tool to inspect it)*
+`);
+		}
+	}
+
+	parts.push(`### Resolution Protocol
+
+For each conflicted file above:
+
+1. **Understand** what both versions (between \`<<<<<<<\` and \`>>>>>>>\` markers) are trying to accomplish
+2. **Resolve** by combining both changes — keep additions from BOTH sides
+3. **Clean** — remove ALL conflict markers (\`<<<<<<<\`, \`=======\`, \`>>>>>>>\`). The file must be valid code.
+4. **Write** the resolved file using the Edit or Write tool
 
 ### After Resolving All Conflicts
 
@@ -107,14 +177,13 @@ For each conflicted file:
 - Do NOT create new commits for individual file resolutions
 - Only run \`git commit --no-edit\` once at the very end
 - Ensure ALL files are resolved and staged before committing
-- The final code should preserve functionality from both branches
-- When in doubt, prefer the incoming changes but preserve local modifications
+- The final code should preserve functionality from BOTH branches
+- Keep all imports, type definitions, and function signatures from both sides
+- When in doubt, prefer the incoming changes (source branch) but preserve target modifications that don't conflict semantically
 
-### Conflict Count
+Begin resolution now.`);
 
-Total files to resolve: ${conflicts.length}
-
-Begin resolution now.`;
+	return parts.join("\n\n");
 }
 
 /**
@@ -146,6 +215,7 @@ Ensure the result is valid code with no markers remaining.`;
  * @param conflicts - Conflicts to resolve
  * @param workDir - Working directory
  * @param modelOverride - Optional model override
+ * @param issueContext - Optional issue context for better AI decisions
  * @returns Resolution result
  */
 export async function resolveConflictsWithEngine(
@@ -153,6 +223,7 @@ export async function resolveConflictsWithEngine(
 	conflicts: MergeConflict[],
 	workDir: string,
 	modelOverride?: string,
+	issueContext?: ConflictIssueContext,
 ): Promise<ConflictResolutionResult> {
 	if (conflicts.length === 0) {
 		return {
@@ -175,7 +246,7 @@ export async function resolveConflictsWithEngine(
 		files: conflicts.map((c) => c.filePath),
 	});
 
-	const prompt = buildConflictResolutionPrompt(conflicts);
+	const prompt = buildConflictResolutionPrompt(conflicts, workDir, issueContext);
 	const engineOptions = modelOverride ? { modelOverride } : undefined;
 
 	try {

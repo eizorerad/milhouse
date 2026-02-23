@@ -124,6 +124,8 @@ export {
 	// Detection
 	detectMergeConflicts,
 	createMergeConflictInfo,
+	// Types
+	type ConflictIssueContext,
 	// Prompt building
 	buildConflictResolutionPrompt,
 	buildSimpleConflictPrompt,
