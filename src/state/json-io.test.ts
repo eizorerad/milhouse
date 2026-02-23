@@ -104,6 +104,84 @@ describe("saveJsonFile", () => {
 		});
 	});
 
+	describe("retry logic", () => {
+		test("retry succeeds after transient rename failure", () => {
+			const filePath = join(testDir, "test.json");
+			const data = { key: "retry-value" };
+
+			let callCount = 0;
+			const originalRename = fs.renameSync;
+
+			// Mock renameSync to fail twice then succeed on third attempt
+			const renameSpy = spyOn(fs, "renameSync").mockImplementation(
+				(...args: Parameters<typeof fs.renameSync>) => {
+					callCount++;
+					if (callCount <= 2) {
+						const err = new Error("EPERM: operation not permitted");
+						(err as NodeJS.ErrnoException).code = "EPERM";
+						throw err;
+					}
+					return originalRename(...args);
+				},
+			);
+
+			const warnSpy = spyOn(console, "warn");
+
+			saveJsonFile(filePath, data);
+
+			// Rename should have been called 3 times (2 failures + 1 success)
+			expect(renameSpy).toHaveBeenCalledTimes(3);
+
+			// File should exist with correct content (via successful rename)
+			expect(existsSync(filePath)).toBe(true);
+			const content = JSON.parse(readFileSync(filePath, "utf-8"));
+			expect(content).toEqual(data);
+
+			// No warning should be logged since retry succeeded
+			expect(warnSpy).not.toHaveBeenCalled();
+
+			// .tmp file should not exist
+			expect(existsSync(`${filePath}.tmp`)).toBe(false);
+
+			renameSpy.mockRestore();
+			warnSpy.mockRestore();
+		});
+
+		test("all retries exhausted triggers fallback", () => {
+			const filePath = join(testDir, "test.json");
+			const data = { key: "exhausted-value" };
+
+			// Mock renameSync to always fail
+			const renameSpy = spyOn(fs, "renameSync").mockImplementation(() => {
+				const err = new Error("EPERM: operation not permitted");
+				(err as NodeJS.ErrnoException).code = "EPERM";
+				throw err;
+			});
+
+			const warnSpy = spyOn(console, "warn");
+
+			saveJsonFile(filePath, data);
+
+			// Rename should have been called 3 times (all retries)
+			expect(renameSpy).toHaveBeenCalledTimes(3);
+
+			// Warning should be logged after all retries exhausted
+			expect(warnSpy).toHaveBeenCalled();
+			expect(warnSpy.mock.calls[0][0]).toContain("[STATE WARN]");
+
+			// File should still be written via fallback
+			expect(existsSync(filePath)).toBe(true);
+			const content = JSON.parse(readFileSync(filePath, "utf-8"));
+			expect(content).toEqual(data);
+
+			// .tmp file should be cleaned up
+			expect(existsSync(`${filePath}.tmp`)).toBe(false);
+
+			renameSpy.mockRestore();
+			warnSpy.mockRestore();
+		});
+	});
+
 	describe("non-atomic write", () => {
 		test("when atomic=false, no tmp file is created at all", () => {
 			const filePath = join(testDir, "test.json");

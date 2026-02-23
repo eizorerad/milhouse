@@ -63,27 +63,39 @@ export function saveJsonFile(filePath: string, data: unknown, atomic = true): vo
 
 	if (atomic) {
 		const tmpPath = `${filePath}.tmp`;
-		try {
-			writeFileSync(tmpPath, content);
-			renameSync(tmpPath, filePath);
-			return;
-		} catch (error) {
-			// Log that atomicity was lost
-			const writeError = new StateWriteError(
-				`Atomic write failed for ${filePath}, falling back to direct write`,
-				{
-					filePath,
-					cause: error instanceof Error ? error : new Error(String(error)),
-				},
-			);
-			logStateError(writeError, "warn");
+		const maxRetries = 3;
+		const retryDelayMs = 50;
 
-			// Clean up orphaned .tmp file
+		writeFileSync(tmpPath, content);
+
+		let lastError: unknown;
+		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
-				unlinkSync(tmpPath);
-			} catch {
-				// .tmp may not exist or already removed — ignore
+				renameSync(tmpPath, filePath);
+				return;
+			} catch (error) {
+				lastError = error;
+				if (attempt < maxRetries - 1) {
+					Bun.sleepSync(retryDelayMs);
+				}
 			}
+		}
+
+		// All retries exhausted — log warning and fall back to direct write
+		const writeError = new StateWriteError(
+			`Atomic write failed for ${filePath}, falling back to direct write`,
+			{
+				filePath,
+				cause: lastError instanceof Error ? lastError : new Error(String(lastError)),
+			},
+		);
+		logStateError(writeError, "warn");
+
+		// Clean up orphaned .tmp file
+		try {
+			unlinkSync(tmpPath);
+		} catch {
+			// .tmp may not exist or already removed — ignore
 		}
 	}
 
