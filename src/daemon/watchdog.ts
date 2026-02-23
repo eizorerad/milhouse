@@ -96,6 +96,9 @@ export async function spawnWithWatchdog(
 		}
 	})();
 
+	// Track the SIGKILL escalation timer so it can be cleared if the process exits
+	let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
+
 	// Watchdog check loop
 	const watchdogInterval = setInterval(() => {
 		// Already exited?
@@ -106,7 +109,7 @@ export async function spawnWithWatchdog(
 
 		// External abort?
 		if (options.signal?.aborted) {
-			killProcess(proc, "external abort");
+			sigkillTimer = killProcess(proc, "external abort");
 			clearInterval(watchdogInterval);
 			killedByWatchdog = true;
 			killReason = "activity-timeout";
@@ -119,7 +122,7 @@ export async function spawnWithWatchdog(
 
 		// Activity timeout: no stdout for too long
 		if (config.activityTimeout > 0 && silentMinutes > config.activityTimeout) {
-			killProcess(proc, `no output for ${Math.round(silentMinutes)} minutes`);
+			sigkillTimer = killProcess(proc, `no output for ${Math.round(silentMinutes)} minutes`);
 			clearInterval(watchdogInterval);
 			killedByWatchdog = true;
 			killReason = "activity-timeout";
@@ -128,7 +131,7 @@ export async function spawnWithWatchdog(
 
 		// Total run timeout
 		if (config.runTimeout > 0 && totalMinutes > config.runTimeout) {
-			killProcess(proc, `total run time exceeded ${config.runTimeout} minutes`);
+			sigkillTimer = killProcess(proc, `total run time exceeded ${config.runTimeout} minutes`);
 			clearInterval(watchdogInterval);
 			killedByWatchdog = true;
 			killReason = "run-timeout";
@@ -139,6 +142,10 @@ export async function spawnWithWatchdog(
 	// Wait for process to exit
 	const exitCode = await proc.exited;
 	clearInterval(watchdogInterval);
+	if (sigkillTimer) {
+		clearTimeout(sigkillTimer);
+		sigkillTimer = undefined;
+	}
 
 	// Wait for streams to finish reading
 	await Promise.all([readStdout, readStderr]);
@@ -153,11 +160,11 @@ export async function spawnWithWatchdog(
 	};
 }
 
-function killProcess(proc: Subprocess, reason: string): void {
+function killProcess(proc: Subprocess, reason: string): ReturnType<typeof setTimeout> | undefined {
 	try {
 		proc.kill("SIGTERM");
 		// Give it 10 seconds to clean up, then force kill
-		setTimeout(() => {
+		return setTimeout(() => {
 			try {
 				proc.kill("SIGKILL");
 			} catch {
@@ -166,5 +173,6 @@ function killProcess(proc: Subprocess, reason: string): void {
 		}, 10_000);
 	} catch {
 		// Already dead
+		return undefined;
 	}
 }

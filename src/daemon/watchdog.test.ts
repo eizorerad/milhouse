@@ -96,26 +96,26 @@ function installInterceptors(mockProc: ReturnType<typeof createMockProc>) {
 
 	(Bun as any).spawn = () => mockProc.proc;
 
-	globalThis.setInterval = ((fn: Function, _ms: number) => {
+	globalThis.setInterval = ((fn: Function, _ms?: number) => {
 		intervalCallback = fn as () => void;
 		return handleCounter++ as unknown as ReturnType<typeof setInterval>;
-	}) as typeof setInterval;
+	}) as unknown as typeof setInterval;
 
-	globalThis.setTimeout = ((fn: Function, _ms: number) => {
+	globalThis.setTimeout = ((fn: Function, _ms?: number) => {
 		const handle = handleCounter++;
 		timeoutCallbacks.set(handle, fn as () => void);
 		return handle as unknown as ReturnType<typeof setTimeout>;
-	}) as typeof setTimeout;
+	}) as unknown as typeof setTimeout;
 
 	globalThis.clearInterval = ((_handle: unknown) => {
 		// no-op: we don't need the interval to re-fire
-	}) as typeof clearInterval;
+	}) as unknown as typeof clearInterval;
 
 	globalThis.clearTimeout = ((handle: unknown) => {
 		const h = handle as number;
 		clearedTimeouts.add(h);
 		timeoutCallbacks.delete(h);
-	}) as typeof clearTimeout;
+	}) as unknown as typeof clearTimeout;
 }
 
 function restoreInterceptors() {
