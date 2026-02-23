@@ -23,7 +23,8 @@ export async function daemonCommand(
 		}
 
 		case "install": {
-			logError("daemon install is not yet implemented");
+			const { daemonInstall } = await import("./daemon/install.ts");
+			await daemonInstall(args, opts);
 			break;
 		}
 
