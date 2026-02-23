@@ -208,6 +208,70 @@ milhouse --run-id <id> --exec     # Use specific run
 
 ---
 
+## Daemon Mode (Overnight Autonomous)
+
+Leave milhouse running overnight. It iterates the pipeline in a loop — scanning for issues, fixing them, re-scanning — until the work is done or a safety limit is hit.
+
+An AI orchestrator agent reviews progress between iterations and decides what to focus on next. Safety rails (budget, max runs, timeouts) are hardcoded and cannot be overridden by the AI.
+
+```bash
+# Fix bugs overnight, stop at 8am
+milhouse daemon start "fix all critical and high bugs" --until 08:00
+
+# Build a system from spec documents with $100 budget
+milhouse daemon start "build the auth system" --input specs/ --budget 100
+
+# Check on progress
+milhouse daemon status
+
+# View event log
+milhouse daemon log
+
+# Stop gracefully
+milhouse daemon stop
+
+# View the overnight report
+milhouse daemon report
+```
+
+### Safety Rails
+
+| Limit | Description |
+|-------|-------------|
+| `--budget <$>` | Stop when session cost reaches limit |
+| `--max-runs <n>` | Stop after N pipeline iterations |
+| `--until <HH:MM>` | Stop at clock time |
+| Consecutive failures | Stop after 3 crashes in a row |
+| Watchdog | Kill hung process after 30min of silence |
+
+### Configuration
+
+Add a `daemon` section to `.milhouse/config.ts`:
+
+```typescript
+daemon: {
+  orchestrator: { enabled: true, model: "sonnet" },
+  safety: { budgetLimit: 50, maxRuns: 20, maxConsecutiveFailures: 3 },
+  watchdog: { activityTimeout: 30, runTimeout: 180 },
+},
+```
+
+### OS Timer Integration
+
+For production reliability, use `milhouse daemon tick` with your OS scheduler:
+
+```bash
+# cron
+*/15 * * * * cd /path/to/project && milhouse daemon tick
+
+# Install OS-native timer (systemd/launchd/schtasks)
+milhouse daemon install --interval 15
+```
+
+Full daemon documentation: [docs/daemon.md](docs/daemon.md)
+
+---
+
 ## Project Structure
 
 ```
@@ -223,6 +287,11 @@ milhouse --run-id <id> --exec     # Use specific run
 │       │   ├── problem_brief.md
 │       │   └── wbs_P-xxx.md
 │       └── probes/         # Probe results
+├── daemon-state.json       # Daemon session state (when running)
+├── daemon-log.jsonl        # Daemon event log (append-only)
+├── daemon.pid              # Daemon PID file
+├── reports/
+│   └── overnight-2026-02-22.md  # Daemon session reports
 └── work/
     └── worktrees/          # Isolated execution environments
 ```

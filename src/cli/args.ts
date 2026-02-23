@@ -176,8 +176,18 @@ Examples:
 
 Pipeline:  scan → validate → plan → consolidate → exec → verify
 
+Daemon (autonomous overnight mode):
+  $ milhouse daemon start "fix critical bugs" --until 08:00
+  $ milhouse daemon start "build system" --input specs/ --budget 100
+  $ milhouse daemon stop                     # Stop running daemon
+  $ milhouse daemon status                   # Show daemon state
+  $ milhouse daemon log                      # Show event log
+  $ milhouse daemon report                   # View session report
+  $ milhouse daemon tick                     # Single iteration (for cron)
+  $ milhouse daemon install                  # Install OS timer
+
 Config:    Edit .milhouse/config.ts to configure phases, workers, rules,
-           gates, cost budgets, and more. CLI flags override config per run.
+           gates, cost budgets, daemon settings, and more.
 `,
 	);
 
@@ -571,8 +581,19 @@ ${theme.bold("Filtering:")}
   ${$} ${m} --run --min-severity HIGH       ${c("# Only HIGH+ severity")}
   ${$} ${m} --exec --exclude-issues P-xxx   ${c("# Skip specific issues")}
 
+${theme.bold("Daemon (overnight autonomous mode):")}
+  ${$} ${m} daemon start "fix bugs" --until 08:00  ${c("# Run overnight, stop at 8am")}
+  ${$} ${m} daemon start --input specs/ --budget 50 ${c("# Build from specs, $50 limit")}
+  ${$} ${m} daemon stop                             ${c("# Stop running daemon")}
+  ${$} ${m} daemon status                           ${c("# Show current state")}
+  ${$} ${m} daemon log                              ${c("# View event log")}
+  ${$} ${m} daemon report                           ${c("# View session report")}
+  ${$} ${m} daemon tick                             ${c("# Single iteration (cron/systemd)")}
+  ${$} ${m} daemon install                          ${c("# Install OS-native timer")}
+
 ${theme.bold("Config:")}
   Edit ${theme.highlight(".milhouse/config.ts")} to configure phases, workers, rules, gates, and more.
+  Add a ${theme.highlight("daemon")} section for overnight mode settings (budget, watchdog, orchestrator).
   CLI flags override config values for that run only.
 
 ${theme.muted(`${MILHOUSE_BRANDING.repoUrl}`)}
