@@ -29,7 +29,8 @@ export async function daemonCommand(
 		}
 
 		case "uninstall": {
-			logError("daemon uninstall is not yet implemented");
+			const { daemonUninstall } = await import("./daemon/uninstall.ts");
+			await daemonUninstall(args, opts);
 			break;
 		}
 
