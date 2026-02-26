@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { withFileLock } from "./file-lock.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
 import { type GraphNode, GraphNodeSchema, STATE_FILES, type Task } from "./types.ts";
 
@@ -750,4 +751,106 @@ export function getGraphStats(workDir = process.cwd()): {
 		orphanCount: orphanNodes.length,
 		hasCycles: sortResult.hasCycle,
 	};
+}
+
+// ============================================
+// Concurrent-Safe Variants (with file locking)
+// ============================================
+
+/**
+ * Execute an operation with cross-process file locking on the graph file.
+ *
+ * Uses proper-lockfile to ensure atomic read-modify-write operations
+ * even when multiple processes access graph.json simultaneously.
+ */
+export async function withGraphLock<T>(
+	workDir: string,
+	operation: () => T | Promise<T>,
+): Promise<T> {
+	return withFileLock(getGraphPath(workDir), operation);
+}
+
+/**
+ * Create a new graph node with file locking for concurrent safety.
+ */
+export async function createGraphNodeSafe(
+	node: Omit<GraphNode, "parallel_group"> & { parallel_group?: number },
+	workDir = process.cwd(),
+): Promise<GraphNode> {
+	return withGraphLock(workDir, () => createGraphNode(node, workDir));
+}
+
+/**
+ * Update a graph node with file locking for concurrent safety.
+ */
+export async function updateGraphNodeSafe(
+	id: string,
+	update: Partial<Omit<GraphNode, "id">>,
+	workDir = process.cwd(),
+): Promise<GraphNode | null> {
+	return withGraphLock(workDir, () => updateGraphNode(id, update, workDir));
+}
+
+/**
+ * Delete a graph node with file locking for concurrent safety.
+ */
+export async function deleteGraphNodeSafe(
+	id: string,
+	workDir = process.cwd(),
+): Promise<boolean> {
+	return withGraphLock(workDir, () => deleteGraphNode(id, workDir));
+}
+
+/**
+ * Add a dependency to a node with file locking for concurrent safety.
+ */
+export async function addNodeDependencySafe(
+	nodeId: string,
+	dependencyId: string,
+	workDir = process.cwd(),
+): Promise<GraphNode | null> {
+	return withGraphLock(workDir, () => addNodeDependency(nodeId, dependencyId, workDir));
+}
+
+/**
+ * Remove a dependency from a node with file locking for concurrent safety.
+ */
+export async function removeNodeDependencySafe(
+	nodeId: string,
+	dependencyId: string,
+	workDir = process.cwd(),
+): Promise<GraphNode | null> {
+	return withGraphLock(workDir, () => removeNodeDependency(nodeId, dependencyId, workDir));
+}
+
+/**
+ * Assign parallel groups with file locking for concurrent safety.
+ */
+export async function assignParallelGroupsSafe(
+	workDir = process.cwd(),
+): Promise<GraphNode[]> {
+	return withGraphLock(workDir, () => assignParallelGroups(workDir));
+}
+
+/**
+ * Build and save dependency graph from tasks with file locking for concurrent safety.
+ */
+export async function buildGraphFromTasksSafe(
+	tasks: Task[],
+	workDir = process.cwd(),
+): Promise<GraphNode[]> {
+	return withGraphLock(workDir, () => buildGraphFromTasks(tasks, workDir));
+}
+
+/**
+ * Save dependency graph for a specific run with cross-process file locking.
+ */
+export async function saveGraphForRunSafe(
+	runId: string,
+	nodes: GraphNode[],
+	workDir = process.cwd(),
+): Promise<void> {
+	return withFileLock(getGraphPathForRun(runId, workDir), () =>
+		saveGraphForRun(runId, nodes, workDir),
+	);
 }

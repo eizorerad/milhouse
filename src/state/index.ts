@@ -136,6 +136,15 @@ export {
 	getRootNodes,
 	getLeafNodes,
 	getGraphStats,
+	withGraphLock,
+	createGraphNodeSafe,
+	updateGraphNodeSafe,
+	deleteGraphNodeSafe,
+	addNodeDependencySafe,
+	removeNodeDependencySafe,
+	assignParallelGroupsSafe,
+	buildGraphFromTasksSafe,
+	saveGraphForRunSafe,
 } from "./graph.ts";
 export type { TopologicalSortResult } from "./graph.ts";
 
