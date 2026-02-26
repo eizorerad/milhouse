@@ -1141,6 +1141,12 @@ export async function runParallelByIssue(
 					logWarn(`     - ${file}`);
 				}
 				logWarn("   Your pre-merge changes to these files were overridden by the merged fixes.");
+			if (iv.stashBackupRef) {
+				logWarn(`   A backup of your pre-merge changes was saved. To recover: git stash apply ${iv.stashBackupRef}`);
+				logWarn(`   To view a backed-up file: git show ${iv.stashBackupRef}:<filepath>`);
+			} else {
+				logWarn("   Warning: No backup of your pre-merge changes could be created.");
+			}
 			}
 		} else {
 			logError(`   Fast-forward merge into ${baseBranch} failed: ${isolatedResult.error.message}`);

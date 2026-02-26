@@ -932,6 +932,32 @@ export class MergeService implements IMergeService {
 			const conflictedResult = await this.getConflictedFiles(workDir);
 			if (conflictedResult.ok && conflictedResult.value.length > 0) {
 				const resolvedFiles = conflictedResult.value;
+
+				// Best-effort backup: save the stash commit as a named ref before auto-resolving
+				let stashBackupRef: string | undefined;
+				try {
+					const revParseResult = await runGitCommand(["rev-parse", "stash@{0}"], workDir);
+					if (revParseResult.ok && revParseResult.value.exitCode === 0) {
+						const stashSha = revParseResult.value.stdout.trim();
+						const refName = `refs/milhouse/stash-backup/${mergeId}`;
+						const updateRefResult = await runGitCommand(
+							["update-ref", refName, stashSha],
+							workDir,
+						);
+						if (updateRefResult.ok && updateRefResult.value.exitCode === 0) {
+							stashBackupRef = refName;
+						} else {
+							logDebug(`Failed to create stash backup ref: update-ref failed`);
+						}
+					} else {
+						logDebug(`Failed to capture stash SHA for backup: rev-parse failed`);
+					}
+				} catch (backupErr) {
+					logDebug(
+						`Stash backup failed (proceeding with auto-resolution): ${backupErr instanceof Error ? backupErr.message : String(backupErr)}`,
+					);
+				}
+
 				for (const file of resolvedFiles) {
 					await runGitCommand(["checkout", "--ours", "--", file], workDir);
 					await runGitCommand(["add", "--", file], workDir);
@@ -945,6 +971,7 @@ export class MergeService implements IMergeService {
 					success: true,
 					stashWasNeeded: true,
 					stashConflictsResolved: resolvedFiles,
+					stashBackupRef,
 				});
 			}
 
@@ -1076,6 +1103,8 @@ export interface IsolatedMergeResult {
 	stashWasNeeded: boolean;
 	/** Files where stash pop conflicts were auto-resolved (kept merged version) */
 	stashConflictsResolved: string[];
+	/** Named ref backing up the stash before auto-resolution, if conflicts occurred */
+	stashBackupRef?: string;
 }
 
 /**
