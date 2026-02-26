@@ -308,34 +308,38 @@ export async function updateIssueFromValidation(
 	},
 	workDir = process.cwd(),
 ): Promise<Issue | null> {
-	const update: Partial<Omit<Issue, "id" | "created_at">> = {
-		status: validationResult.status,
-		validated_by: validationResult.validated_by || "IV",
-	};
+	return issueMutex.run(() => {
+		const update: Partial<Omit<Issue, "id" | "created_at">> = {
+			status: validationResult.status,
+			validated_by: validationResult.validated_by || "IV",
+		};
 
-	if (validationResult.evidence && validationResult.evidence.length > 0) {
-		// Need to merge with existing evidence
-		const existing = readIssue(id, workDir);
-		if (existing) {
-			update.evidence = [...existing.evidence, ...validationResult.evidence];
-		} else {
-			update.evidence = validationResult.evidence;
+		if (validationResult.evidence && validationResult.evidence.length > 0) {
+			// Read existing evidence inside the lock to prevent TOCTOU race
+			const existing = readIssue(id, workDir);
+			if (existing) {
+				update.evidence = [...existing.evidence, ...validationResult.evidence];
+			} else {
+				update.evidence = validationResult.evidence;
+			}
 		}
-	}
 
-	if (validationResult.corrected_description) {
-		update.corrected_description = validationResult.corrected_description;
-	}
+		if (validationResult.corrected_description) {
+			update.corrected_description = validationResult.corrected_description;
+		}
 
-	if (validationResult.severity) {
-		update.severity = validationResult.severity;
-	}
+		if (validationResult.severity) {
+			update.severity = validationResult.severity;
+		}
 
-	if (validationResult.strategy) {
-		update.strategy = validationResult.strategy;
-	}
+		if (validationResult.strategy) {
+			update.strategy = validationResult.strategy;
+		}
 
-	return updateIssueWithLock(id, update, workDir);
+		// Use updateIssue directly since we already hold the mutex
+		// (calling updateIssueWithLock would deadlock as AsyncMutex is non-reentrant)
+		return updateIssue(id, update, workDir);
+	});
 }
 
 // ============================================================================
