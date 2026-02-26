@@ -206,8 +206,6 @@ export {
 	createRun,
 	deleteRun,
 	listRuns,
-	updateRunPhaseInMeta,
-	updateRunStats,
 	updateRunMetaWithLock,
 	updateRunPhaseInMetaWithLock,
 	updateRunStatsWithLock,

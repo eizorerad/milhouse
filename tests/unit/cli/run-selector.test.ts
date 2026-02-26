@@ -140,7 +140,7 @@ describe("run-selector", () => {
 			// scanRun is in 'scan' phase by default
 
 			const validateRun = await runs.createRun({ scope: "validate run", workDir: testDir });
-			runs.updateRunPhaseInMeta(validateRun.id, "validate", testDir);
+			await runs.updateRunPhaseInMetaWithLock(validateRun.id, "validate", testDir);
 
 			// Request only validate phase runs
 			const result = await selectOrRequireRun(undefined, testDir, {

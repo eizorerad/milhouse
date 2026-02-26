@@ -13,7 +13,7 @@ import {
 	loadIssuesForRun,
 } from "../../state/issues.ts";
 import { getMilhouseDir, initializeDir, updateProgress } from "../../state/manager.ts";
-import { updateRunPhaseInMeta, updateRunStats } from "../../state/runs.ts";
+import { updateRunPhaseInMetaWithLock, updateRunStatsWithLock } from "../../state/runs.ts";
 import {
 	loadTasksForRun,
 	readTask,
@@ -411,7 +411,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 	if (pendingTasks.length === 0) {
 		logWarn("No pending or merge_error tasks found.");
 		// Advance to verify phase so pipeline can complete gracefully
-		updateRunPhaseInMeta(runId, "verify", workDir);
+		await updateRunPhaseInMetaWithLock(runId, "verify", workDir);
 		return {
 			success: true,
 			tasksExecuted: 0,
@@ -423,7 +423,7 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 	}
 
 	// Update phase to exec using run-aware function
-	currentRun = updateRunPhaseInMeta(runId, "exec", workDir) ?? currentRun;
+	currentRun = (await updateRunPhaseInMetaWithLock(runId, "exec", workDir)) ?? currentRun;
 
 	// Check engine availability
 	const engine = await createEngine(options.aiEngine as AIEngineName);
@@ -894,16 +894,16 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 	const anyFailed = finalTasks.some((t: Task) => t.status === "failed");
 
 	const nextPhase = allDone ? "verify" : anyFailed ? "failed" : "exec";
-	currentRun = updateRunPhaseInMeta(runId, nextPhase, workDir) ?? currentRun;
+	currentRun = (await updateRunPhaseInMetaWithLock(runId, nextPhase, workDir)) ?? currentRun;
 	currentRun =
-		updateRunStats(
+		(await updateRunStatsWithLock(
 			runId,
 			{
 				tasks_completed: finalTasks.filter((t: Task) => t.status === "done").length,
 				tasks_failed: finalTasks.filter((t: Task) => t.status === "failed").length,
 			},
 			workDir,
-		) ?? currentRun;
+		)) ?? currentRun;
 
 	const duration = Date.now() - startTime;
 

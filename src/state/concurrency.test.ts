@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
 	createRun,
+	deleteRun,
 	loadRunMeta,
 	loadRunsIndex,
 	saveRunsIndexWithLock,
@@ -707,6 +708,86 @@ describe("Concurrency Tests", () => {
 			);
 
 			expect(result).toBeNull();
+		});
+	});
+
+	describe("Concurrent phase updates via updateRunPhaseInMetaWithLock", () => {
+		test("should maintain meta-index phase consistency under concurrent phase updates", async () => {
+			const run = await createRun({ scope: "concurrent phase consistency", workDir: testDir });
+
+			const phases: RunPhase[] = [
+				"scan", "validate", "plan", "exec", "verify",
+				"completed", "failed", "scan", "validate", "plan",
+			];
+
+			// Run 10 parallel phase updates
+			const results = await Promise.all(
+				phases.map((phase) => updateRunPhaseInMetaWithLock(run.id, phase, testDir)),
+			);
+
+			// All updates should succeed
+			expect(results.every((r) => r !== null)).toBe(true);
+
+			// Final state: meta phase must match index phase
+			const finalMeta = loadRunMeta(run.id, testDir);
+			const finalIndex = loadRunsIndex(testDir);
+			const indexEntry = finalIndex.runs.find((r) => r.id === run.id);
+
+			expect(finalMeta).not.toBeNull();
+			expect(indexEntry).toBeDefined();
+			expect(finalMeta?.phase).toBe(indexEntry?.phase);
+			// The final phase should be one of the phases we submitted
+			expect(phases).toContain(finalMeta!.phase);
+		});
+	});
+
+	describe("Concurrent stats updates via updateRunStatsWithLock", () => {
+		test("should produce a valid last-write-wins value under concurrent stats updates", async () => {
+			const run = await createRun({ scope: "concurrent stats", workDir: testDir });
+
+			const statsUpdates = Array.from({ length: 10 }, (_, i) => ({
+				issues_found: (i + 1) * 10,
+				tasks_completed: i + 1,
+			}));
+
+			// Run 10 parallel stats updates
+			const results = await Promise.all(
+				statsUpdates.map((stats) => updateRunStatsWithLock(run.id, stats, testDir)),
+			);
+
+			// All updates should succeed
+			expect(results.every((r) => r !== null)).toBe(true);
+
+			// Final state should have one of the submitted values (no corruption)
+			const finalMeta = loadRunMeta(run.id, testDir);
+			expect(finalMeta).not.toBeNull();
+
+			const validIssuesFound = statsUpdates.map((s) => s.issues_found);
+			const validTasksCompleted = statsUpdates.map((s) => s.tasks_completed);
+			expect(validIssuesFound).toContain(finalMeta!.issues_found);
+			expect(validTasksCompleted).toContain(finalMeta!.tasks_completed);
+		});
+	});
+
+	describe("Concurrent deleteRun", () => {
+		test("should return exactly one true when deleteRun is called concurrently for the same run", async () => {
+			const run = await createRun({ scope: "concurrent delete", workDir: testDir });
+
+			// Call deleteRun twice concurrently for the same run ID
+			const results = await Promise.all([
+				deleteRun(run.id, testDir),
+				deleteRun(run.id, testDir),
+			]);
+
+			// Exactly one should return true and one should return false
+			const trueCount = results.filter((r) => r === true).length;
+			const falseCount = results.filter((r) => r === false).length;
+			expect(trueCount).toBe(1);
+			expect(falseCount).toBe(1);
+
+			// The run should be gone from the index
+			const finalIndex = loadRunsIndex(testDir);
+			expect(finalIndex.runs.some((r) => r.id === run.id)).toBe(false);
 		});
 	});
 });
