@@ -9,7 +9,7 @@ export type {
 	PhaseRunResult,
 	PhaseMode,
 } from "./types.ts";
-export { resolvePhaseModel } from "./types.ts";
+export { resolvePhaseModel, resolvePhaseWorkers } from "./types.ts";
 export { loadResolvedConfig, getConfigDefaults } from "./config-loader.ts";
 export {
 	calculateCost,

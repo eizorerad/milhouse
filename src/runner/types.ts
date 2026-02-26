@@ -2,9 +2,10 @@ import type { AIEngine } from "../engines/types.ts";
 import type { AgentRole, RunPhase, Severity } from "../state/types.ts";
 import type { RunCost } from "./cost.ts";
 
-/** Per-phase model override */
+/** Per-phase overrides for model and worker count */
 export interface PhaseModelConfig {
 	model?: string;
+	workers?: number;
 }
 
 /** Cost tracking configuration */
@@ -93,6 +94,15 @@ export interface ResolvedConfig {
  */
 export function resolvePhaseModel(config: ResolvedConfig, phase: string): string {
 	return config.phases[phase]?.model ?? config.model;
+}
+
+/**
+ * Resolve the worker count for a specific phase.
+ * Returns undefined if no per-phase override is set, allowing callers to fall back
+ * to config.workers or phaseConfig.defaultParallel.
+ */
+export function resolvePhaseWorkers(config: ResolvedConfig, phase: string): number | undefined {
+	return config.phases[phase]?.workers;
 }
 
 // ============================================================================
