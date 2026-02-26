@@ -21,9 +21,13 @@ function mapToResolvedConfig(cfg: ResolvedFullConfig): ResolvedConfig {
 		engine: cfg.engine,
 		model: cfg.model,
 		phases: Object.fromEntries(
-			Object.entries(cfg.phases)
-				.filter(([_, p]) => p.model !== cfg.model)
-				.map(([name, p]) => [name, { model: p.model }]),
+			Object.entries(cfg.phases).map(([name, p]) => [
+				name,
+				{
+					...(p.model !== cfg.model ? { model: p.model } : {}),
+					workers: p.workers,
+				},
+			]),
 		),
 		workers: cfg.phases.exec.workers,
 		cost: cfg.cost as CostConfig,

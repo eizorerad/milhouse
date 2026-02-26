@@ -32,7 +32,7 @@ import type {
 	PhaseRunResult,
 	ResolvedConfig,
 } from "./types.ts";
-import { resolvePhaseModel } from "./types.ts";
+import { resolvePhaseModel, resolvePhaseWorkers } from "./types.ts";
 
 /** Map internal abbreviated roles to engine's full role names */
 const ROLE_TO_ENGINE: Partial<Record<AgentRole, EngineAgentRole>> = {
@@ -148,7 +148,7 @@ export async function runPhase<TItem, TResult>(
 	try {
 		// 3. Create engine with concurrency matching worker count
 		const engine = await createEngine(config.engine, {
-			maxConcurrent: config.workers ?? phaseConfig.defaultParallel,
+			maxConcurrent: resolvePhaseWorkers(config, phaseConfig.name) ?? config.workers ?? phaseConfig.defaultParallel,
 		});
 
 		// 4. Resolve model for this phase
@@ -387,7 +387,7 @@ async function executePool<TItem, TResult>(
 	config: ResolvedConfig,
 	runCost: RunCost,
 ): Promise<PhaseItemResult<TResult>[]> {
-	const maxParallel = config.workers ?? phaseConfig.defaultParallel;
+	const maxParallel = resolvePhaseWorkers(config, phaseConfig.name) ?? config.workers ?? phaseConfig.defaultParallel;
 	const limit = pLimit(maxParallel);
 	const isSingle = items.length === 1;
 	const roleName = phaseConfig.role as AgentRole;
