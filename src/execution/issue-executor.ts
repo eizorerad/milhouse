@@ -723,7 +723,7 @@ export async function runParallelByIssue(
 
 	// Queue to collect successful branches for deferred merging
 	// Map branch name to issue ID for tracking merge results
-	const branchesToMerge: string[] = [];
+	let branchesToMerge: string[] = [];
 	const branchToIssueMap = new Map<string, string>();
 	// Map branch name to issue info for human-readable commit messages
 	const branchToIssueInfo = new Map<string, IssueInfo>();
@@ -1103,6 +1103,35 @@ export async function runParallelByIssue(
 		}
 
 		logDebug("Worktree cleanup completed - branches are now available for merge");
+	}
+
+	// ============================================================================
+	// FILTER PHASE: Exclude branches with failed worktree cleanup from merge
+	// Locked worktrees prevent branch checkout, making merge impossible
+	// ============================================================================
+	if (failedCleanupBranches.size > 0) {
+		const excludedCount = branchesToMerge.filter((b) =>
+			failedCleanupBranches.has(b),
+		).length;
+		if (excludedCount > 0) {
+			logWarn(
+				`Excluding ${excludedCount} branch(es) from merge due to worktree cleanup failure: ${[...failedCleanupBranches].join(", ")}`,
+			);
+
+			// Update allBranchStatuses for excluded branches
+			for (const branch of failedCleanupBranches) {
+				const branchStatus = allBranchStatuses.find((b) => b.branch === branch);
+				if (branchStatus) {
+					branchStatus.error =
+						"Skipped merge: worktree cleanup failed, branch is still locked";
+					branchStatus.merged = false;
+				}
+			}
+
+			branchesToMerge = branchesToMerge.filter(
+				(b) => !failedCleanupBranches.has(b),
+			);
+		}
 	}
 
 	// ============================================================================
