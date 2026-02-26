@@ -2,7 +2,10 @@
  * Cost calculator — tracks token usage and dollar cost per phase and total
  */
 
+import { logWarn } from "../ui/logger.ts";
 import type { CostConfig } from "./types.ts";
+
+let budgetWarningLogged = false;
 
 /** Per-phase cost breakdown */
 export interface PhaseCost {
@@ -101,7 +104,14 @@ export class BudgetExceededError extends Error {
  * Check budget and throw if exceeded
  */
 export function checkBudget(runCost: RunCost, config: CostConfig): void {
-	if (config.budgetLimit > 0 && runCost.totalCost >= config.budgetLimit) {
+	if (config.budgetLimit <= 0) {
+		if (!budgetWarningLogged) {
+			budgetWarningLogged = true;
+			logWarn("No budget limit set (budgetLimit: 0). Running with unlimited spending.");
+		}
+		return;
+	}
+	if (runCost.totalCost >= config.budgetLimit) {
 		throw new BudgetExceededError(runCost.totalCost, config.budgetLimit);
 	}
 }

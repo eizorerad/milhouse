@@ -228,6 +228,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	const phases = resolvePhases(options);
 	logInfo(`Pipeline phases: ${phases.join(" \u2192 ")}`);
 
+	if (config.cost.budgetLimit <= 0) {
+		logWarn(
+			"Budget limit is unlimited (budgetLimit: 0). Set cost.budgetLimit in .milhouse/config.ts to cap spending.",
+		);
+	}
+
 	const outcomes: PhaseOutcome[] = [];
 
 	for (const phase of phases) {
