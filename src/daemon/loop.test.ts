@@ -44,28 +44,28 @@ describe("extractRunCost", () => {
 		expect(cost).toBe(1.5);
 	});
 
-	test("returns 0 when report.json does not exist", () => {
+	test("returns null when report.json does not exist", () => {
 		// runsDir exists but no report.json file
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when report.json is corrupt/invalid JSON", () => {
+	test("returns null when report.json is corrupt/invalid JSON", () => {
 		writeFileSync(join(runsDir, "report.json"), "not valid json {{{");
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when report.json has no cost field", () => {
+	test("returns null when report.json has no cost field", () => {
 		const report = { version: "0.2.0", run_id: runId };
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when cost.total is negative (defensive)", () => {
+	test("returns null when cost.total is negative", () => {
 		const report = {
 			version: "0.2.0",
 			run_id: runId,
@@ -74,10 +74,10 @@ describe("extractRunCost", () => {
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when cost.total is not a number", () => {
+	test("returns null when cost.total is not a number", () => {
 		const report = {
 			version: "0.2.0",
 			run_id: runId,
@@ -86,15 +86,15 @@ describe("extractRunCost", () => {
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when run directory does not exist at all", () => {
+	test("returns null when run directory does not exist at all", () => {
 		const cost = extractRunCost("run-nonexistent-xyz", testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when cost.total is NaN", () => {
+	test("returns null when cost.total is NaN", () => {
 		const report = {
 			version: "0.2.0",
 			run_id: runId,
@@ -103,7 +103,7 @@ describe("extractRunCost", () => {
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
 	test("returns correct cost for zero total (valid)", () => {
@@ -165,7 +165,7 @@ describe("totalCost accumulation", () => {
 		expect(state.runs).toHaveLength(2);
 	});
 
-	test("state.totalCost stays 0 when cost is undefined", () => {
+	test("state.totalCost stays 0 when cost is undefined and costExtractionFailures is not affected", () => {
 		const state = createDaemonState();
 
 		const entry = recordRunComplete(state, {
@@ -174,10 +174,15 @@ describe("totalCost accumulation", () => {
 			duration: 60000,
 			runId: "run-crashed",
 		});
-		state.totalCost += entry.cost ?? 0;
+		// Manual accumulation (not via processRunCompletion)
+		if (typeof entry.cost === "number") {
+			state.totalCost += entry.cost;
+		}
 
 		expect(state.totalCost).toBe(0);
 		expect(entry.cost).toBeUndefined();
+		// costExtractionFailures is only incremented by processRunCompletion
+		expect(state.costExtractionFailures).toBe(0);
 	});
 
 	test("processRunCompletion accumulates totalCost from report.json", () => {
@@ -213,6 +218,116 @@ describe("totalCost accumulation", () => {
 			expect(entry.cost).toBe(4.25);
 			expect(entry.runId).toBe(runId);
 			expect(state.totalCost).toBe(4.25);
+		} finally {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+		}
+	});
+});
+
+describe("costExtractionFailures tracking", () => {
+	test("createDaemonState initializes costExtractionFailures to 0", () => {
+		const state = createDaemonState();
+		expect(state.costExtractionFailures).toBe(0);
+	});
+
+	test("processRunCompletion increments costExtractionFailures when extractRunCost returns null", () => {
+		const testDir = join(process.cwd(), ".test-cost-failures");
+		const runId = "run-20240115-fail-abc1";
+		const runsDir = join(testDir, ".milhouse", "runs", runId, "reports");
+		const indexDir = join(testDir, ".milhouse");
+
+		try {
+			mkdirSync(runsDir, { recursive: true });
+
+			// Write corrupt report.json to trigger null cost
+			writeFileSync(join(runsDir, "report.json"), "not valid json {{{");
+
+			// Write a runs-index.json so getCurrentRunId can find the run
+			const runsIndex = {
+				runs: [{ id: runId, created_at: new Date().toISOString(), phase: "completed" }],
+			};
+			writeFileSync(join(indexDir, "runs-index.json"), JSON.stringify(runsIndex));
+
+			const state = createDaemonState();
+			processRunCompletion(
+				state,
+				{ exitCode: 0, killedByWatchdog: false, duration: 5000 },
+				testDir,
+			);
+
+			expect(state.costExtractionFailures).toBe(1);
+		} finally {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+		}
+	});
+
+	test("totalCost is NOT incremented when cost extraction fails", () => {
+		const testDir = join(process.cwd(), ".test-cost-no-inflate");
+		const runId = "run-20240115-noinflate-abc1";
+		const runsDir = join(testDir, ".milhouse", "runs", runId, "reports");
+		const indexDir = join(testDir, ".milhouse");
+
+		try {
+			mkdirSync(runsDir, { recursive: true });
+
+			// Write corrupt report.json
+			writeFileSync(join(runsDir, "report.json"), "not valid json {{{");
+
+			const runsIndex = {
+				runs: [{ id: runId, created_at: new Date().toISOString(), phase: "completed" }],
+			};
+			writeFileSync(join(indexDir, "runs-index.json"), JSON.stringify(runsIndex));
+
+			const state = createDaemonState();
+			processRunCompletion(
+				state,
+				{ exitCode: 0, killedByWatchdog: false, duration: 5000 },
+				testDir,
+			);
+
+			expect(state.totalCost).toBe(0);
+			expect(state.costExtractionFailures).toBe(1);
+		} finally {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+		}
+	});
+
+	test("costExtractionFailures accumulates across multiple failed extractions", () => {
+		const testDir = join(process.cwd(), ".test-cost-accum-fail");
+		const indexDir = join(testDir, ".milhouse");
+
+		try {
+			mkdirSync(indexDir, { recursive: true });
+
+			const state = createDaemonState();
+
+			// Simulate 3 runs with missing report.json (no run dirs created)
+			for (let i = 1; i <= 3; i++) {
+				const rid = `run-20240115-accfail-${i}`;
+				const ridDir = join(testDir, ".milhouse", "runs", rid, "reports");
+				mkdirSync(ridDir, { recursive: true });
+				// No report.json — extractRunCost returns null
+
+				const runsIndex = {
+					runs: [{ id: rid, created_at: new Date().toISOString(), phase: "completed" }],
+				};
+				writeFileSync(join(indexDir, "runs-index.json"), JSON.stringify(runsIndex));
+
+				processRunCompletion(
+					state,
+					{ exitCode: 0, killedByWatchdog: false, duration: 5000 },
+					testDir,
+				);
+			}
+
+			expect(state.costExtractionFailures).toBe(3);
+			expect(state.totalCost).toBe(0);
 		} finally {
 			if (existsSync(testDir)) {
 				rmSync(testDir, { recursive: true, force: true });

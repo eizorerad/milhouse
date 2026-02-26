@@ -13,6 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getCurrentRunId, getRunDir } from "../state/runs.ts";
+import { logWarn } from "../ui/logger.ts";
 
 // ============================================================================
 // DAEMON STATE TYPES
@@ -38,6 +39,8 @@ export interface DaemonRunEntry {
 export interface DaemonState {
 	/** Total accumulated cost across all child runs (USD) */
 	totalCost: number;
+	/** Number of runs where cost extraction failed (null cost) */
+	costExtractionFailures: number;
 	/** Completed run entries */
 	runs: DaemonRunEntry[];
 	/** Daemon start time */
@@ -67,6 +70,7 @@ export interface SafetyRailResult {
 export function createDaemonState(): DaemonState {
 	return {
 		totalCost: 0,
+		costExtractionFailures: 0,
 		runs: [],
 		startedAt: new Date().toISOString(),
 	};
@@ -80,34 +84,41 @@ export function createDaemonState(): DaemonState {
  * Extract the total cost from a completed run's report.json.
  *
  * Reads `.milhouse/runs/<runId>/reports/report.json`, parses JSON,
- * and returns `cost.total` (USD). Returns 0 on any failure:
+ * and returns `cost.total` (USD). Returns null when cost cannot be
+ * determined:
  * - Missing report.json (child crashed before generating it)
  * - Corrupt / invalid JSON
  * - Missing or non-numeric cost.total field
  * - Child killed by watchdog before report generation
  * - Negative cost values (defensive)
+ *
+ * A return value of 0 means the run genuinely cost nothing.
+ * A return value of null means cost extraction failed.
  */
-export function extractRunCost(runId: string, workDir: string): number {
-	try {
-		const runDir = getRunDir(runId, workDir);
-		const reportPath = join(runDir, "reports", "report.json");
+export function extractRunCost(runId: string, workDir: string): number | null {
+	const runDir = getRunDir(runId, workDir);
+	const reportPath = join(runDir, "reports", "report.json");
 
-		if (!existsSync(reportPath)) {
-			return 0;
-		}
-
-		const raw = readFileSync(reportPath, "utf-8");
-		const report = JSON.parse(raw);
-
-		const total = report?.cost?.total;
-		if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
-			return 0;
-		}
-
-		return total;
-	} catch {
-		return 0;
+	if (!existsSync(reportPath)) {
+		return null;
 	}
+
+	let report: unknown;
+	try {
+		const raw = readFileSync(reportPath, "utf-8");
+		report = JSON.parse(raw);
+	} catch {
+		logWarn(`Cost extraction failed for run ${runId}: corrupt report.json`);
+		return null;
+	}
+
+	const total = (report as { cost?: { total?: unknown } })?.cost?.total;
+	if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
+		logWarn(`Cost extraction failed for run ${runId}: invalid cost.total field`);
+		return null;
+	}
+
+	return total;
 }
 
 // ============================================================================
@@ -155,7 +166,12 @@ export function processRunCompletion(
 	const childRunId = getCurrentRunId(workDir) ?? undefined;
 
 	// 2. Extract cost from the child's report.json
-	const runCost = childRunId ? extractRunCost(childRunId, workDir) : 0;
+	const runCost = childRunId ? extractRunCost(childRunId, workDir) : null;
+
+	// Track extraction failures
+	if (runCost === null) {
+		state.costExtractionFailures++;
+	}
 
 	// 3. Record the run with cost data
 	const entry = recordRunComplete(state, {
@@ -163,12 +179,14 @@ export function processRunCompletion(
 		killedByWatchdog: result.killedByWatchdog,
 		duration: result.duration,
 		runId: childRunId,
-		cost: runCost,
+		cost: runCost ?? undefined,
 	});
 
-	// 4. CRITICAL: Accumulate totalCost — this was the missing line that
-	//    caused the budget safety rail to never trigger
-	state.totalCost += entry.cost ?? 0;
+	// 4. CRITICAL: Accumulate totalCost — only when cost is a real number.
+	//    Runs with failed cost extraction are not counted (tracked via costExtractionFailures).
+	if (typeof entry.cost === "number") {
+		state.totalCost += entry.cost;
+	}
 
 	return entry;
 }

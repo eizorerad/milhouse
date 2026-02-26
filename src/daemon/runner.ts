@@ -224,10 +224,15 @@ export async function runDaemonLoop(
 				logWarn(`Run #${runEntry.number} killed by watchdog after ${durationMin}min`);
 			} else if (result.exitCode === 0) {
 				appendLog(workDir, "run:complete", { duration: result.duration, cost: entry.cost }, entry.runId, runEntry.number);
-				logSuccess(`Run #${runEntry.number} completed in ${durationMin}min (cost: $${(entry.cost ?? 0).toFixed(2)})`);
+				const costStr = typeof entry.cost === "number" ? `$${entry.cost.toFixed(2)}` : "unknown";
+				logSuccess(`Run #${runEntry.number} completed in ${durationMin}min (cost: ${costStr})`);
 			} else {
 				appendLog(workDir, "run:failed", { exitCode: result.exitCode, duration: result.duration }, entry.runId, runEntry.number);
 				logError(`Run #${runEntry.number} failed (exit ${result.exitCode}) after ${durationMin}min`);
+			}
+
+			if (daemonState.costExtractionFailures > 0) {
+				logWarn(`Cost data unreliable: ${daemonState.costExtractionFailures} of ${daemonState.runs.length} runs have missing cost data`);
 			}
 
 			sessionState.totalRuns = totalRuns;
