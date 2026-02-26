@@ -266,23 +266,20 @@ export async function createRun(options: {
  * Uses saveRunsIndexWithLock to prevent data loss under concurrent calls.
  */
 export async function deleteRun(runId: string, workDir = process.cwd()): Promise<boolean> {
-	// Check existence first (before taking lock)
-	const index = loadRunsIndex(workDir);
-	if (!index.runs.some((r) => r.id === runId)) {
-		return false;
-	}
-
-	// Remove from index with locking
+	let found = false;
 	await saveRunsIndexWithLock((idx) => {
-		return { ...idx, runs: idx.runs.filter((r) => r.id !== runId) };
+		const filtered = idx.runs.filter((r) => r.id !== runId);
+		found = filtered.length < idx.runs.length;
+		return { ...idx, runs: filtered };
 	}, workDir);
+
+	if (!found) return false;
 
 	// Delete run directory
 	const runDir = getRunDir(runId, workDir);
 	if (existsSync(runDir)) {
 		rmSync(runDir, { recursive: true, force: true });
 	}
-
 	return true;
 }
 
