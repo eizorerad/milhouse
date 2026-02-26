@@ -203,13 +203,22 @@ export async function executeValidationRound(
 					validatedEvidence.push(evidenceItem);
 				}
 
-				// Validate severity
-				const validSeverities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
-				const reportedSeverity = result.report.impact_assessment.actual_severity;
-				const validatedSeverity =
-					reportedSeverity && validSeverities.includes(reportedSeverity)
-						? (reportedSeverity as Issue["severity"])
-						: issue.severity;
+				// Validate severity — only override if the AI explicitly says
+					// severity differs AND the status is PARTIAL/MISDIAGNOSED (scope change).
+					// For CONFIRMED issues, preserve the original scanner severity to avoid
+					// every issue being flattened to HIGH by the validator.
+					const validSeverities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+					const reportedSeverity = result.report.impact_assessment.actual_severity;
+					const severityChanged =
+						reportedSeverity &&
+						validSeverities.includes(reportedSeverity) &&
+						reportedSeverity !== issue.severity;
+					const statusAllowsSeverityOverride =
+						result.report.status === "PARTIAL" || result.report.status === "MISDIAGNOSED";
+					const validatedSeverity =
+						severityChanged && statusAllowsSeverityOverride
+							? (reportedSeverity as Issue["severity"])
+							: issue.severity;
 
 				// Validate status
 				const validStatuses = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] as const;
@@ -566,13 +575,21 @@ export async function executeValidationRoundTmux(
 						validatedEvidence.push(evidenceItem);
 					}
 
-					// Validate severity
-					const validSeverities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
-					const reportedSeverity = report.impact_assessment.actual_severity;
-					const validatedSeverity =
-						reportedSeverity && validSeverities.includes(reportedSeverity)
-							? (reportedSeverity as Issue["severity"])
-							: issue.severity;
+					// Validate severity — only override if the AI explicitly says
+						// severity differs AND the status is PARTIAL/MISDIAGNOSED (scope change).
+						// For CONFIRMED issues, preserve the original scanner severity.
+						const validSeverities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+						const reportedSeverity = report.impact_assessment.actual_severity;
+						const severityChanged =
+							reportedSeverity &&
+							validSeverities.includes(reportedSeverity) &&
+							reportedSeverity !== issue.severity;
+						const statusAllowsSeverityOverride =
+							report.status === "PARTIAL" || report.status === "MISDIAGNOSED";
+						const validatedSeverity =
+							severityChanged && statusAllowsSeverityOverride
+								? (reportedSeverity as Issue["severity"])
+								: issue.severity;
 
 					// Validate status
 					const validStatuses = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] as const;

@@ -207,14 +207,33 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 			console.log(`  ${pc.bold("Validation:")}  ${parts.join("  ")}`);
 		}
 
-		// List confirmed/partial issues
+		// List confirmed/partial issues with severity from loaded issues
+		const loadedIssues = results
+			.filter((r) => r.success)
+			.reduce(
+				(map, r) => {
+					const issue = r.item as Issue;
+					map.set(issue.id, issue);
+					return map;
+				},
+				new Map<string, Issue>(),
+			);
+
 		const actionable = [...(byStatus.get("CONFIRMED") ?? []), ...(byStatus.get("PARTIAL") ?? [])];
 		if (actionable.length > 0) {
 			console.log("");
 			for (const item of actionable) {
-				const conf = item.confidence ? pc.dim(`(${item.confidence})`) : "";
+				const issue = loadedIssues.get(item.issueId);
+				const severity = issue?.severity ?? "N/A";
+				const severityColors: Record<string, (s: string) => string> = {
+					CRITICAL: pc.red,
+					HIGH: pc.yellow,
+					MEDIUM: pc.blue,
+					LOW: pc.dim,
+				};
+				const severityColor = severityColors[severity] ?? pc.dim;
 				const summary = item.summary ? ` ${item.summary.slice(0, 60)}` : "";
-				console.log(`    ${pc.green("●")} ${item.issueId}:${summary} ${conf}`);
+				console.log(`    ${pc.green("●")} ${item.issueId}:${summary} ${severityColor(`(${severity})`)}`);
 			}
 		}
 
