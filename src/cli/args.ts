@@ -195,6 +195,24 @@ Config:    Edit .milhouse/config.ts to configure phases, workers, rules,
 }
 
 /**
+ * Parse a string value as an integer, throwing on non-numeric input.
+ *
+ * @param value - The string value to parse, or undefined
+ * @param flagName - The CLI flag name (for error messages)
+ * @param defaultValue - The default value if value is undefined
+ * @returns The parsed integer, or defaultValue if value is undefined
+ * @throws {Error} If value is not a valid integer
+ */
+function parseIntOption(value: string | undefined, flagName: string, defaultValue: number): number {
+	if (value === undefined) return defaultValue;
+	const parsed = Number.parseInt(value, 10);
+	if (Number.isNaN(parsed)) {
+		throw new Error(`--${flagName} requires a numeric value, got '${value}'`);
+	}
+	return parsed;
+}
+
+/**
  * Parse comma-separated issue IDs
  *
  * @param str - Comma-separated string of issue IDs
@@ -411,9 +429,9 @@ export function parseArgs(args: string[]): ParsedArgs {
 	// --workers can be boolean (true) or have a value (number of workers)
 	const hasWorkersFlag = opts.workers !== undefined;
 	const workersValue =
-		typeof opts.workers === "string" ? Number.parseInt(opts.workers, 10) : undefined;
+		opts.workers === true ? undefined : parseIntOption(opts.workers, "workers", 3);
 	const useParallel = hasWorkersFlag;
-	const workerCount = workersValue || 3;
+	const workerCount = workersValue ?? 3;
 
 	// Handle --pr/--draft flags
 	const createPr = opts.pr || false;
@@ -427,9 +445,9 @@ export function parseArgs(args: string[]): ParsedArgs {
 		skipLint,
 		aiEngine,
 		dryRun: opts.dryRun || false,
-		maxIterations: Number.parseInt(opts.maxIterations, 10) || 0,
-		maxRetries: Number.parseInt(opts.maxRetries, 10) || 3,
-		retryDelay: (Number.parseInt(opts.retryDelay, 10) || 5) * 1000, // Convert seconds to ms
+		maxIterations: parseIntOption(opts.maxIterations, "max-iterations", 0),
+		maxRetries: parseIntOption(opts.maxRetries, "max-retries", 3),
+		retryDelay: parseIntOption(opts.retryDelay, "retry-delay", 5) * 1000, // Convert seconds to ms
 		verbose: opts.verbose || false,
 		branchPerTask: isolateTask,
 		baseBranch: opts.baseBranch || "",
@@ -459,10 +477,9 @@ export function parseArgs(args: string[]): ParsedArgs {
 		severityFilter: parseSeverityLevels(opts.severity),
 		runId: opts.runId,
 		// Validation retry options
-		maxValidationRetries:
-			opts.maxValidationRetries !== undefined ? Number.parseInt(opts.maxValidationRetries, 10) : 2,
+		maxValidationRetries: parseIntOption(opts.maxValidationRetries, "max-validation-retries", 2),
 		retryUnvalidated: opts.retryUnvalidated !== false, // Default true, --no-retry-unvalidated sets to false
-		retryDelayValidation: Number.parseInt(opts.retryDelayValidation, 10) || 2000,
+		retryDelayValidation: parseIntOption(opts.retryDelayValidation, "retry-delay-validation", 2000),
 		unsafeDoDChecks: opts.unsafeDodChecks || false,
 		retryOnAnyFailure: opts.retryOnAnyFailure || false,
 		// Tmux mode options (OpenCode only)
