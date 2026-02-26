@@ -213,7 +213,7 @@ export type RunStats = z.infer<typeof RunStatsSchema>;
  * .milhouse/state/run.json files. New code should use:
  * - createRun() to create a new run
  * - getCurrentRun() to get the current run metadata
- * - updateRunPhaseInMeta() to update run phase
+ * - updateRunPhaseInMetaWithLock() to update run phase
  *
  * Will be removed in v2.0.
  */
@@ -330,8 +330,8 @@ export type RunPhase = z.infer<typeof RunPhaseSchema>;
  * Use the following functions to work with RunMeta:
  * - createRun() - Create a new run
  * - getCurrentRun() - Get the current active run
- * - updateRunPhaseInMeta() - Update run phase
- * - updateRunStats() - Update progress statistics
+ * - updateRunPhaseInMetaWithLock() - Update run phase (concurrent-safe)
+ * - updateRunStatsWithLock() - Update progress statistics (concurrent-safe)
  * - updateRunMetaWithLock() - Thread-safe updates
  */
 export const RunMetaSchema = z.object({

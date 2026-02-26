@@ -314,7 +314,8 @@ export function listRuns(workDir = process.cwd()): Array<{
 /**
  * Update run phase
  */
-export function updateRunPhaseInMeta(
+/** @internal - Use updateRunPhaseInMetaWithLock for concurrent-safe updates */
+function updateRunPhaseInMeta(
 	runId: string,
 	phase: RunPhase,
 	workDir = process.cwd(),
@@ -346,7 +347,8 @@ export function updateRunPhaseInMeta(
 /**
  * Update run statistics
  */
-export function updateRunStats(
+/** @internal - Use updateRunStatsWithLock for concurrent-safe updates */
+function updateRunStats(
 	runId: string,
 	stats: Partial<
 		Pick<
