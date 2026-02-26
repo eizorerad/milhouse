@@ -7,8 +7,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { parseArgs } from "./args";
 import { DEFAULTS, resolveConfig } from "../config/define";
+import { parseArgs } from "./args";
 
 describe("parseArgs", () => {
 	describe("severity parsing", () => {
@@ -131,6 +131,94 @@ describe("parseArgs", () => {
 		test("sets to true when --unsafe-dod-checks is provided", () => {
 			const result = parseArgs(["node", "milhouse", "--unsafe-dod-checks"]);
 			expect(result.options.unsafeDoDChecks).toBe(true);
+		});
+	});
+
+	describe("numeric option parsing", () => {
+		describe("--workers", () => {
+			test("throws on non-numeric value", () => {
+				expect(() => parseArgs(["node", "milhouse", "--workers", "abc"])).toThrow();
+			});
+
+			test("preserves zero value", () => {
+				const result = parseArgs(["node", "milhouse", "--workers", "0"]);
+				expect(result.options.maxParallel).toBe(0);
+			});
+
+			test("parses valid numeric value", () => {
+				const result = parseArgs(["node", "milhouse", "--workers", "5"]);
+				expect(result.options.maxParallel).toBe(5);
+			});
+		});
+
+		describe("--max-iterations", () => {
+			test("throws on non-numeric value", () => {
+				expect(() => parseArgs(["node", "milhouse", "--max-iterations", "abc"])).toThrow();
+			});
+
+			test("parses valid numeric value", () => {
+				const result = parseArgs(["node", "milhouse", "--max-iterations", "10"]);
+				expect(result.options.maxIterations).toBe(10);
+			});
+		});
+
+		describe("--max-retries", () => {
+			test("throws on non-numeric value", () => {
+				expect(() => parseArgs(["node", "milhouse", "--max-retries", "abc"])).toThrow();
+			});
+
+			test("preserves zero value", () => {
+				const result = parseArgs(["node", "milhouse", "--max-retries", "0"]);
+				expect(result.options.maxRetries).toBe(0);
+			});
+
+			test("parses valid numeric value", () => {
+				const result = parseArgs(["node", "milhouse", "--max-retries", "5"]);
+				expect(result.options.maxRetries).toBe(5);
+			});
+		});
+
+		describe("--retry-delay", () => {
+			test("throws on non-numeric value", () => {
+				expect(() => parseArgs(["node", "milhouse", "--retry-delay", "abc"])).toThrow();
+			});
+
+			test("preserves zero value", () => {
+				const result = parseArgs(["node", "milhouse", "--retry-delay", "0"]);
+				expect(result.options.retryDelay).toBe(0);
+			});
+
+			test("parses valid numeric value", () => {
+				const result = parseArgs(["node", "milhouse", "--retry-delay", "10"]);
+				expect(result.options.retryDelay).toBe(10000);
+			});
+		});
+
+		describe("--max-validation-retries", () => {
+			test("throws on non-numeric value", () => {
+				expect(() => parseArgs(["node", "milhouse", "--max-validation-retries", "abc"])).toThrow();
+			});
+
+			test("parses valid numeric value", () => {
+				const result = parseArgs(["node", "milhouse", "--max-validation-retries", "5"]);
+				expect(result.options.maxValidationRetries).toBe(5);
+			});
+		});
+
+		describe("--retry-delay-validation", () => {
+			test("throws on non-numeric value", () => {
+				expect(() => parseArgs(["node", "milhouse", "--retry-delay-validation", "abc"])).toThrow();
+			});
+
+			test("preserves zero value", () => {
+				const result = parseArgs(["node", "milhouse", "--retry-delay-validation", "0"]);
+				expect(result.options.retryDelayValidation).toBe(0);
+			});
+
+			test("parses valid numeric value", () => {
+				const result = parseArgs(["node", "milhouse", "--retry-delay-validation", "5000"]);
+				expect(result.options.retryDelayValidation).toBe(5000);
+			});
 		});
 	});
 
