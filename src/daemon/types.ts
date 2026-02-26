@@ -76,7 +76,7 @@ export interface DaemonIntervalConfig {
 }
 
 export interface DaemonWatchdogConfig {
-	/** Kill process after N minutes with no stdout activity */
+	/** Kill process after N minutes with no stdout/stderr activity */
 	activityTimeout: number;
 	/** Kill process after N minutes total wall time */
 	runTimeout: number;
