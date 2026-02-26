@@ -45,6 +45,11 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 	mode: "per-item",
 	defaultParallel: 5,
 
+	// Limit turns to prevent Claude from asking clarifying questions
+	// and hanging indefinitely. Plan agents need 2-3 turns at most
+	// (read files + generate JSON response).
+	engineMetadata: { maxTurns: 5 },
+
 	// Retry: if an item fails (e.g. CLI hang timeout), retry it
 	isRetryable: true,
 	maxRetryRounds: 1,
