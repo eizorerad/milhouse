@@ -164,6 +164,36 @@ export class EngineExecutor implements IEngineExecutor {
 			stderr: "pipe",
 		});
 
+		// Set up abort signal listener to kill the process on timeout.
+		// This ensures timed-out processes don't become zombies.
+		let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+		const abortSignal = request.abortSignal as AbortSignal | undefined;
+
+		const onAbort = () => {
+			try {
+				proc.kill("SIGTERM");
+			} catch {
+				// Process already exited
+			}
+			// Force kill after 5 seconds if SIGTERM doesn't work
+			forceKillTimer = setTimeout(() => {
+				try {
+					proc.kill("SIGKILL");
+				} catch {
+					// Process already exited
+				}
+			}, 5000);
+		};
+
+		if (abortSignal) {
+			if (abortSignal.aborted) {
+				// Signal already fired before we set up the listener
+				onAbort();
+			} else {
+				abortSignal.addEventListener("abort", onAbort, { once: true });
+			}
+		}
+
 		// Set up stream processor for real-time output with optional step callback
 		const streamProcessor = new RealtimeStreamProcessor({
 			taskId: request.taskId || "unknown",
@@ -221,6 +251,15 @@ export class EngineExecutor implements IEngineExecutor {
 			readStderr(),
 			waitForExit(),
 		]);
+
+		// Clean up abort signal listener and force-kill timer now that process has exited
+		if (abortSignal && !abortSignal.aborted) {
+			abortSignal.removeEventListener("abort", onAbort);
+		}
+		if (forceKillTimer) {
+			clearTimeout(forceKillTimer);
+			forceKillTimer = null;
+		}
 
 		// Get exit code (should always succeed if process was spawned)
 		const exitCode = exitResult.status === "fulfilled" ? exitResult.value : 1;
