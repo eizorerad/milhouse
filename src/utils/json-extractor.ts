@@ -93,30 +93,36 @@ export function tryFixAndParseJson<T = unknown>(jsonStr: string): T | null {
 		// Continue to next strategy
 	}
 
-	// Strategy 3: Try to extract just the array/object part
+	// Strategy 3: Try to extract just the array/object part using balanced matching
 	try {
-		const arrayMatch = trimmed.match(/\[[\s\S]*\]/);
-		if (arrayMatch) {
-			const cleaned = arrayMatch[0]
-				.split("\n")
-				.map((line) => line.trim())
-				.join(" ");
-			const result = JSON.parse(cleaned);
-			return result as T;
+		const arrayStart = trimmed.indexOf("[");
+		if (arrayStart >= 0) {
+			const extracted = extractBalancedJson(trimmed.slice(arrayStart), "[");
+			if (extracted) {
+				const cleaned = extracted
+					.split("\n")
+					.map((line) => line.trim())
+					.join(" ");
+				const result = JSON.parse(cleaned);
+				return result as T;
+			}
 		}
 	} catch {
 		// Continue
 	}
 
 	try {
-		const objectMatch = trimmed.match(/\{[\s\S]*\}/);
-		if (objectMatch) {
-			const cleaned = objectMatch[0]
-				.split("\n")
-				.map((line) => line.trim())
-				.join(" ");
-			const result = JSON.parse(cleaned);
-			return result as T;
+		const objectStart = trimmed.indexOf("{");
+		if (objectStart >= 0) {
+			const extracted = extractBalancedJson(trimmed.slice(objectStart), "{");
+			if (extracted) {
+				const cleaned = extracted
+					.split("\n")
+					.map((line) => line.trim())
+					.join(" ");
+				const result = JSON.parse(cleaned);
+				return result as T;
+			}
 		}
 	} catch {
 		// Continue

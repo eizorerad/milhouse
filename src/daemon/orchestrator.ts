@@ -6,6 +6,7 @@
  */
 
 import { buildOrchestratorPrompt } from "../agents/prompts/orchestrator.ts";
+import { extractAndParseJson } from "../utils/json-extractor.ts";
 import { logWarn } from "../ui/logger.ts";
 import { hardcodedDecision } from "./hardcoded-fallback.ts";
 import { buildOrchestratorContext } from "./orchestrator-prompt.ts";
@@ -89,22 +90,12 @@ export async function getOrchestratorDirective(
  * Parse the orchestrator's JSON response into a RunDirective.
  * Handles common AI output quirks (markdown fences, extra text).
  */
-function parseDirective(raw: string): RunDirective {
-	// Strip markdown code fences if present
-	let json = raw.trim();
-
-	const fenceMatch = json.match(/```(?:json)?\s*([\s\S]*?)```/);
-	if (fenceMatch) {
-		json = fenceMatch[1].trim();
-	}
-
-	// Try to find JSON object in the output
-	const objectMatch = json.match(/\{[\s\S]*\}/);
-	if (!objectMatch) {
+export function parseDirective(raw: string): RunDirective {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const parsed = extractAndParseJson<any>(raw);
+	if (!parsed) {
 		throw new Error("No JSON object found in orchestrator response");
 	}
-
-	const parsed = JSON.parse(objectMatch[0]);
 
 	// Validate required fields
 	if (!parsed.action || !["run", "stop"].includes(parsed.action)) {
