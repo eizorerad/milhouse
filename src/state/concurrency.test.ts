@@ -28,6 +28,7 @@ import {
 	updateTaskStatusWithLock,
 	updateTaskWithLock,
 } from "./tasks.ts";
+import { createIssue, readIssue, updateIssueFromValidation } from "./issues.ts";
 import type { RunPhase } from "./types.ts";
 
 describe("Concurrency Tests", () => {
@@ -788,6 +789,59 @@ describe("Concurrency Tests", () => {
 			// The run should be gone from the index
 			const finalIndex = loadRunsIndex(testDir);
 			expect(finalIndex.runs.some((r) => r.id === run.id)).toBe(false);
+		});
+	});
+
+	describe("updateIssueFromValidation concurrency", () => {
+		test("should preserve all evidence entries under concurrent updates to the same issue", async () => {
+			// Create a run so getStatePathForCurrentRun resolves correctly
+			await createRun({ scope: "evidence merge test", workDir: testDir });
+
+			// Create an issue with empty evidence
+			const issue = createIssue(
+				{
+					symptom: "Test symptom",
+					hypothesis: "Test hypothesis",
+					evidence: [],
+					status: "UNVALIDATED",
+					severity: "MEDIUM",
+					related_task_ids: [],
+				},
+				testDir,
+			);
+
+			const N = 10;
+
+			// Launch N concurrent calls, each adding a unique evidence entry
+			const promises = Array.from({ length: N }, (_, i) =>
+				updateIssueFromValidation(
+					issue.id,
+					{
+						status: "CONFIRMED",
+						evidence: [
+							{
+								type: "log",
+								output: `evidence-${i}`,
+								timestamp: new Date().toISOString(),
+							},
+						],
+					},
+					testDir,
+				),
+			);
+
+			await Promise.all(promises);
+
+			// Load the issue and verify all N evidence entries are present
+			const finalIssue = readIssue(issue.id, testDir);
+			expect(finalIssue).not.toBeNull();
+			expect(finalIssue!.evidence.length).toBe(N);
+
+			// Verify each unique evidence entry exists
+			for (let i = 0; i < N; i++) {
+				const found = finalIssue!.evidence.some((e) => e.output === `evidence-${i}`);
+				expect(found).toBe(true);
+			}
 		});
 	});
 });
