@@ -17,7 +17,7 @@
  * @since 1.0.0
  */
 
-import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import pLimit from "p-limit";
 import { MILHOUSE_DIR } from "../domain/config/directories.ts";
@@ -34,6 +34,7 @@ import {
 import { AGENT_ROLES, type Issue, type Task as StateTask } from "../state/types.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { DynamicAgentSpinner } from "../ui/spinners.ts";
+import { runGitCommand } from "../vcs/backends/git-cli.ts";
 import { mergeInIsolatedWorktree } from "../vcs/services/merge-service.ts";
 import { cleanupWorktree, createWorktree } from "../vcs/services/worktree-service.ts";
 import { type BranchMergeResult, type IssueInfo, mergeCompletedBranches } from "./merge/index.ts";
@@ -1034,6 +1035,8 @@ export async function runParallelByIssue(
 	// This releases the branch locks so merge can checkout the branches
 	// The branch commits are preserved - only the worktree directory is removed
 	// ============================================================================
+	const failedCleanupBranches = new Set<string>();
+
 	if (worktreesToCleanup.length > 0) {
 		logDebug(
 			`Starting worktree cleanup BEFORE merge: ${worktreesToCleanup.length} worktree(s) to clean`,
@@ -1041,14 +1044,61 @@ export async function runParallelByIssue(
 
 		for (const { worktreeDir, branchName } of worktreesToCleanup) {
 			try {
-				await cleanupWorktree({
+				const result = await cleanupWorktree({
 					path: worktreeDir,
 					originalDir: workDir,
 				});
-				logDebug(`Cleaned up worktree: ${worktreeDir} (branch ${branchName} preserved)`);
+
+				// Check if cleanup succeeded (worktree fully removed)
+				if (result.ok && !result.value.leftInPlace) {
+					logDebug(`Cleaned up worktree: ${worktreeDir} (branch ${branchName} preserved)`);
+					continue;
+				}
+
+				// Worktree left in place or error - escalate with force
+				const reason = result.ok ? result.value.reason : result.error.message;
+				logDebug(
+					`Worktree cleanup left in place (${reason}), retrying with force: ${worktreeDir}`,
+				);
+
+				const forceResult = await cleanupWorktree({
+					path: worktreeDir,
+					originalDir: workDir,
+					force: true,
+				});
+
+				if (forceResult.ok && !forceResult.value.leftInPlace) {
+					logDebug(
+						`Force cleanup succeeded: ${worktreeDir} (branch ${branchName} preserved)`,
+					);
+					continue;
+				}
+
+				// Force cleanup also failed - try manual rmSync + git worktree prune
+				logDebug(`Force cleanup failed, attempting manual removal: ${worktreeDir}`);
+				try {
+					if (existsSync(worktreeDir)) {
+						rmSync(worktreeDir, { recursive: true, force: true });
+					}
+					await runGitCommand(["worktree", "prune"], workDir);
+					logDebug(
+						`Manual cleanup succeeded: ${worktreeDir} (branch ${branchName} preserved)`,
+					);
+					continue;
+				} catch (manualError) {
+					logWarn(`Manual cleanup also failed for ${worktreeDir}: ${manualError}`);
+				}
+
+				// All cleanup attempts failed - track for merge exclusion
+				failedCleanupBranches.add(branchName);
+				logWarn(
+					`Failed to cleanup worktree for branch ${branchName} after escalation - branch will be excluded from merge phase`,
+				);
 			} catch (error) {
-				logWarn(`Failed to cleanup worktree ${worktreeDir}: ${error}`);
-				// Continue with other cleanups even if one fails
+				failedCleanupBranches.add(branchName);
+				logWarn(
+					`Failed to cleanup worktree ${worktreeDir}: ${error} - branch ${branchName} will be excluded from merge phase`,
+				);
 			}
 		}
 
