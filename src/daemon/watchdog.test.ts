@@ -25,22 +25,43 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-/** Creates a mock ReadableStream that blocks on read() until close() is called. */
+/** Creates a mock ReadableStream that blocks on read() until close() is called.
+ *  Supports pushing data chunks via pushChunk() for simulating stream output. */
 function createMockStream() {
-	let onClose: (() => void) | null = null;
+	const encoder = new TextEncoder();
+	const pendingChunks: Uint8Array[] = [];
+	let waitingReader: ((result: { done: boolean; value: Uint8Array | undefined }) => void) | null = null;
 	let closed = false;
+
 	return {
 		getReader: () => ({
 			read: () => {
+				if (pendingChunks.length > 0) {
+					return Promise.resolve({ done: false as const, value: pendingChunks.shift()! });
+				}
 				if (closed) return Promise.resolve({ done: true as const, value: undefined });
-				return new Promise<{ done: true; value: undefined }>((resolve) => {
-					onClose = () => resolve({ done: true, value: undefined });
+				return new Promise<{ done: boolean; value: Uint8Array | undefined }>((resolve) => {
+					waitingReader = resolve;
 				});
 			},
 		}),
+		pushChunk(text: string) {
+			const encoded = encoder.encode(text);
+			if (waitingReader) {
+				const reader = waitingReader;
+				waitingReader = null;
+				reader({ done: false, value: encoded });
+			} else {
+				pendingChunks.push(encoded);
+			}
+		},
 		close() {
 			closed = true;
-			onClose?.();
+			if (waitingReader) {
+				const reader = waitingReader;
+				waitingReader = null;
+				reader({ done: true, value: undefined });
+			}
 		},
 	};
 }
@@ -225,5 +246,57 @@ describe("killProcess SIGKILL timer", () => {
 		// After fix: clearTimeout should have been called with the SIGKILL timer handle
 		// Before fix: clearTimeout is never called → the timer leaks
 		expect(clearedTimeouts.has(sigkillHandle)).toBe(true);
+	});
+});
+
+describe("stderr activity tracking", () => {
+	let mockProc: ReturnType<typeof createMockProc>;
+	const origDateNow = Date.now;
+
+	beforeEach(() => {
+		mockProc = createMockProc();
+		installInterceptors(mockProc);
+	});
+
+	afterEach(() => {
+		restoreInterceptors();
+		Date.now = origDateNow;
+	});
+
+	test("stderr activity resets lastActivityAt and prevents activity-timeout kill", async () => {
+		const config = {
+			activityTimeout: 1, // 1 minute
+			runTimeout: 180,
+			onTimeout: "kill-and-retry" as const,
+		};
+
+		// Mock Date.now to control time
+		let currentTime = 1_000_000;
+		Date.now = () => currentTime;
+
+		const resultPromise = spawnWithWatchdog(["--test"], config, {
+			workDir: "/tmp",
+		});
+
+		// Advance time past the activity timeout (90s > 60s = 1 minute)
+		currentTime += 90_000;
+
+		// Push stderr data — should reset lastActivityAt in fixed code
+		mockProc.proc.stderr.pushChunk("compilation error: something failed\n");
+
+		// Allow the async stderr reader to process the chunk
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// Fire the watchdog interval
+		intervalCallback!();
+
+		// With the fix: stderr updated lastActivityAt, so silentMinutes ≈ 0 → no kill
+		// Without the fix: lastActivityAt unchanged, silentMinutes = 1.5 → kill triggered
+		expect(mockProc.killCalls).toEqual([]);
+
+		// Clean up
+		mockProc.resolveExit(0);
+		await resultPromise;
 	});
 });
