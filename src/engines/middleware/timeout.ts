@@ -56,6 +56,12 @@ export function createTimeoutMiddleware(options: TimeoutOptions = {}): Middlewar
 		// Create abort controller if supported
 		const abortController = useAbortController ? new AbortController() : null;
 
+		// Attach the signal to the request so the executor can use it to kill
+		// the spawned process when a timeout fires.
+		if (abortController) {
+			request.abortSignal = abortController.signal;
+		}
+
 		// Create timeout promise
 		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 		const timeoutPromise = new Promise<never>((_, reject) => {
