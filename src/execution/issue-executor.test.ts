@@ -22,6 +22,7 @@ import {
 	type IssueGroup,
 	buildIssueExecutorPrompt,
 	displayBranchStatusSummary,
+	filterBranchesForMerge,
 	groupTasksByIssue,
 	runParallelByIssue,
 } from "./issue-executor.ts";
@@ -633,5 +634,114 @@ describe("Rebase Failure Scenarios", () => {
 		// - Preserving branch if all attempts fail
 
 		expect(true).toBe(true); // Placeholder - actual test requires VCS mocking
+	});
+});
+
+// ============================================================================
+// Unit Tests: filterBranchesForMerge (worktree cleanup failure -> merge exclusion)
+// ============================================================================
+
+describe("filterBranchesForMerge", () => {
+	function createBranchStatus(branch: string, issueId: string): BranchStatus {
+		return {
+			branch,
+			issueId,
+			status: "complete",
+			completedTasks: 1,
+			failedTasks: 0,
+			totalTasks: 1,
+			merged: false,
+		};
+	}
+
+	it("successful cleanup allows merge - all branches pass through when no cleanup failures", () => {
+		const branchesToMerge = ["branch-a", "branch-b", "branch-c"];
+		const failedCleanupBranches = new Set<string>();
+		const allBranchStatuses = [
+			createBranchStatus("branch-a", "P-1"),
+			createBranchStatus("branch-b", "P-2"),
+			createBranchStatus("branch-c", "P-3"),
+		];
+
+		const result = filterBranchesForMerge(branchesToMerge, failedCleanupBranches, allBranchStatuses);
+
+		expect(result).toEqual(["branch-a", "branch-b", "branch-c"]);
+		// No branch statuses should have error set
+		expect(allBranchStatuses.every((s) => s.error === undefined)).toBe(true);
+	});
+
+	it("failed cleanup excludes branch from merge and sets error status", () => {
+		const branchesToMerge = ["branch-a", "branch-b"];
+		const failedCleanupBranches = new Set<string>(["branch-a"]);
+		const allBranchStatuses = [
+			createBranchStatus("branch-a", "P-1"),
+			createBranchStatus("branch-b", "P-2"),
+		];
+
+		const result = filterBranchesForMerge(branchesToMerge, failedCleanupBranches, allBranchStatuses);
+
+		expect(result).toEqual(["branch-b"]);
+		// branch-a should have error status
+		const branchAStatus = allBranchStatuses.find((s) => s.branch === "branch-a");
+		expect(branchAStatus?.error).toContain("worktree cleanup failed");
+		expect(branchAStatus?.merged).toBe(false);
+		// branch-b should be unaffected
+		const branchBStatus = allBranchStatuses.find((s) => s.branch === "branch-b");
+		expect(branchBStatus?.error).toBeUndefined();
+	});
+
+	it("leftInPlace cleanup triggers exclusion after escalation failure", () => {
+		// This tests the scenario where cleanupWorktree returned leftInPlace: true,
+		// the forced retry also failed, and the branch ended up in failedCleanupBranches.
+		// From filterBranchesForMerge's perspective, the branch is simply in the failed set.
+		const branchesToMerge = ["branch-locked"];
+		const failedCleanupBranches = new Set<string>(["branch-locked"]);
+		const allBranchStatuses = [createBranchStatus("branch-locked", "P-1")];
+
+		const result = filterBranchesForMerge(branchesToMerge, failedCleanupBranches, allBranchStatuses);
+
+		expect(result).toEqual([]);
+		const status = allBranchStatuses[0];
+		expect(status.error).toContain("worktree cleanup failed");
+		expect(status.error).toContain("locked");
+		expect(status.merged).toBe(false);
+	});
+
+	it("partial cleanup failure only excludes failed branches while successful ones proceed", () => {
+		const branchesToMerge = ["branch-ok-1", "branch-fail", "branch-ok-2"];
+		const failedCleanupBranches = new Set<string>(["branch-fail"]);
+		const allBranchStatuses = [
+			createBranchStatus("branch-ok-1", "P-1"),
+			createBranchStatus("branch-fail", "P-2"),
+			createBranchStatus("branch-ok-2", "P-3"),
+		];
+
+		const result = filterBranchesForMerge(branchesToMerge, failedCleanupBranches, allBranchStatuses);
+
+		// Only the failed branch should be excluded
+		expect(result).toEqual(["branch-ok-1", "branch-ok-2"]);
+		// Failed branch gets error
+		const failedStatus = allBranchStatuses.find((s) => s.branch === "branch-fail");
+		expect(failedStatus?.error).toContain("worktree cleanup failed");
+		// Successful branches are unaffected
+		const ok1Status = allBranchStatuses.find((s) => s.branch === "branch-ok-1");
+		const ok2Status = allBranchStatuses.find((s) => s.branch === "branch-ok-2");
+		expect(ok1Status?.error).toBeUndefined();
+		expect(ok2Status?.error).toBeUndefined();
+	});
+
+	it("handles failed branch not in branchesToMerge gracefully", () => {
+		// Edge case: a branch in failedCleanupBranches that wasn't queued for merge
+		const branchesToMerge = ["branch-a"];
+		const failedCleanupBranches = new Set<string>(["branch-not-queued"]);
+		const allBranchStatuses = [
+			createBranchStatus("branch-a", "P-1"),
+			createBranchStatus("branch-not-queued", "P-2"),
+		];
+
+		const result = filterBranchesForMerge(branchesToMerge, failedCleanupBranches, allBranchStatuses);
+
+		// branch-a should still be included since it's not in failedCleanupBranches
+		expect(result).toEqual(["branch-a"]);
 	});
 });
