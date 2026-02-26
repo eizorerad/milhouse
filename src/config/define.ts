@@ -6,7 +6,11 @@
  * At runtime, missing fields are filled from DEFAULTS.
  */
 
+import { logWarn } from "../ui/logger.ts";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+export const VALID_PHASES = ["scan", "validate", "plan", "consolidate", "exec", "verify"] as const;
 
 export type PhaseName = "scan" | "validate" | "plan" | "consolidate" | "exec" | "verify";
 
@@ -240,14 +244,52 @@ export function resolveConfig(user: Config): ResolvedFullConfig {
 	};
 }
 
+/** Compute Levenshtein distance between two strings */
+function levenshtein(a: string, b: string): number {
+	const m = a.length;
+	const n = b.length;
+	const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+	for (let i = 0; i <= m; i++) dp[i][0] = i;
+	for (let j = 0; j <= n; j++) dp[0][j] = j;
+	for (let i = 1; i <= m; i++) {
+		for (let j = 1; j <= n; j++) {
+			dp[i][j] =
+				a[i - 1] === b[j - 1]
+					? dp[i - 1][j - 1]
+					: 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+		}
+	}
+	return dp[m][n];
+}
+
+/** Return the closest valid phase name to the given input */
+function closestPhaseName(input: string): string {
+	let best = VALID_PHASES[0] as string;
+	let bestDist = Number.POSITIVE_INFINITY;
+	for (const phase of VALID_PHASES) {
+		const d = levenshtein(input, phase);
+		if (d < bestDist) {
+			bestDist = d;
+			best = phase;
+		}
+	}
+	return best;
+}
+
 function mergePhases(
 	user?: Partial<Record<PhaseName, PhaseConfig>>,
 ): Record<PhaseName, Required<PhaseConfig>> {
 	const result = { ...DEFAULTS.phases };
 	if (!user) return result;
 
-	for (const phase of Object.keys(user) as PhaseName[]) {
-		if (result[phase] && user[phase]) {
+	for (const key of Object.keys(user) as string[]) {
+		if (!(VALID_PHASES as readonly string[]).includes(key)) {
+			const suggestion = closestPhaseName(key);
+			logWarn(`Unknown phase "${key}" in config — did you mean "${suggestion}"?`);
+			continue;
+		}
+		const phase = key as PhaseName;
+		if (user[phase]) {
 			result[phase] = { ...result[phase], ...user[phase] };
 		}
 	}
