@@ -2,12 +2,13 @@
  * Milhouse Conflict Resolution Runtime
  *
  * Provides AI-assisted merge conflict resolution for Milhouse execution.
- * Uses AI engines to intelligently resolve git merge conflicts.
+ * Uses AI engines to intelligently resolve git merge conflicts and rebase conflicts.
  *
  * Features:
  * - AI-powered conflict resolution
  * - Event emission for conflict lifecycle
  * - Pipeline-aware resolution
+ * - Rebase-aware: uses correct git commands (rebase --continue vs commit)
  * - Detailed result tracking
  *
  * @module execution/runtime/conflict-resolution
@@ -19,7 +20,11 @@ import { join } from "node:path";
 import type { AIEngine } from "../../engines/types.ts";
 import { bus } from "../../events/index.ts";
 import { logDebug, logError, logInfo, logWarn } from "../../ui/logger.ts";
-import { completeMerge, getConflictedFiles } from "../../vcs/services/merge-service.ts";
+import {
+	completeMerge,
+	continueRebase,
+	getConflictedFiles,
+} from "../../vcs/services/merge-service.ts";
 import type {
 	ConflictResolutionResult,
 	MergeConflict,
@@ -27,6 +32,14 @@ import type {
 	TokenUsage,
 } from "./types.ts";
 import { createEmptyTokenUsage } from "./types.ts";
+
+/**
+ * Whether the conflict arose during a merge or a rebase.
+ * Determines which git commands are used to finalize resolution:
+ * - 'merge': git add + git commit --no-edit
+ * - 'rebase': git add + git rebase --continue
+ */
+export type ConflictMode = "merge" | "rebase";
 
 /**
  * Optional issue context passed to the conflict resolver for better AI decisions
@@ -112,22 +125,25 @@ function truncateContent(content: string): string {
  * @param conflicts - Array of merge conflicts
  * @param workDir - Working directory to read files from
  * @param issueContext - Optional issue context for semantic understanding
+ * @param mode - Whether this is a 'merge' or 'rebase' conflict (affects git finalization commands)
  * @returns Formatted prompt for AI
  */
 export function buildConflictResolutionPrompt(
 	conflicts: MergeConflict[],
 	workDir?: string,
 	issueContext?: ConflictIssueContext,
+	mode: ConflictMode = "merge",
 ): string {
 	const branchName = conflicts[0]?.sourceBranch ?? "unknown";
 	const targetName = conflicts[0]?.targetBranch ?? "unknown";
+	const isRebase = mode === "rebase";
 
 	const parts: string[] = [];
 
 	parts.push(`## Milhouse Conflict Resolution Task
 
-You are resolving git merge conflicts as part of the Milhouse pipeline.
-Merging branch \`${branchName}\` into \`${targetName}\`.`);
+You are resolving git ${isRebase ? "rebase" : "merge"} conflicts as part of the Milhouse pipeline.
+${isRebase ? "Rebasing" : "Merging"} branch \`${branchName}\` ${isRebase ? "onto" : "into"} \`${targetName}\`.`);
 
 	// Include issue context if available
 	if (issueContext) {
@@ -158,6 +174,11 @@ ${truncateContent(content)}
 		}
 	}
 
+	// Finalization command depends on whether we're in merge or rebase state
+	const finalizeCommand = isRebase
+		? "Run `git rebase --continue` to advance the rebase"
+		: "Run `git commit --no-edit` to complete the merge";
+
 	parts.push(`### Resolution Protocol
 
 For each conflicted file above:
@@ -170,13 +191,12 @@ For each conflicted file above:
 ### After Resolving All Conflicts
 
 1. Run \`git add\` on each resolved file to stage it
-2. Run \`git commit --no-edit\` to complete the merge
+2. ${finalizeCommand}
 
 ### Important Guidelines
 
 - Do NOT create new commits for individual file resolutions
-- Only run \`git commit --no-edit\` once at the very end
-- Ensure ALL files are resolved and staged before committing
+- Ensure ALL files are resolved and staged before finalizing
 - The final code should preserve functionality from BOTH branches
 - Keep all imports, type definitions, and function signatures from both sides
 - When in doubt, prefer the incoming changes (source branch) but preserve target modifications that don't conflict semantically
@@ -209,13 +229,18 @@ Ensure the result is valid code with no markers remaining.`;
 // ============================================================================
 
 /**
- * Resolve merge conflicts using AI
+ * Resolve merge or rebase conflicts using AI.
+ *
+ * The `mode` parameter controls which git commands are used to finalize:
+ * - 'merge' (default): uses `git add` + `git commit --no-edit`
+ * - 'rebase': uses `git add` + `git rebase --continue`
  *
  * @param engine - AI engine to use
  * @param conflicts - Conflicts to resolve
  * @param workDir - Working directory
  * @param modelOverride - Optional model override
  * @param issueContext - Optional issue context for better AI decisions
+ * @param mode - Whether this is a 'merge' or 'rebase' conflict (default: 'merge')
  * @returns Resolution result
  */
 export async function resolveConflictsWithEngine(
@@ -224,6 +249,7 @@ export async function resolveConflictsWithEngine(
 	workDir: string,
 	modelOverride?: string,
 	issueContext?: ConflictIssueContext,
+	mode: ConflictMode = "merge",
 ): Promise<ConflictResolutionResult> {
 	if (conflicts.length === 0) {
 		return {
@@ -234,10 +260,12 @@ export async function resolveConflictsWithEngine(
 		};
 	}
 
+	const modeLabel = mode === "rebase" ? "rebase" : "merge";
 	logInfo(
-		`Milhouse: Attempting AI-assisted conflict resolution for ${conflicts.length} file(s)...`,
+		`Milhouse: Attempting AI-assisted ${modeLabel} conflict resolution for ${conflicts.length} file(s)...`,
 	);
 	logDebug(`Conflicted files: ${conflicts.map((c) => c.filePath).join(", ")}`);
+	logDebug(`Resolution mode: ${modeLabel}`);
 
 	// Emit event for conflict resolution start
 	bus.emit("git:merge:conflict", {
@@ -246,7 +274,7 @@ export async function resolveConflictsWithEngine(
 		files: conflicts.map((c) => c.filePath),
 	});
 
-	const prompt = buildConflictResolutionPrompt(conflicts, workDir, issueContext);
+	const prompt = buildConflictResolutionPrompt(conflicts, workDir, issueContext, mode);
 	const engineOptions = modelOverride ? { modelOverride } : undefined;
 
 	try {
@@ -275,13 +303,46 @@ export async function resolveConflictsWithEngine(
 				};
 			}
 
-			// Try to complete the merge (AI may have staged but not committed)
+			// Finalize based on mode — merge uses commit, rebase uses rebase --continue
 			const conflictedFiles = conflicts.map((c) => c.filePath);
+
+			if (mode === "rebase") {
+				// For rebase: stage resolved files and continue the rebase
+				const rebaseResult = await continueRebase(workDir);
+				if (rebaseResult.ok && rebaseResult.value) {
+					logInfo(`Milhouse: AI successfully resolved ${modeLabel} conflicts`);
+					bus.emit("git:merge:complete", {
+						source: conflicts[0]?.sourceBranch ?? "unknown",
+						target: conflicts[0]?.targetBranch ?? "unknown",
+					});
+					return {
+						success: true,
+						resolvedFiles: conflictedFiles,
+						unresolvedFiles: [],
+						tokenUsage,
+					};
+				}
+
+				// continueRebase failed — AI resolved files but rebase couldn't proceed
+				const rebaseError = !rebaseResult.ok
+					? rebaseResult.error.message
+					: "rebase --continue returned false after AI resolution";
+				logWarn(`Milhouse: AI resolved files but rebase --continue failed: ${rebaseError}`);
+				return {
+					success: false,
+					resolvedFiles: conflictedFiles,
+					unresolvedFiles: [],
+					tokenUsage,
+					error: `Rebase continue failed: ${rebaseError}`,
+				};
+			}
+
+			// For merge: stage and commit
 			const completedResult = await completeMerge(workDir, conflictedFiles);
 			const completed = completedResult.ok && completedResult.value;
 
 			if (completed) {
-				logInfo("Milhouse: AI successfully resolved merge conflicts");
+				logInfo(`Milhouse: AI successfully resolved ${modeLabel} conflicts`);
 				bus.emit("git:merge:complete", {
 					source: conflicts[0]?.sourceBranch ?? "unknown",
 					target: conflicts[0]?.targetBranch ?? "unknown",
@@ -294,14 +355,32 @@ export async function resolveConflictsWithEngine(
 				};
 			}
 
-			// If completeMerge returned false but no conflicts remain,
-			// the AI likely already committed
-			logDebug("Merge appears to be already completed by AI");
+			// completeMerge failed — don't assume "AI already committed".
+			// During a merge, if no conflicts remain but commit fails,
+			// it likely means the AI already ran git commit (success)
+			// OR the working tree is in an unexpected state (failure).
+			// Check if merge is still in progress to disambiguate.
+			const { isMergeInProgress } = await import("../../vcs/services/merge-service.ts");
+			const mergeStillActive = await isMergeInProgress(workDir);
+			if (mergeStillActive.ok && !mergeStillActive.value) {
+				// No merge in progress + no conflicts = AI already committed successfully
+				logDebug("Merge completed by AI (no merge in progress, no conflicts)");
+				return {
+					success: true,
+					resolvedFiles: conflictedFiles,
+					unresolvedFiles: [],
+					tokenUsage,
+				};
+			}
+
+			// Merge still in progress but completeMerge failed — genuine failure
+			logWarn("Milhouse: AI resolved files but merge commit failed");
 			return {
-				success: true,
+				success: false,
 				resolvedFiles: conflictedFiles,
 				unresolvedFiles: [],
 				tokenUsage,
+				error: "Merge commit failed after AI resolution",
 			};
 		}
 
@@ -333,6 +412,7 @@ export async function resolveConflictsWithEngine(
  * @param engine - AI engine to use
  * @param conflicts - Conflicts to resolve
  * @param modelOverride - Optional model override
+ * @param mode - Whether this is a 'merge' or 'rebase' conflict (default: 'merge')
  * @returns Resolution result
  */
 export async function resolveConflictsWithContext(
@@ -340,12 +420,13 @@ export async function resolveConflictsWithContext(
 	engine: AIEngine,
 	conflicts: MergeConflict[],
 	modelOverride?: string,
+	mode: ConflictMode = "merge",
 ): Promise<ConflictResolutionResult> {
 	// Emit progress event
 	context.emitEvent("task:progress", {
 		taskId: context.currentTaskId ?? "conflict-resolution",
 		step: "resolving-conflicts",
-		detail: `${conflicts.length} file(s)`,
+		detail: `${conflicts.length} file(s) [${mode}]`,
 	});
 
 	const result = await resolveConflictsWithEngine(
@@ -353,6 +434,8 @@ export async function resolveConflictsWithContext(
 		conflicts,
 		context.environment.workDir,
 		modelOverride,
+		undefined,
+		mode,
 	);
 
 	// Emit completion event

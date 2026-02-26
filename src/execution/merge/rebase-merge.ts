@@ -237,37 +237,41 @@ export async function mergeCompletedBranches(
 					? { id: issueCtx.id, title: issueCtx.title }
 					: undefined;
 				const resolutionResult = await resolveConflictsWithEngine(
-					engine,
-					conflicts,
-					workDir,
-					modelOverride,
-					conflictIssueCtx,
-				);
-				const resolved = resolutionResult.success;
-
-				const issueInfoForConflict = branchToIssueInfo.get(branch);
-
-				if (resolved) {
-					logDebug("  ✓ AI resolved conflicts");
-
-					const mergeResultVcs2 = await mergeAgentBranch(branch, targetBranch, workDir, {
-						message: issueInfoForConflict?.title,
-					});
-
-					if (mergeResultVcs2.ok && mergeResultVcs2.value.success) {
-						logSuccess(`  ✓ Successfully merged ${branch} after AI conflict resolution`);
-						await deleteLocalBranch(branch, workDir, true);
-						success = true;
-						break;
+						engine,
+						conflicts,
+						workDir,
+						modelOverride,
+						conflictIssueCtx,
+						"rebase",
+					);
+					const resolved = resolutionResult.success;
+	
+					const issueInfoForConflict = branchToIssueInfo.get(branch);
+	
+					if (resolved) {
+						logDebug("  ✓ AI resolved rebase conflicts, rebase continued");
+	
+						// After successful rebase resolution, the source branch is rebased
+						// on top of target. Now do a fast-forward merge.
+						const mergeResultVcs2 = await mergeAgentBranch(branch, targetBranch, workDir, {
+							message: issueInfoForConflict?.title,
+						});
+	
+						if (mergeResultVcs2.ok && mergeResultVcs2.value.success) {
+							logSuccess(`  ✓ Successfully merged ${branch} after AI conflict resolution`);
+							await deleteLocalBranch(branch, workDir, true);
+							success = true;
+							break;
+						}
+	
+						lastError = !mergeResultVcs2.ok
+							? mergeResultVcs2.error.message
+							: "Merge failed after conflict resolution";
+						logWarn(`  ✗ Merge failed after AI resolution: ${lastError}`);
+						// Bug fix: use abortRebase (not abortMerge) since we're in rebase context
+						await abortRebase(workDir);
+						continue;
 					}
-
-					lastError = !mergeResultVcs2.ok
-						? mergeResultVcs2.error.message
-						: "Merge failed after conflict resolution";
-					logWarn(`  ✗ Merge failed after AI resolution: ${lastError}`);
-					await abortMerge(workDir);
-					continue;
-				}
 
 				// AI couldn't resolve conflicts
 				lastError = `AI failed to resolve rebase conflicts (${rebaseResult.conflictedFiles.join(", ")})`;
