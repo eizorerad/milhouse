@@ -15,8 +15,8 @@ import {
 	loadRunsIndex,
 	saveRunsIndex,
 	setCurrentRun,
-	updateRunPhaseInMeta,
-	updateRunStats,
+	updateRunPhaseInMetaWithLock,
+	updateRunStatsWithLock,
 } from "./runs.ts";
 import { createTask, loadTasks, saveTasks, updateTask } from "./tasks.ts";
 import type { Issue, RunsIndex, Task } from "./types.ts";
@@ -57,7 +57,7 @@ describe("Immutability Tests", () => {
 			};
 
 			// Update stats
-			const updated = updateRunStats(
+			const updated = await updateRunStatsWithLock(
 				run.id,
 				{
 					issues_found: 10,
@@ -88,7 +88,7 @@ describe("Immutability Tests", () => {
 			const originalPhase = originalMeta?.phase;
 
 			// Update phase
-			const updated = updateRunPhaseInMeta(run.id, "exec", testDir);
+			const updated = await updateRunPhaseInMetaWithLock(run.id, "exec", testDir);
 
 			// Verify update succeeded
 			expect(updated).not.toBeNull();
@@ -511,7 +511,7 @@ describe("Immutability Tests", () => {
 			const originalTasksTotal = stats.tasks_total;
 
 			// Update stats
-			updateRunStats(run.id, stats, testDir);
+			await updateRunStatsWithLock(run.id, stats, testDir);
 
 			// Verify stats object was not mutated
 			expect(stats.issues_found).toBe(originalIssuesFound);

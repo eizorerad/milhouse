@@ -21,8 +21,8 @@ import {
 	listRuns,
 	loadRunMeta,
 	setCurrentRun,
-	updateRunPhaseInMeta,
-	updateRunStats,
+	updateRunPhaseInMetaWithLock,
+	updateRunStatsWithLock,
 } from "./runs.ts";
 import {
 	countTasksByStatus,
@@ -104,26 +104,26 @@ describe("Integration Tests", () => {
 			saveIssues(issues, testDir);
 
 			// Update run stats
-			updateRunStats(run.id, { issues_found: 2 }, testDir);
+			await updateRunStatsWithLock(run.id, { issues_found: 2 }, testDir);
 
 			// Verify issues were saved
 			const loadedIssues = loadIssues(testDir);
 			expect(loadedIssues.length).toBe(2);
 
 			// Step 3: Update phase to validate
-			updateRunPhaseInMeta(run.id, "validate", testDir);
+			await updateRunPhaseInMetaWithLock(run.id, "validate", testDir);
 
 			// Validate issues
 			updateIssue("ISSUE-1", { status: "CONFIRMED" }, testDir);
 			updateIssue("ISSUE-2", { status: "CONFIRMED" }, testDir);
-			updateRunStats(run.id, { issues_validated: 2 }, testDir);
+			await updateRunStatsWithLock(run.id, { issues_validated: 2 }, testDir);
 
 			// Add validation reports
 			updateValidationIndex(run.id, "ISSUE-1", "validation-reports/ISSUE-1.json", "valid", testDir);
 			updateValidationIndex(run.id, "ISSUE-2", "validation-reports/ISSUE-2.json", "valid", testDir);
 
 			// Step 4: Update phase to plan and create tasks
-			updateRunPhaseInMeta(run.id, "plan", testDir);
+			await updateRunPhaseInMetaWithLock(run.id, "plan", testDir);
 
 			const tasks: Task[] = [
 				{
@@ -170,24 +170,24 @@ describe("Integration Tests", () => {
 				},
 			];
 			saveTasks(tasks, testDir);
-			updateRunStats(run.id, { tasks_total: 3 }, testDir);
+			await updateRunStatsWithLock(run.id, { tasks_total: 3 }, testDir);
 
 			// Verify tasks
 			const loadedTasks = loadTasks(testDir);
 			expect(loadedTasks.length).toBe(3);
 
 			// Step 5: Update phase to exec and execute tasks
-			updateRunPhaseInMeta(run.id, "exec", testDir);
+			await updateRunPhaseInMetaWithLock(run.id, "exec", testDir);
 
 			// Execute first task
 			updateTaskStatus("ISSUE-1-T1", "running", undefined, testDir);
 			updateTaskStatus("ISSUE-1-T1", "done", undefined, testDir);
-			updateRunStats(run.id, { tasks_completed: 1 }, testDir);
+			await updateRunStatsWithLock(run.id, { tasks_completed: 1 }, testDir);
 
 			// Execute second task
 			updateTaskStatus("ISSUE-2-T1", "running", undefined, testDir);
 			updateTaskStatus("ISSUE-2-T1", "done", undefined, testDir);
-			updateRunStats(run.id, { tasks_completed: 2 }, testDir);
+			await updateRunStatsWithLock(run.id, { tasks_completed: 2 }, testDir);
 
 			// Execute third task (was blocked, now ready)
 			const readyTasks = getReadyTasks(testDir);
@@ -195,13 +195,13 @@ describe("Integration Tests", () => {
 
 			updateTaskStatus("ISSUE-2-T2", "running", undefined, testDir);
 			updateTaskStatus("ISSUE-2-T2", "done", undefined, testDir);
-			updateRunStats(run.id, { tasks_completed: 3 }, testDir);
+			await updateRunStatsWithLock(run.id, { tasks_completed: 3 }, testDir);
 
 			// Step 6: Update phase to verify
-			updateRunPhaseInMeta(run.id, "verify", testDir);
+			await updateRunPhaseInMetaWithLock(run.id, "verify", testDir);
 
 			// Step 7: Complete the run
-			updateRunPhaseInMeta(run.id, "completed", testDir);
+			await updateRunPhaseInMetaWithLock(run.id, "completed", testDir);
 
 			// Final verification
 			const finalRun = loadRunMeta(run.id, testDir);
@@ -255,7 +255,7 @@ describe("Integration Tests", () => {
 
 			// Fail the first task
 			updateTaskStatus("TASK-1", "failed", "Test failure", testDir);
-			updateRunStats(run.id, { tasks_failed: 1 }, testDir);
+			await updateRunStatsWithLock(run.id, { tasks_failed: 1 }, testDir);
 
 			// Verify dependent task is blocked
 			const loadedTasks = loadTasks(testDir);
@@ -275,7 +275,7 @@ describe("Integration Tests", () => {
 			const _run2 = await createRun({ scope: "run 2", workDir: testDir });
 
 			// Update run1 phase
-			updateRunPhaseInMeta(run1.id, "exec", testDir);
+			await updateRunPhaseInMetaWithLock(run1.id, "exec", testDir);
 
 			// Verify both meta and index are consistent
 			const meta = loadRunMeta(run1.id, testDir);
