@@ -95,7 +95,7 @@ const config: Config = {
   // ═══════════════════════════════════════════════════════════
   //
   // Token pricing for cost tracking (displayed in summaries).
-  // budgetLimit: max $ per pipeline run. 0 = unlimited.
+  // budgetLimit: max $ per pipeline run. 50 = default; set to 0 for unlimited.
   //
   // Example: cap at $5 per run:
   //   cost: { inputPerMillion: 5, outputPerMillion: 25, budgetLimit: 5 },
@@ -103,7 +103,7 @@ const config: Config = {
   cost: {
     inputPerMillion: 5,
     outputPerMillion: 25,
-    budgetLimit: 0,
+    budgetLimit: 50,
   },
 
   // ═══════════════════════════════════════════════════════════

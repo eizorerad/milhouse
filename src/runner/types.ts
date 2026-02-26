@@ -13,7 +13,7 @@ export interface CostConfig {
 	inputPerMillion: number;
 	/** $/1M output tokens */
 	outputPerMillion: number;
-	/** $ max per run (0 = unlimited) */
+	/** $ max per run (default: 50; set to 0 for unlimited) */
 	budgetLimit: number;
 }
 

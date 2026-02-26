@@ -148,7 +148,7 @@ export const DEFAULTS = {
 		verify: { model: "opus", workers: 1, retries: 1, retryDelay: 3000, timeout: 120_000 },
 	},
 
-	cost: { inputPerMillion: 5, outputPerMillion: 25, budgetLimit: 0 },
+	cost: { inputPerMillion: 5, outputPerMillion: 25, budgetLimit: 50 },
 
 	project: { name: "", language: "", framework: "", description: "" },
 	commands: { test: "", lint: "", build: "", compile: "" },
