@@ -207,6 +207,18 @@ export const ExecutionRequestSchema = z.object({
 	background: z.boolean().optional(),
 	/** Enable fullscreen mode (Cursor --fullscreen flag) */
 	fullscreen: z.boolean().optional(),
+
+	// ========================================================================
+	// Internal fields (set by middleware, not user-facing)
+	// ========================================================================
+
+	/**
+	 * @internal AbortSignal set by timeout middleware to allow the executor
+	 * to kill the spawned process when a timeout fires. This is a runtime
+	 * object that doesn't need Zod validation — it survives parse() via
+	 * z.any().optional() so that Zod's strict stripping doesn't remove it.
+	 */
+	abortSignal: z.any().optional(),
 });
 
 // Token usage schema
