@@ -2,7 +2,7 @@
  * Watchdog process monitor
  *
  * Spawns milhouse as a child process and monitors it:
- *   - Tracks stdout activity (last output timestamp)
+ *   - Tracks stdout/stderr activity (last output timestamp)
  *   - Kills process if no activity for activityTimeout minutes
  *   - Kills process if total run time exceeds runTimeout minutes
  *   - Captures stdout/stderr for logging
@@ -16,7 +16,7 @@ const WATCHDOG_CHECK_INTERVAL_MS = 15_000; // check every 15 seconds
 /**
  * Spawn milhouse with the given CLI args and monitor via watchdog.
  *
- * The watchdog reads stdout in real-time. If milhouse stops producing output
+ * The watchdog reads stdout and stderr in real-time. If milhouse stops producing output
  * for longer than activityTimeout, or if total wall time exceeds runTimeout,
  * the process is killed.
  *
@@ -36,7 +36,7 @@ export async function spawnWithWatchdog(
 		entryPoint?: string;
 		/** Abort signal to cancel externally */
 		signal?: AbortSignal;
-		/** Callback when stdout activity detected */
+		/** Called with each stdout chunk */
 		onActivity?: (chunk: string) => void;
 	},
 ): Promise<WatchdogResult> {
@@ -63,7 +63,7 @@ export async function spawnWithWatchdog(
 		},
 	});
 
-	// Read stdout asynchronously — track activity
+	// Read stdout asynchronously
 	const readStdout = (async () => {
 		const reader = proc.stdout.getReader();
 		const decoder = new TextDecoder();
@@ -89,7 +89,9 @@ export async function spawnWithWatchdog(
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
-				stderrChunks.push(decoder.decode(value, { stream: true }));
+				const text = decoder.decode(value, { stream: true });
+				lastActivityAt = Date.now();
+				stderrChunks.push(text);
 			}
 		} catch {
 			// Stream closed
@@ -120,7 +122,7 @@ export async function spawnWithWatchdog(
 		const silentMinutes = (now - lastActivityAt) / 60_000;
 		const totalMinutes = (now - startedAt) / 60_000;
 
-		// Activity timeout: no stdout for too long
+		// Activity timeout: no stdout/stderr for too long
 		if (config.activityTimeout > 0 && silentMinutes > config.activityTimeout) {
 			sigkillTimer = killProcess(proc, `no output for ${Math.round(silentMinutes)} minutes`);
 			clearInterval(watchdogInterval);
