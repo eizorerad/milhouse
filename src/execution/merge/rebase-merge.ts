@@ -177,7 +177,14 @@ export async function mergeCompletedBranches(
 					logInfo("    Suggestion: Commit or stash changes before merge");
 				} else if (errorCode === "BRANCH_LOCKED") {
 					logError("  ✗ Cannot rebase: branch is checked out in another worktree");
+					logDebug(
+						"    This is likely caused by a worktree cleanup failure during the cleanup phase. " +
+							"The branch lock cannot be released by retrying.",
+					);
 					logInfo(`    Suggestion: Remove the worktree first with 'git worktree remove'`);
+					// BRANCH_LOCKED is permanent - retrying cannot succeed, break immediately
+					lastError = `Branch ${branch} is locked by another worktree (cleanup failure)`;
+					break;
 				} else if (errorCode === "BRANCH_NOT_FOUND") {
 					logError(`  ✗ Cannot rebase: branch ${branch} not found`);
 				} else {
