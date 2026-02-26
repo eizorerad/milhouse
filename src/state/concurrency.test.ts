@@ -724,6 +724,7 @@ describe("Concurrency Tests", () => {
 					evidence: [],
 					status: "UNVALIDATED",
 					severity: "MEDIUM",
+					related_task_ids: [],
 				},
 				testDir,
 			);
