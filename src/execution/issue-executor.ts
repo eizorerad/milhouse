@@ -665,6 +665,42 @@ If there are no conflicts, you're done!
 // ============================================================================
 
 /**
+ * Filter branches that failed worktree cleanup from the merge candidate list.
+ * Branches with failed cleanup still have worktree locks, making merge impossible.
+ *
+ * @returns The filtered list of branches eligible for merge
+ */
+export function filterBranchesForMerge(
+	branchesToMerge: string[],
+	failedCleanupBranches: Set<string>,
+	allBranchStatuses: BranchStatus[],
+): string[] {
+	if (failedCleanupBranches.size === 0) {
+		return branchesToMerge;
+	}
+
+	const excludedCount = branchesToMerge.filter((b) => failedCleanupBranches.has(b)).length;
+
+	if (excludedCount > 0) {
+		logWarn(
+			`Excluding ${excludedCount} branch(es) from merge due to worktree cleanup failure: ${[...failedCleanupBranches].join(", ")}`,
+		);
+
+		// Update allBranchStatuses for excluded branches
+		for (const branch of failedCleanupBranches) {
+			const branchStatus = allBranchStatuses.find((b) => b.branch === branch);
+			if (branchStatus) {
+				branchStatus.error =
+					"Skipped merge: worktree cleanup failed, branch is still locked";
+				branchStatus.merged = false;
+			}
+		}
+	}
+
+	return branchesToMerge.filter((b) => !failedCleanupBranches.has(b));
+}
+
+/**
  * Run tasks grouped by issue with parallel worktree execution
  * Each issue's tasks run in a dedicated worktree
  *
@@ -1109,30 +1145,11 @@ export async function runParallelByIssue(
 	// FILTER PHASE: Exclude branches with failed worktree cleanup from merge
 	// Locked worktrees prevent branch checkout, making merge impossible
 	// ============================================================================
-	if (failedCleanupBranches.size > 0) {
-		const excludedCount = branchesToMerge.filter((b) =>
-			failedCleanupBranches.has(b),
-		).length;
-		if (excludedCount > 0) {
-			logWarn(
-				`Excluding ${excludedCount} branch(es) from merge due to worktree cleanup failure: ${[...failedCleanupBranches].join(", ")}`,
-			);
-
-			// Update allBranchStatuses for excluded branches
-			for (const branch of failedCleanupBranches) {
-				const branchStatus = allBranchStatuses.find((b) => b.branch === branch);
-				if (branchStatus) {
-					branchStatus.error =
-						"Skipped merge: worktree cleanup failed, branch is still locked";
-					branchStatus.merged = false;
-				}
-			}
-
-			branchesToMerge = branchesToMerge.filter(
-				(b) => !failedCleanupBranches.has(b),
-			);
-		}
-	}
+	branchesToMerge = filterBranchesForMerge(
+		branchesToMerge,
+		failedCleanupBranches,
+		allBranchStatuses,
+	);
 
 	// ============================================================================
 	// DEFERRED MERGE PHASE: Merge all branches AFTER worktree cleanup
