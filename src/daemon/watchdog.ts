@@ -89,7 +89,9 @@ export async function spawnWithWatchdog(
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
-				stderrChunks.push(decoder.decode(value, { stream: true }));
+				const text = decoder.decode(value, { stream: true });
+				lastActivityAt = Date.now();
+				stderrChunks.push(text);
 			}
 		} catch {
 			// Stream closed
