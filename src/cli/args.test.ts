@@ -7,8 +7,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { parseArgs } from "./args";
 import { DEFAULTS, resolveConfig } from "../config/define";
+import { parseArgs } from "./args";
 
 describe("parseArgs", () => {
 	describe("severity parsing", () => {
@@ -196,9 +196,7 @@ describe("parseArgs", () => {
 
 		describe("--max-validation-retries", () => {
 			test("throws on non-numeric value", () => {
-				expect(() =>
-					parseArgs(["node", "milhouse", "--max-validation-retries", "abc"]),
-				).toThrow();
+				expect(() => parseArgs(["node", "milhouse", "--max-validation-retries", "abc"])).toThrow();
 			});
 
 			test("parses valid numeric value", () => {
@@ -209,9 +207,7 @@ describe("parseArgs", () => {
 
 		describe("--retry-delay-validation", () => {
 			test("throws on non-numeric value", () => {
-				expect(() =>
-					parseArgs(["node", "milhouse", "--retry-delay-validation", "abc"]),
-				).toThrow();
+				expect(() => parseArgs(["node", "milhouse", "--retry-delay-validation", "abc"])).toThrow();
 			});
 
 			test("preserves zero value", () => {
