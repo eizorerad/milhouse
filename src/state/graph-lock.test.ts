@@ -221,6 +221,7 @@ describe("graph locking", () => {
 
 	describe("buildGraphFromTasksSafe", () => {
 		test("delegates to buildGraphFromTasks and returns nodes", async () => {
+			const now = new Date().toISOString();
 			const tasks: Task[] = [
 				{
 					id: "T1",
@@ -235,7 +236,8 @@ describe("graph locking", () => {
 					rollback: "revert",
 					parallel_group: 0,
 					status: "pending",
-					created_at: new Date().toISOString(),
+					created_at: now,
+					updated_at: now,
 				},
 			];
 

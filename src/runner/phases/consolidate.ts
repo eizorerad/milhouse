@@ -8,7 +8,7 @@
 import pc from "picocolors";
 import { type ConsolidateInput, buildConsolidatePrompt } from "../../agents/prompts/consolidate.ts";
 import { CONSOLIDATE_SCHEMA } from "../../agents/schemas/consolidate.ts";
-import { loadGraphForRun, saveGraphForRun } from "../../state/graph.ts";
+import { loadGraphForRun, saveGraphForRunSafe } from "../../state/graph.ts";
 import { filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import { writeExecutionPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
@@ -153,7 +153,7 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 			depends_on: [...t.depends_on],
 			parallel_group: t.parallel_group,
 		}));
-		saveGraphForRun(ctx.runId, graph, ctx.workDir);
+		await saveGraphForRunSafe(ctx.runId, graph, ctx.workDir);
 
 		// Generate execution plan markdown
 		const markdown = generateExecutionPlanMarkdown(pendingTasks, issues, duplicatesRemoved);
