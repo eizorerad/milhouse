@@ -44,28 +44,28 @@ describe("extractRunCost", () => {
 		expect(cost).toBe(1.5);
 	});
 
-	test("returns 0 when report.json does not exist", () => {
+	test("returns null when report.json does not exist", () => {
 		// runsDir exists but no report.json file
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when report.json is corrupt/invalid JSON", () => {
+	test("returns null when report.json is corrupt/invalid JSON", () => {
 		writeFileSync(join(runsDir, "report.json"), "not valid json {{{");
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when report.json has no cost field", () => {
+	test("returns null when report.json has no cost field", () => {
 		const report = { version: "0.2.0", run_id: runId };
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when cost.total is negative (defensive)", () => {
+	test("returns null when cost.total is negative", () => {
 		const report = {
 			version: "0.2.0",
 			run_id: runId,
@@ -74,10 +74,10 @@ describe("extractRunCost", () => {
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when cost.total is not a number", () => {
+	test("returns null when cost.total is not a number", () => {
 		const report = {
 			version: "0.2.0",
 			run_id: runId,
@@ -86,15 +86,15 @@ describe("extractRunCost", () => {
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when run directory does not exist at all", () => {
+	test("returns null when run directory does not exist at all", () => {
 		const cost = extractRunCost("run-nonexistent-xyz", testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
-	test("returns 0 when cost.total is NaN", () => {
+	test("returns null when cost.total is NaN", () => {
 		const report = {
 			version: "0.2.0",
 			run_id: runId,
@@ -103,7 +103,7 @@ describe("extractRunCost", () => {
 		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
 
 		const cost = extractRunCost(runId, testDir);
-		expect(cost).toBe(0);
+		expect(cost).toBeNull();
 	});
 
 	test("returns correct cost for zero total (valid)", () => {

@@ -80,20 +80,24 @@ export function createDaemonState(): DaemonState {
  * Extract the total cost from a completed run's report.json.
  *
  * Reads `.milhouse/runs/<runId>/reports/report.json`, parses JSON,
- * and returns `cost.total` (USD). Returns 0 on any failure:
+ * and returns `cost.total` (USD). Returns null when cost cannot be
+ * determined:
  * - Missing report.json (child crashed before generating it)
  * - Corrupt / invalid JSON
  * - Missing or non-numeric cost.total field
  * - Child killed by watchdog before report generation
  * - Negative cost values (defensive)
+ *
+ * A return value of 0 means the run genuinely cost nothing.
+ * A return value of null means cost extraction failed.
  */
-export function extractRunCost(runId: string, workDir: string): number {
+export function extractRunCost(runId: string, workDir: string): number | null {
 	try {
 		const runDir = getRunDir(runId, workDir);
 		const reportPath = join(runDir, "reports", "report.json");
 
 		if (!existsSync(reportPath)) {
-			return 0;
+			return null;
 		}
 
 		const raw = readFileSync(reportPath, "utf-8");
@@ -101,12 +105,12 @@ export function extractRunCost(runId: string, workDir: string): number {
 
 		const total = report?.cost?.total;
 		if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
-			return 0;
+			return null;
 		}
 
 		return total;
 	} catch {
-		return 0;
+		return null;
 	}
 }
 
@@ -155,7 +159,7 @@ export function processRunCompletion(
 	const childRunId = getCurrentRunId(workDir) ?? undefined;
 
 	// 2. Extract cost from the child's report.json
-	const runCost = childRunId ? extractRunCost(childRunId, workDir) : 0;
+	const runCost = childRunId ? extractRunCost(childRunId, workDir) : null;
 
 	// 3. Record the run with cost data
 	const entry = recordRunComplete(state, {
@@ -163,7 +167,7 @@ export function processRunCompletion(
 		killedByWatchdog: result.killedByWatchdog,
 		duration: result.duration,
 		runId: childRunId,
-		cost: runCost,
+		cost: runCost ?? undefined,
 	});
 
 	// 4. CRITICAL: Accumulate totalCost — this was the missing line that
