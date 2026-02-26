@@ -175,7 +175,7 @@ export interface PhaseConfig<TItem = unknown, TResult = unknown> {
 	/** How to run: one agent for all items, or one agent per item */
 	mode: PhaseMode;
 
-	/** Default parallel agents (overridden by config.workers) */
+	/** Default parallel agents (overridden by per-phase workers, then config.workers) */
 	defaultParallel: number;
 
 	/** Load work items for this phase */

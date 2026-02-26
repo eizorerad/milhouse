@@ -40,7 +40,7 @@ import { createPullRequest } from "../../vcs/services/pr-service.ts";
 import type { RunCost } from "../cost.ts";
 import { calculateCost } from "../cost.ts";
 import { displayPhaseSummaryHeader } from "../phase-runner.ts";
-import { resolvePhaseModel } from "../types.ts";
+import { resolvePhaseModel, resolvePhaseWorkers } from "../types.ts";
 import type { PhaseConfig, PhaseContext, PhaseItemResult } from "../types.ts";
 
 // ============================================================================
@@ -433,7 +433,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 			return [];
 		}
 
-		const maxParallel = Math.min(config.workers ?? 3, pendingTasks.length);
+		const maxParallel = Math.min(resolvePhaseWorkers(config, 'exec') ?? config.workers ?? 3, pendingTasks.length);
 		const useParallel = maxParallel > 1;
 		const useExecByIssue = config.execByIssue;
 
