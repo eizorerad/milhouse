@@ -767,20 +767,20 @@ export function addDependency(
 		return task;
 	}
 
-	// Check if adding this dependency would create a cycle
+	// Build in-memory tasks array with the new dependency added
 	const newDeps = [...task.depends_on, dependencyId];
-	const tempTask = { ...task, depends_on: newDeps };
+	const updatedTask: Task = { ...task, depends_on: newDeps, updated_at: new Date().toISOString() };
 	const index = tasks.findIndex((t) => t.id === taskId);
-	const tempTasks = [...tasks.slice(0, index), tempTask, ...tasks.slice(index + 1)];
-	saveTasks(tempTasks, workDir);
+	const tempTasks = [...tasks.slice(0, index), updatedTask, ...tasks.slice(index + 1)];
 
-	if (hasCircularDependency(taskId, workDir)) {
-		// Revert the change
-		saveTasks(tasks, workDir);
+	// Check for circular dependency in-memory without touching disk
+	if (hasCircularDependency(taskId, workDir, tempTasks)) {
 		return null;
 	}
 
-	return updateTask(taskId, { depends_on: newDeps }, workDir);
+	// Save once after validation passes
+	saveTasks(tempTasks, workDir);
+	return updatedTask;
 }
 
 /**
