@@ -694,8 +694,8 @@ export function getTransitiveDependencies(taskId: string, workDir = process.cwd(
 /**
  * Check for circular dependencies starting from a task
  */
-export function hasCircularDependency(taskId: string, workDir = process.cwd()): boolean {
-	const tasks = loadTasks(workDir);
+export function hasCircularDependency(taskId: string, workDir = process.cwd(), tasksArray?: Task[]): boolean {
+	const tasks = tasksArray ?? loadTasks(workDir);
 	const visited = new Set<string>();
 	const recursionStack = new Set<string>();
 
