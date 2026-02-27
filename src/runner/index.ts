@@ -19,6 +19,7 @@ export {
 	formatCost,
 	formatTokens,
 	BudgetExceededError,
+	BudgetGuard,
 } from "./cost.ts";
 export type { RunCost, PhaseCost } from "./cost.ts";
 export { runPhase, displayPhaseSummaryHeader } from "./phase-runner.ts";

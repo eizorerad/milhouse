@@ -2,6 +2,7 @@
  * Cost calculator — tracks token usage and dollar cost per phase and total
  */
 
+import { AsyncMutex } from "../state/file-lock.ts";
 import { logWarn } from "../ui/logger.ts";
 import type { CostConfig } from "./types.ts";
 
@@ -22,6 +23,7 @@ export interface RunCost {
 	inputCost: number;
 	outputCost: number;
 	totalCost: number;
+	reservedCost: number;
 	byPhase: Record<string, PhaseCost>;
 }
 
@@ -49,6 +51,7 @@ export function createRunCost(): RunCost {
 		inputCost: 0,
 		outputCost: 0,
 		totalCost: 0,
+		reservedCost: 0,
 		byPhase: {},
 	};
 }
@@ -130,4 +133,55 @@ export function formatCost(cost: number): string {
 export function formatTokens(count: number): string {
 	if (count >= 1000) return `${Math.round(count / 1000)}K`;
 	return count.toLocaleString();
+}
+
+/**
+ * BudgetGuard — mutex-serialized budget reservation to prevent race conditions
+ * in parallel task execution.
+ *
+ * Before a task starts, call reserve() to claim estimated cost.
+ * After a task completes, call settle() to reconcile with actual cost.
+ */
+export class BudgetGuard {
+	private mutex = new AsyncMutex();
+
+	/**
+	 * Reserve estimated cost before task execution.
+	 * Under mutex, checks totalCost + reservedCost against budgetLimit.
+	 * If within budget, adds estimatedCost to reservedCost.
+	 * If over budget, throws BudgetExceededError.
+	 * If budgetLimit <= 0 (unlimited), does nothing.
+	 */
+	async reserve(runCost: RunCost, config: CostConfig, estimatedCost: number): Promise<void> {
+		if (config.budgetLimit <= 0) return;
+
+		await this.mutex.run(() => {
+			const committed = runCost.totalCost + runCost.reservedCost;
+			if (committed >= config.budgetLimit) {
+				throw new BudgetExceededError(committed, config.budgetLimit);
+			}
+			runCost.reservedCost += estimatedCost;
+		});
+	}
+
+	/**
+	 * Settle after task completion: subtract reserved amount and add actual cost.
+	 * Under mutex, decrements reservedCost by reservedAmount, then adds actualCost
+	 * to totalCost and updates token counters.
+	 */
+	async settle(
+		runCost: RunCost,
+		reservedAmount: number,
+		actualCost: number,
+		inputTokens: number,
+		outputTokens: number,
+	): Promise<void> {
+		await this.mutex.run(() => {
+			runCost.reservedCost -= reservedAmount;
+			runCost.totalCost += actualCost;
+			runCost.inputTokens += inputTokens;
+			runCost.outputTokens += outputTokens;
+			runCost.totalTokens += inputTokens + outputTokens;
+		});
+	}
 }
