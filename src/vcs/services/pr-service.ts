@@ -33,6 +33,7 @@ async function execCommand(
 	return new Promise((resolve) => {
 		const child = spawn(command, args, {
 			cwd,
+			shell: true,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 
