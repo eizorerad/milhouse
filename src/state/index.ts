@@ -278,6 +278,8 @@ export {
 	removeValidationReportFromIndex,
 	clearValidationIndex,
 	rebuildValidationIndex,
+	saveValidationIndexSafe,
+	addValidationReportToIndexSafe,
 } from "./validation-index.ts";
 
 // Plan Store module - Run-aware plan operations
