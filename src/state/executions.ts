@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { logWarn } from "../ui/logger.ts";
 import { withFileLock } from "./file-lock.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
 import { type ExecutionRecord, ExecutionRecordSchema, STATE_FILES } from "./types.ts";
@@ -39,7 +40,8 @@ export function loadExecutionsForRun(runId: string, workDir = process.cwd()): Ex
 			if (result.success) validRecords.push(result.data);
 		}
 		return validRecords;
-	} catch {
+	} catch (e) {
+		logWarn(`Failed to load executions for run ${runId} from ${path}:`, e);
 		return [];
 	}
 }
@@ -112,7 +114,8 @@ export function loadRawExecutions(workDir = process.cwd()): unknown[] {
 		const content = readFileSync(path, "utf-8");
 		const parsed = JSON.parse(content);
 		return Array.isArray(parsed) ? parsed : [];
-	} catch {
+	} catch (e) {
+		logWarn(`Failed to load raw executions from ${path}:`, e);
 		return [];
 	}
 }
