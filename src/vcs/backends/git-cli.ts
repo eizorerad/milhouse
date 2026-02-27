@@ -404,6 +404,62 @@ export async function getCommitsSinceBase(
 }
 
 /**
+	* Get diff stats for a specific commit (files changed, insertions, deletions).
+	* Used to verify a commit has actual code changes (not an empty commit).
+	*
+	* @param workDir - Working directory
+	* @param commitHash - The commit hash to check
+	* @returns Object with filesChanged, insertions, deletions
+	*/
+export async function getCommitDiffStats(
+	workDir: string,
+	commitHash: string,
+): Promise<VcsResult<{ filesChanged: number; insertions: number; deletions: number }>> {
+	const result = await runGitCommand(
+		["diff", "--shortstat", `${commitHash}~1`, commitHash],
+		workDir,
+	);
+
+	if (!result.ok) {
+		return result;
+	}
+
+	if (result.value.exitCode !== 0) {
+		// Might be the first commit — try diff against empty tree
+		const altResult = await runGitCommand(
+			["diff", "--shortstat", "4b825dc642cb6eb9a060e54bf899d69f82559", commitHash],
+			workDir,
+		);
+		if (!altResult.ok || altResult.value.exitCode !== 0) {
+			return ok({ filesChanged: 0, insertions: 0, deletions: 0 });
+		}
+		return ok(parseShortstat(altResult.value.stdout));
+	}
+
+	return ok(parseShortstat(result.value.stdout));
+}
+
+/**
+	* Parse `git diff --shortstat` output into structured data.
+	* Format: " 3 files changed, 10 insertions(+), 2 deletions(-)"
+	*/
+function parseShortstat(output: string): {
+	filesChanged: number;
+	insertions: number;
+	deletions: number;
+} {
+	const filesMatch = output.match(/(\d+) files? changed/);
+	const insertMatch = output.match(/(\d+) insertions?\(\+\)/);
+	const deleteMatch = output.match(/(\d+) deletions?\(-\)/);
+
+	return {
+		filesChanged: filesMatch ? Number.parseInt(filesMatch[1], 10) : 0,
+		insertions: insertMatch ? Number.parseInt(insertMatch[1], 10) : 0,
+		deletions: deleteMatch ? Number.parseInt(deleteMatch[1], 10) : 0,
+	};
+}
+
+/**
  * Parse git diff --numstat output
  *
  * Format: ADDED\tREMOVED\tFILE

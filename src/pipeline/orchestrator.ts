@@ -312,7 +312,26 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
 	const allSuccess = outcomes.every((o) => o.success);
 	displaySummary(cost, config, phasesCompleted, phases, outcomes, pipelineDuration, allSuccess);
-	return { runId, success: allSuccess, cost, phasesCompleted };
+
+	// Build a meaningful error message from failed phase outcomes
+	if (!allSuccess) {
+		const failedPhases = outcomes.filter((o) => !o.success);
+		const failedNames = failedPhases.map((o) => o.phase);
+		const firstFailed = failedPhases[0];
+		const errorMsg = firstFailed?.error
+			? `Phase "${firstFailed.phase}" failed: ${firstFailed.error}`
+			: `${failedNames.length} phase(s) failed: ${failedNames.join(", ")}`;
+		return {
+			runId,
+			success: false,
+			cost,
+			phasesCompleted,
+			stoppedAt: firstFailed?.phase,
+			error: errorMsg,
+		};
+	}
+
+	return { runId, success: true, cost, phasesCompleted };
 }
 
 /** Display pipeline cost summary. */

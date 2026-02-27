@@ -472,7 +472,10 @@ export class MergeService implements IMergeService {
 	}
 
 	/**
-	 * Continue a rebase after conflicts have been resolved
+	 * Continue a rebase after conflicts have been resolved.
+	 * Sets GIT_EDITOR=true to prevent editor prompts in automated mode.
+	 * After a failed continue, checks if the rebase actually completed
+	 * (e.g., AI already ran rebase --continue itself).
 	 */
 	async continueRebase(workDir: string): Promise<VcsResult<boolean>> {
 		// Stage all resolved files
@@ -481,18 +484,37 @@ export class MergeService implements IMergeService {
 			return addResult;
 		}
 
-		// Continue the rebase
-		const continueResult = await runGitCommand(["rebase", "--continue"], workDir);
+		// Continue the rebase with GIT_EDITOR=true to prevent editor prompts
+		const continueResult = await runGitCommand(
+			["-c", "core.editor=true", "rebase", "--continue"],
+			workDir,
+		);
 		if (!continueResult.ok) {
 			return continueResult;
 		}
 
 		if (continueResult.value.exitCode !== 0) {
-			// Check if there are still conflicts
+			// Check if rebase is still in progress — if not, it actually completed
+			// (e.g., the AI already ran git rebase --continue itself)
+			const rebaseActive = await this.isRebaseInProgress(workDir);
+			if (rebaseActive.ok && !rebaseActive.value) {
+				// Rebase is no longer active — it succeeded despite non-zero exit
+				return ok(true);
+			}
+
+			// Check if there are new conflicts (multi-commit rebase)
 			const conflictedFilesResult = await this.getConflictedFiles(workDir);
 			if (conflictedFilesResult.ok && conflictedFilesResult.value.length > 0) {
+				logDebug(
+					`continueRebase: new conflicts after continue (multi-commit rebase): ${conflictedFilesResult.value.join(", ")}`,
+				);
 				return ok(false);
 			}
+
+			// Unknown failure — log stderr for debugging
+			logDebug(
+				`continueRebase: rebase --continue failed (exit ${continueResult.value.exitCode}): ${continueResult.value.stderr}`,
+			);
 			return ok(false);
 		}
 

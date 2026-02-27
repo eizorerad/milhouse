@@ -1,15 +1,16 @@
 /**
  * Task Commit Matcher Utility
  *
- * Matches task IDs to git commits based on commit message patterns.
+ * Matches task IDs to git commits based on commit message patterns
+ * AND validates that matching commits contain actual code changes.
  * Used to determine which tasks were actually completed during partial execution.
  *
  * @module execution/utils/task-commit-matcher
  */
 
 import type { Task } from "../../state/types.ts";
-import { logDebug } from "../../ui/logger.ts";
-import { getCommitsSinceBase } from "../../vcs/backends/git-cli.ts";
+import { logDebug, logWarn } from "../../ui/logger.ts";
+import { getCommitDiffStats, getCommitsSinceBase } from "../../vcs/backends/git-cli.ts";
 import type { CommitEntry } from "../../vcs/backends/types.ts";
 
 /**
@@ -142,19 +143,71 @@ export async function analyzeIssueTaskCompletion(
 		logDebug(`    - ${commit.hash.slice(0, 7)}: ${commit.message.slice(0, 60)}`);
 	}
 
-	// Match tasks to commits
+	// Match tasks to commits (by message pattern)
 	const matchResult = matchTasksToCommits(issueGroup.issueId, issueGroup.tasks, commits);
+
+	// Verify matched commits have actual code changes (prevent phantom completions)
+	// Agents sometimes create commits with matching messages but zero diffs
+	const verifiedCompletedIds: string[] = [];
+	const phantomTaskIds: string[] = [];
+
+	for (const taskId of matchResult.completedTaskIds) {
+		const taskIndex = issueGroup.tasks.findIndex((t) => t.id === taskId);
+		if (taskIndex < 0) {
+			verifiedCompletedIds.push(taskId);
+			continue;
+		}
+
+		const task = issueGroup.tasks[taskIndex];
+		const taskNumber = taskIndex + 1;
+		const exactPattern = `[${issueGroup.issueId}] Task ${taskNumber}:`;
+
+		// Find the matching commit(s) for this task
+		const matchingCommits = commits.filter(
+			(c) =>
+				c.message.includes(exactPattern) ||
+				(c.message.includes(`[${issueGroup.issueId}]`) &&
+					c.message.toLowerCase().includes(task.title.toLowerCase())),
+		);
+
+		// Check if any matching commit has actual diffs
+		let hasRealChanges = false;
+		for (const commit of matchingCommits) {
+			const statsResult = await getCommitDiffStats(worktreeDir, commit.hash);
+			if (statsResult.ok) {
+				const stats = statsResult.value;
+				if (stats.filesChanged > 0 || stats.insertions > 0 || stats.deletions > 0) {
+					hasRealChanges = true;
+					break;
+				}
+			}
+		}
+
+		if (hasRealChanges) {
+			verifiedCompletedIds.push(taskId);
+		} else {
+			phantomTaskIds.push(taskId);
+			logWarn(
+				`Task ${taskId} has matching commit(s) but ZERO code changes — marking as failed (phantom completion)`,
+			);
+		}
+	}
 
 	logDebug("  Task completion analysis results:");
 	logDebug(
-		`    Completed: ${matchResult.completedTaskIds.length} task(s) - [${matchResult.completedTaskIds.join(", ")}]`,
+		`    Verified completed: ${verifiedCompletedIds.length} task(s) - [${verifiedCompletedIds.join(", ")}]`,
 	);
 	logDebug(
 		`    Uncommitted: ${matchResult.uncommittedTaskIds.length} task(s) - [${matchResult.uncommittedTaskIds.join(", ")}]`,
 	);
+	if (phantomTaskIds.length > 0) {
+		logDebug(
+			`    Phantom (empty commits): ${phantomTaskIds.length} task(s) - [${phantomTaskIds.join(", ")}]`,
+		);
+	}
 
 	return {
-		completedTaskIds: matchResult.completedTaskIds,
-		failedTaskIds: matchResult.uncommittedTaskIds,
+		completedTaskIds: verifiedCompletedIds,
+		failedTaskIds: [...matchResult.uncommittedTaskIds, ...phantomTaskIds],
 	};
 }
