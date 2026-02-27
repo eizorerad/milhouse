@@ -987,3 +987,27 @@ export async function updateTaskForRunSafe(
 		return updateTaskForRun(runId, taskId, update, workDir);
 	});
 }
+
+/**
+ * Save tasks for a specific run with cross-process file locking for concurrent safety.
+ *
+ * This function uses proper-lockfile to ensure atomic write operations
+ * even when multiple milhouse processes access the same file.
+ *
+ * @param runId - The run ID to save tasks to
+ * @param tasks - Array of tasks to save
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @param options - Optional save options (e.g., force)
+ */
+export async function saveTasksForRunSafe(
+	runId: string,
+	tasks: Task[],
+	workDir = process.cwd(),
+	options?: { force?: boolean },
+): Promise<void> {
+	const tasksPath = getTasksPathForRun(runId, workDir);
+
+	return withFileLock(tasksPath, () => {
+		return saveTasksForRun(runId, tasks, workDir, options);
+	});
+}

@@ -61,6 +61,7 @@ export {
 	updateIssueWithLock,
 	updateIssuesConcurrently,
 	updateIssueFromValidation,
+	saveIssuesForRunSafe,
 } from "./issues.ts";
 
 // Tasks module - Task CRUD with dependency resolution
@@ -99,6 +100,7 @@ export {
 	getExecutionOrder,
 	updateTaskWithLock,
 	updateTaskStatusWithLock,
+	saveTasksForRunSafe,
 } from "./tasks.ts";
 
 // Graph module - Dependency graph builder and topological sort
@@ -186,6 +188,10 @@ export {
 	deleteFailedExecutions,
 	deleteExecutionsOlderThan,
 	clearAllExecutions,
+	withExecutionsLock,
+	createExecutionSafe,
+	updateExecutionSafe,
+	deleteExecutionSafe,
 } from "./executions.ts";
 
 // Runs module - Run management
@@ -274,6 +280,8 @@ export {
 	removeValidationReportFromIndex,
 	clearValidationIndex,
 	rebuildValidationIndex,
+	saveValidationIndexSafe,
+	addValidationReportToIndexSafe,
 } from "./validation-index.ts";
 
 // Plan Store module - Run-aware plan operations

@@ -24,12 +24,20 @@ import {
 	loadTasks,
 	loadTasksForRun,
 	readTaskForRun,
+	saveTasksForRunSafe,
 	updateTaskForRunSafe,
 	updateTaskStatusWithLock,
 	updateTaskWithLock,
 } from "./tasks.ts";
-import { createIssue, readIssue, updateIssueFromValidation } from "./issues.ts";
-import type { RunPhase } from "./types.ts";
+import {
+	createIssue,
+	loadIssuesForRun,
+	readIssue,
+	saveIssuesForRun,
+	saveIssuesForRunSafe,
+	updateIssueFromValidation,
+} from "./issues.ts";
+import type { Issue, RunPhase } from "./types.ts";
 
 describe("Concurrency Tests", () => {
 	const testDir = join(process.cwd(), ".test-concurrency");
@@ -842,6 +850,114 @@ describe("Concurrency Tests", () => {
 				const found = finalIssue!.evidence.some((e) => e.output === `evidence-${i}`);
 				expect(found).toBe(true);
 			}
+		});
+	});
+
+	describe("saveTasksForRunSafe", () => {
+		test("should handle concurrent saves without data loss", async () => {
+			const run = await createRun({ scope: "test safe tasks save", workDir: testDir });
+
+			// Create initial tasks
+			const task1 = createTaskForRun(
+				run.id,
+				{
+					title: "Task 1",
+					description: "First task",
+					issue_id: "ISSUE-1",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			const task2 = createTaskForRun(
+				run.id,
+				{
+					title: "Task 2",
+					description: "Second task",
+					issue_id: "ISSUE-1",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			// Load and modify tasks, then save concurrently
+			const saves = Array.from({ length: 3 }, async (_, i) => {
+				const tasks = loadTasksForRun(run.id, testDir);
+				const modified = tasks.map((t) => ({
+					...t,
+					description: `Updated by save ${i}`,
+				}));
+				return saveTasksForRunSafe(run.id, modified, testDir);
+			});
+
+			await Promise.all(saves);
+
+			// Verify data integrity - all tasks should still exist
+			const finalTasks = loadTasksForRun(run.id, testDir);
+			expect(finalTasks.length).toBe(2);
+			// Last write should win but no corruption
+			expect(finalTasks[0].description).toMatch(/^Updated by save \d$/);
+		});
+	});
+
+	describe("saveIssuesForRunSafe", () => {
+		test("should handle concurrent saves without data loss", async () => {
+			const run = await createRun({ scope: "test safe issues save", workDir: testDir });
+
+			// Create initial issues
+			const now = new Date().toISOString();
+			const issues: Issue[] = [
+				{
+					id: "P-test-issue1",
+					symptom: "Test symptom 1",
+					hypothesis: "Test hypothesis 1",
+					evidence: [],
+					status: "UNVALIDATED",
+					severity: "MEDIUM",
+					related_task_ids: [],
+					created_at: now,
+					updated_at: now,
+				},
+				{
+					id: "P-test-issue2",
+					symptom: "Test symptom 2",
+					hypothesis: "Test hypothesis 2",
+					evidence: [],
+					status: "UNVALIDATED",
+					severity: "HIGH",
+					related_task_ids: [],
+					created_at: now,
+					updated_at: now,
+				},
+			];
+			saveIssuesForRun(run.id, issues, testDir);
+
+			// Save concurrently
+			const saves = Array.from({ length: 3 }, async (_, i) => {
+				const current = loadIssuesForRun(run.id, testDir);
+				const modified = current.map((issue) => ({
+					...issue,
+					hypothesis: `Updated by save ${i}`,
+				}));
+				return saveIssuesForRunSafe(run.id, modified, testDir);
+			});
+
+			await Promise.all(saves);
+
+			// Verify data integrity
+			const finalIssues = loadIssuesForRun(run.id, testDir);
+			expect(finalIssues.length).toBe(2);
+			expect(finalIssues[0].hypothesis).toMatch(/^Updated by save \d$/);
 		});
 	});
 });

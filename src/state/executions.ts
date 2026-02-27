@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { withFileLock } from "./file-lock.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
 import { type ExecutionRecord, ExecutionRecordSchema, STATE_FILES } from "./types.ts";
 
@@ -639,4 +640,52 @@ export function clearAllExecutions(workDir = process.cwd()): number {
 	}
 
 	return count;
+}
+
+// ============================================
+// Concurrent-Safe Variants (with file locking)
+// ============================================
+
+/**
+ * Execute an operation with cross-process file locking on the executions file.
+ *
+ * Uses proper-lockfile to ensure atomic read-modify-write operations
+ * even when multiple processes access executions.json simultaneously.
+ */
+export async function withExecutionsLock<T>(
+	workDir: string,
+	operation: () => T | Promise<T>,
+): Promise<T> {
+	return withFileLock(getExecutionsPath(workDir), operation);
+}
+
+/**
+ * Create a new execution record with file locking for concurrent safety.
+ */
+export async function createExecutionSafe(
+	execution: Omit<ExecutionRecord, "id">,
+	workDir = process.cwd(),
+): Promise<ExecutionRecord> {
+	return withExecutionsLock(workDir, () => createExecution(execution, workDir));
+}
+
+/**
+ * Update an existing execution with file locking for concurrent safety.
+ */
+export async function updateExecutionSafe(
+	id: string,
+	update: Partial<Omit<ExecutionRecord, "id">>,
+	workDir = process.cwd(),
+): Promise<ExecutionRecord | null> {
+	return withExecutionsLock(workDir, () => updateExecution(id, update, workDir));
+}
+
+/**
+ * Delete an execution by ID with file locking for concurrent safety.
+ */
+export async function deleteExecutionSafe(
+	id: string,
+	workDir = process.cwd(),
+): Promise<boolean> {
+	return withExecutionsLock(workDir, () => deleteExecution(id, workDir));
 }

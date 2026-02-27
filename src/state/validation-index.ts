@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { StateParseError, logStateError } from "./errors.ts";
+import { withFileLock } from "./file-lock.ts";
 import { getRunDir } from "./runs.ts";
 import { type ValidationIndex, ValidationIndexSchema, type ValidationReportRef } from "./types.ts";
 
@@ -414,4 +415,31 @@ export function rebuildValidationIndex(runId: string, workDir = process.cwd()): 
 	);
 
 	return reports.length;
+}
+
+// ============================================================================
+// CONCURRENT-SAFE VARIANTS (with file locking)
+// ============================================================================
+
+/**
+ * Save validation index with cross-process file locking for concurrent safety.
+ */
+export async function saveValidationIndexSafe(
+	index: ValidationIndex,
+	workDir = process.cwd(),
+): Promise<void> {
+	const indexPath = getValidationIndexPath(index.run_id, workDir);
+	return withFileLock(indexPath, () => saveValidationIndex(index, workDir));
+}
+
+/**
+ * Add a validation report to the index with cross-process file locking.
+ */
+export async function addValidationReportToIndexSafe(
+	runId: string,
+	reportRef: Omit<ValidationReportRef, "created_at"> & { created_at?: string },
+	workDir = process.cwd(),
+): Promise<void> {
+	const indexPath = getValidationIndexPath(runId, workDir);
+	return withFileLock(indexPath, () => addValidationReportToIndex(runId, reportRef, workDir));
 }

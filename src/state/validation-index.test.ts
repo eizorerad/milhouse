@@ -4,12 +4,15 @@
  * Tests for validation report indexing functionality.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import * as lockfile from "proper-lockfile";
+import { loggers } from "../observability/logger.js";
 import { createRun } from "./runs.ts";
 import {
 	addValidationReportToIndex,
+	addValidationReportToIndexSafe,
 	clearValidationIndex,
 	countValidationReportsByStatus,
 	getLatestValidationReport,
@@ -24,6 +27,7 @@ import {
 	rebuildValidationIndex,
 	removeValidationReportFromIndex,
 	saveValidationIndex,
+	saveValidationIndexSafe,
 	updateValidationIndex,
 } from "./validation-index.ts";
 
@@ -432,6 +436,79 @@ describe("Validation Index Module Tests", () => {
 			expect(reports[0].issue_id).toBe("ISSUE-1");
 			expect(reports[1].issue_id).toBe("ISSUE-2");
 			expect(reports[2].issue_id).toBe("ISSUE-3");
+		});
+	});
+
+	describe("Safe Locking Wrappers", () => {
+		let lockSpy: ReturnType<typeof spyOn>;
+		let warnSpy: ReturnType<typeof spyOn>;
+
+		beforeEach(() => {
+			lockSpy = spyOn(lockfile, "lock");
+			warnSpy = spyOn(loggers.state, "warn").mockImplementation(() => {});
+		});
+
+		afterEach(() => {
+			lockSpy.mockRestore();
+			warnSpy.mockRestore();
+		});
+
+		test("saveValidationIndexSafe acquires lock and delegates to saveValidationIndex", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
+
+			// Reset spy after createRun (which internally calls lockfile.lock)
+			lockSpy.mockRestore();
+			lockSpy = spyOn(lockfile, "lock");
+			const releaseFn = mock(() => Promise.resolve());
+			lockSpy.mockResolvedValueOnce(releaseFn);
+
+			await saveValidationIndexSafe(
+				{
+					run_id: run.id,
+					reports: [],
+					updated_at: new Date().toISOString(),
+				},
+				testDir,
+			);
+
+			expect(lockSpy).toHaveBeenCalledTimes(1);
+			const lockPath = lockSpy.mock.calls[0][0];
+			expect(lockPath).toContain("validation-index.json");
+			expect(releaseFn).toHaveBeenCalledTimes(1);
+
+			// Verify data was saved
+			const loaded = loadValidationIndex(run.id, testDir);
+			expect(loaded.run_id).toBe(run.id);
+		});
+
+		test("addValidationReportToIndexSafe acquires lock and delegates correctly", async () => {
+			const run = await createRun({ scope: "test", workDir: testDir });
+
+			// Reset spy after createRun (which internally calls lockfile.lock)
+			lockSpy.mockRestore();
+			lockSpy = spyOn(lockfile, "lock");
+			const releaseFn = mock(() => Promise.resolve());
+			lockSpy.mockResolvedValueOnce(releaseFn);
+
+			await addValidationReportToIndexSafe(
+				run.id,
+				{
+					issue_id: "ISSUE-1",
+					report_path: "reports/issue-1.json",
+					status: "valid",
+				},
+				testDir,
+			);
+
+			expect(lockSpy).toHaveBeenCalledTimes(1);
+			const lockPath = lockSpy.mock.calls[0][0];
+			expect(lockPath).toContain("validation-index.json");
+			expect(releaseFn).toHaveBeenCalledTimes(1);
+
+			// Verify data was saved
+			const index = loadValidationIndex(run.id, testDir);
+			expect(index.reports.length).toBe(1);
+			expect(index.reports[0].issue_id).toBe("ISSUE-1");
 		});
 	});
 });
