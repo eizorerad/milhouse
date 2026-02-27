@@ -60,4 +60,33 @@ describe("PrService execCommand shell option", () => {
 		expect(args).toEqual(["auth", "status"]);
 		expect(opts.cwd).toBe(process.cwd());
 	});
+
+	describe("shell metacharacter safety", () => {
+		test("branch name with shell metacharacters is passed literally", async () => {
+			const maliciousBranch = "feature/$VAR;rm -rf";
+			await prService.getPrStatus(maliciousBranch, "/tmp");
+
+			expect(spawnSpy).toHaveBeenCalledTimes(1);
+			const args = spawnSpy.mock.calls[0][1] as string[];
+			expect(args).toContain(maliciousBranch);
+		});
+
+		test("branch name with backticks and pipes is passed literally", async () => {
+			const maliciousBranch = "Fix `bug` | review";
+			await prService.getPrStatus(maliciousBranch, "/tmp");
+
+			expect(spawnSpy).toHaveBeenCalledTimes(1);
+			const args = spawnSpy.mock.calls[0][1] as string[];
+			expect(args).toContain(maliciousBranch);
+		});
+
+		test("branch name with $() command substitution is passed literally", async () => {
+			const maliciousBranch = "$(whoami)";
+			await prService.getPrStatus(maliciousBranch, "/tmp");
+
+			expect(spawnSpy).toHaveBeenCalledTimes(1);
+			const args = spawnSpy.mock.calls[0][1] as string[];
+			expect(args).toContain(maliciousBranch);
+		});
+	});
 });
