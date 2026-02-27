@@ -1,8 +1,8 @@
 /**
  * @fileoverview Unit Tests for VCS PR Service — shell option
  *
- * Tests that the execCommand helper passes shell: true to spawn(),
- * ensuring .cmd/.bat shims are resolved on Windows.
+ * Tests that the execCommand helper does NOT pass shell: true to spawn(),
+ * preventing shell injection via metacharacters in arguments.
  *
  * @module vcs/services/pr-service.test
  */
@@ -39,12 +39,12 @@ describe("PrService execCommand shell option", () => {
 		spawnSpy.mockRestore();
 	});
 
-	test("spawn is called with shell: true in options", async () => {
+	test("spawn is called without shell: true in options", async () => {
 		await prService.isGhAvailable();
 
 		expect(spawnSpy).toHaveBeenCalledTimes(1);
 		const opts = spawnSpy.mock.calls[0][2] as childProcess.SpawnOptions;
-		expect(opts.shell).toBe(true);
+		expect(opts.shell).toBeUndefined();
 	});
 
 	test("spawn receives correct command, args, and cwd", async () => {
@@ -59,5 +59,34 @@ describe("PrService execCommand shell option", () => {
 		expect(command).toBe("gh");
 		expect(args).toEqual(["auth", "status"]);
 		expect(opts.cwd).toBe(process.cwd());
+	});
+
+	describe("shell metacharacter safety", () => {
+		test("branch name with shell metacharacters is passed literally", async () => {
+			const maliciousBranch = "feature/$VAR;rm -rf";
+			await prService.getPrStatus(maliciousBranch, "/tmp");
+
+			expect(spawnSpy).toHaveBeenCalledTimes(1);
+			const args = spawnSpy.mock.calls[0][1] as string[];
+			expect(args).toContain(maliciousBranch);
+		});
+
+		test("branch name with backticks and pipes is passed literally", async () => {
+			const maliciousBranch = "Fix `bug` | review";
+			await prService.getPrStatus(maliciousBranch, "/tmp");
+
+			expect(spawnSpy).toHaveBeenCalledTimes(1);
+			const args = spawnSpy.mock.calls[0][1] as string[];
+			expect(args).toContain(maliciousBranch);
+		});
+
+		test("branch name with $() command substitution is passed literally", async () => {
+			const maliciousBranch = "$(whoami)";
+			await prService.getPrStatus(maliciousBranch, "/tmp");
+
+			expect(spawnSpy).toHaveBeenCalledTimes(1);
+			const args = spawnSpy.mock.calls[0][1] as string[];
+			expect(args).toContain(maliciousBranch);
+		});
 	});
 });
