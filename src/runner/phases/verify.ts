@@ -31,7 +31,7 @@ export const verifyPhaseConfig: PhaseConfig<VerifyInput, VerifyResult> = {
 	name: "verify",
 	role: "TV",
 	jsonSchema: VERIFY_SCHEMA as Record<string, unknown>,
-	engineMetadata: { maxTurns: 20 },
+	engineMetadata: { maxTurns: 50 },
 	mode: "single-agent",
 	defaultParallel: 1,
 
