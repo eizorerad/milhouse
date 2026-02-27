@@ -27,6 +27,7 @@ import type { PhaseConfig, PhaseRunResult, ResolvedConfig } from "../runner/type
 import { loadRunMeta, loadRunsIndex } from "../state/runs.ts";
 import type { RunMeta } from "../state/types.ts";
 import { formatDuration, logError, logInfo, logWarn } from "../ui/logger.ts";
+import { validateResumeOutputs } from "./resume-validator.ts";
 
 /** All phase configs indexed by name */
 const PHASE_CONFIGS: Record<string, PhaseConfig> = {
@@ -222,6 +223,19 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	if (options.resume) {
 		runId = await selectRunForResume(workDir, runId);
 		options.startPhase = options.startPhase ?? getResumeStartPhase(runId, workDir);
+
+		// Validate that prior phase outputs exist before skipping phases
+		const validation = validateResumeOutputs(runId, options.startPhase, workDir);
+		if (!validation.valid && validation.firstInvalidPhase) {
+			logWarn(
+				`Resume validation failed: missing outputs for phase "${validation.firstInvalidPhase}". Falling back to re-run from "${validation.firstInvalidPhase}".`,
+			);
+			for (const err of validation.errors) {
+				logWarn(`  ${err}`);
+			}
+			options.startPhase = validation.firstInvalidPhase;
+		}
+
 		logInfo(`Resuming run ${runId} from phase "${options.startPhase}"`);
 	}
 
