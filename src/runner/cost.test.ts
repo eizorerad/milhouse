@@ -117,6 +117,44 @@ describe("BudgetGuard", () => {
 			expect(runCost.inputTokens).toBe(5000);
 			expect(runCost.outputTokens).toBe(2000);
 		});
+
+		test("updates inputCost and outputCost when costConfig is provided", async () => {
+			const guard = new BudgetGuard();
+			const runCost = createRunCost();
+			runCost.reservedCost = 5;
+
+			await guard.settle(runCost, 5, 3.5, 1000, 500, costConfig);
+
+			expect(runCost.inputCost).toBeCloseTo((1000 / 1_000_000) * 5, 10);
+			expect(runCost.outputCost).toBeCloseTo((500 / 1_000_000) * 25, 10);
+		});
+
+		test("does not update inputCost and outputCost when costConfig is omitted", async () => {
+			const guard = new BudgetGuard();
+			const runCost = createRunCost();
+			runCost.reservedCost = 5;
+
+			await guard.settle(runCost, 5, 3.5, 1000, 500);
+
+			expect(runCost.inputCost).toBe(0);
+			expect(runCost.outputCost).toBe(0);
+		});
+
+		test("inputCost + outputCost == totalCost after settle with costConfig", async () => {
+			const guard = new BudgetGuard();
+			const runCost = createRunCost();
+			runCost.reservedCost = 5;
+
+			const inputTokens = 2000;
+			const outputTokens = 800;
+			const actualCost =
+				(inputTokens / 1_000_000) * costConfig.inputPerMillion +
+				(outputTokens / 1_000_000) * costConfig.outputPerMillion;
+
+			await guard.settle(runCost, 5, actualCost, inputTokens, outputTokens, costConfig);
+
+			expect(runCost.inputCost + runCost.outputCost).toBeCloseTo(runCost.totalCost, 10);
+		});
 	});
 
 	describe("concurrent reservation", () => {
