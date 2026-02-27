@@ -146,3 +146,113 @@ describe("BudgetGuard", () => {
 		});
 	});
 });
+
+describe("BudgetGuard integration", () => {
+	const costConfig: CostConfig = {
+		inputPerMillion: 5,
+		outputPerMillion: 25,
+		budgetLimit: 10,
+	};
+
+	test("concurrent tasks cannot collectively exceed the budget", async () => {
+		const guard = new BudgetGuard();
+		const runCost = createRunCost();
+		runCost.totalCost = 8; // $2 headroom
+
+		// Simulate 5 concurrent tasks each trying to reserve $1 then settle
+		const taskResults = await Promise.allSettled(
+			Array.from({ length: 5 }, () =>
+				(async () => {
+					await guard.reserve(runCost, costConfig, 1);
+					// Simulate work with a small delay
+					await new Promise((r) => setTimeout(r, 5));
+					// Settle with actual cost of $0.50
+					await guard.settle(runCost, 1, 0.5, 200, 100);
+					return true;
+				})(),
+			),
+		);
+
+		const succeeded = taskResults.filter((r) => r.status === "fulfilled").length;
+		const failed = taskResults.filter((r) => r.status === "rejected").length;
+
+		// Only 2 tasks should succeed (budget allows $2 of reservations)
+		expect(succeeded).toBe(2);
+		expect(failed).toBe(3);
+
+		// totalCost should reflect 2 tasks settling at $0.50 each
+		expect(runCost.totalCost).toBeCloseTo(8 + 2 * 0.5, 10);
+	});
+
+	test("reservedCost returns to 0 after all tasks complete — no leaked reservations", async () => {
+		const guard = new BudgetGuard();
+		const runCost = createRunCost();
+		// Budget $10, starting at $0 — all 5 tasks should fit with $1 reserves
+		const taskConfig: CostConfig = { ...costConfig, budgetLimit: 10 };
+
+		await Promise.all(
+			Array.from({ length: 5 }, (_, i) =>
+				(async () => {
+					await guard.reserve(runCost, taskConfig, 1);
+					await new Promise((r) => setTimeout(r, 2 + i));
+					await guard.settle(runCost, 1, 0.8, 100, 50);
+				})(),
+			),
+		);
+
+		expect(runCost.reservedCost).toBe(0);
+		expect(runCost.totalCost).toBeCloseTo(5 * 0.8, 10);
+		expect(runCost.inputTokens).toBe(5 * 100);
+		expect(runCost.outputTokens).toBe(5 * 50);
+		expect(runCost.totalTokens).toBe(5 * 150);
+	});
+
+	test("totalCost reflects correct accumulated actual costs", async () => {
+		const guard = new BudgetGuard();
+		const runCost = createRunCost();
+		const bigBudget: CostConfig = { ...costConfig, budgetLimit: 100 };
+
+		// 3 tasks with varying actual costs
+		const costs = [1.5, 2.3, 0.7];
+
+		await Promise.all(
+			costs.map((actualCost) =>
+				(async () => {
+					await guard.reserve(runCost, bigBudget, 5);
+					await new Promise((r) => setTimeout(r, 3));
+					await guard.settle(runCost, 5, actualCost, 500, 200);
+				})(),
+			),
+		);
+
+		expect(runCost.reservedCost).toBe(0);
+		expect(runCost.totalCost).toBeCloseTo(1.5 + 2.3 + 0.7, 10);
+	});
+
+	test("without guard, bare checkBudget allows race condition overshoot", async () => {
+		// This test demonstrates the bug: without BudgetGuard, concurrent tasks
+		// all pass the budget check before any cost is accumulated
+		const runCost = createRunCost();
+		runCost.totalCost = 9; // $1 headroom
+
+		// All 5 concurrent tasks read totalCost=9 < budgetLimit=10 simultaneously
+		// and all pass. This is the race condition the BudgetGuard fixes.
+		const results = await Promise.allSettled(
+			Array.from({ length: 5 }, () =>
+				(async () => {
+					// Without mutex, all see the same stale totalCost
+					checkBudget(runCost, costConfig);
+					await new Promise((r) => setTimeout(r, 5));
+					runCost.totalCost += 0.5;
+				})(),
+			),
+		);
+
+		const succeeded = results.filter((r) => r.status === "fulfilled").length;
+
+		// Without the guard, ALL 5 tasks pass budget check (the bug)
+		expect(succeeded).toBe(5);
+		// Total cost overshoots: 9 + 5*0.5 = 11.5, exceeding the $10 limit
+		expect(runCost.totalCost).toBeGreaterThan(costConfig.budgetLimit);
+	});
+});
