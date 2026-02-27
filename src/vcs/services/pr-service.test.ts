@@ -1,8 +1,8 @@
 /**
  * @fileoverview Unit Tests for VCS PR Service — shell option
  *
- * Tests that the execCommand helper passes shell: true to spawn(),
- * ensuring .cmd/.bat shims are resolved on Windows.
+ * Tests that the execCommand helper does NOT pass shell: true to spawn(),
+ * preventing shell injection via metacharacters in arguments.
  *
  * @module vcs/services/pr-service.test
  */
@@ -39,12 +39,12 @@ describe("PrService execCommand shell option", () => {
 		spawnSpy.mockRestore();
 	});
 
-	test("spawn is called with shell: true in options", async () => {
+	test("spawn is called without shell: true in options", async () => {
 		await prService.isGhAvailable();
 
 		expect(spawnSpy).toHaveBeenCalledTimes(1);
 		const opts = spawnSpy.mock.calls[0][2] as childProcess.SpawnOptions;
-		expect(opts.shell).toBe(true);
+		expect(opts.shell).toBeUndefined();
 	});
 
 	test("spawn receives correct command, args, and cwd", async () => {
