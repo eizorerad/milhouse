@@ -48,9 +48,17 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 
 	loadItems(ctx) {
 		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
-		logDebug(
-			`[validate] loadItems: ${issues.length} issues loaded, severityFilter=${JSON.stringify(ctx.config.severityFilter)}, minSeverity=${ctx.config.minSeverity}`,
-		);
+
+		// Log severity filter for debugging (INFO level so it's always visible)
+		if (ctx.config.severityFilter?.length || ctx.config.minSeverity) {
+			const severities = issues.map((i) => i.severity);
+			const counts: Record<string, number> = {};
+			for (const s of severities) counts[s] = (counts[s] || 0) + 1;
+			logWarn(
+				`[validate] Severity filter active: ${JSON.stringify(ctx.config.severityFilter)} | minSeverity=${ctx.config.minSeverity ?? "none"} | Issues by severity: ${JSON.stringify(counts)}`,
+			);
+		}
+
 		const filtered = filterIssues(issues, {
 			issueIds: ctx.config.issueIds,
 			excludeIssueIds: ctx.config.excludeIssueIds,
@@ -58,7 +66,11 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 			minSeverity: ctx.config.minSeverity,
 			statusFilter: ["UNVALIDATED"],
 		});
-		logDebug(`[validate] After filter: ${filtered.length} issues (from ${issues.length})`);
+
+		if (ctx.config.severityFilter?.length || ctx.config.minSeverity) {
+			logWarn(`[validate] After severity filter: ${filtered.length} issues (from ${issues.length})`);
+		}
+
 		return filtered;
 	},
 
