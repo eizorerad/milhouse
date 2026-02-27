@@ -266,8 +266,8 @@ export async function runDaemonLoop(
 		);
 		appendLog(workDir, "report:generated", { path: reportResult });
 		logInfo(`Report generated`);
-	} catch {
-		logWarn("Failed to generate session report");
+	} catch (e) {
+		logWarn(`Failed to generate session report: ${e instanceof Error ? e.message : String(e)}`);
 	}
 
 	appendLog(workDir, "daemon:stop", {

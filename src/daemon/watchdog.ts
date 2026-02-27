@@ -9,6 +9,7 @@
  */
 
 import type { Subprocess } from "bun";
+import { logDebug } from "../ui/logger.ts";
 import type { DaemonWatchdogConfig, WatchdogResult } from "./types.ts";
 
 const WATCHDOG_CHECK_INTERVAL_MS = 15_000; // check every 15 seconds
@@ -76,8 +77,8 @@ export async function spawnWithWatchdog(
 				stdoutChunks.push(text);
 				options.onActivity?.(text);
 			}
-		} catch {
-			// Stream closed
+		} catch (e) {
+			logDebug("Stdout stream closed", e);
 		}
 	})();
 
@@ -93,8 +94,8 @@ export async function spawnWithWatchdog(
 				lastActivityAt = Date.now();
 				stderrChunks.push(text);
 			}
-		} catch {
-			// Stream closed
+		} catch (e) {
+			logDebug("Stderr stream closed", e);
 		}
 	})();
 
@@ -169,12 +170,12 @@ function killProcess(proc: Subprocess, reason: string): ReturnType<typeof setTim
 		return setTimeout(() => {
 			try {
 				proc.kill("SIGKILL");
-			} catch {
-				// Already dead
+			} catch (e) {
+				logDebug("SIGKILL failed (process already dead)", e);
 			}
 		}, 10_000);
-	} catch {
-		// Already dead
+	} catch (e) {
+		logDebug("SIGTERM failed (process already dead)", e);
 		return undefined;
 	}
 }

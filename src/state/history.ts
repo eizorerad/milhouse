@@ -496,8 +496,13 @@ export function clearSnapshots(
 		try {
 			rmSync(join(historyDir, file));
 			removed++;
-		} catch {
-			// Continue on error
+		} catch (e) {
+			const filePath = join(historyDir, file);
+			const stateError = new StateParseError(`Failed to remove snapshot file: ${file}`, {
+				filePath,
+				cause: e instanceof Error ? e : new Error(String(e)),
+			});
+			logStateError(stateError, "debug");
 		}
 	}
 
