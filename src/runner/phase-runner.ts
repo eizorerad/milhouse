@@ -349,7 +349,6 @@ async function executeItem<TItem, TResult>(
 		if (!aiResult.success) {
 			return {
 				item: processedItem,
-				result: undefined as unknown as TResult,
 				success: false,
 				error: aiResult.error ?? "AI execution failed",
 				inputTokens: aiResult.inputTokens,
@@ -368,7 +367,6 @@ async function executeItem<TItem, TResult>(
 	} catch (error) {
 		return {
 			item: processedItem,
-			result: undefined as unknown as TResult,
 			success: false,
 			error: error instanceof Error ? error.message : String(error),
 			inputTokens: 0,
