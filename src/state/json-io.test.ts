@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import * as fs from "node:fs";
 import { join } from "node:path";
+import { StateWriteError } from "./errors.ts";
 import { saveJsonFile } from "./json-io.ts";
 
 describe("saveJsonFile", () => {
@@ -53,7 +54,11 @@ describe("saveJsonFile", () => {
 				throw err;
 			});
 
-			saveJsonFile(filePath, data);
+			try {
+				saveJsonFile(filePath, data);
+			} catch {
+				// expected to throw after retries exhausted
+			}
 
 			// Should have logged a warning via logStateError at 'warn' level
 			expect(warnSpy).toHaveBeenCalled();
@@ -63,7 +68,7 @@ describe("saveJsonFile", () => {
 			warnSpy.mockRestore();
 		});
 
-		test("cleans up .tmp file when renameSync fails", () => {
+		test("cleans up .tmp file when renameSync fails before throwing", () => {
 			const filePath = join(testDir, "test.json");
 			const data = { key: "value" };
 
@@ -74,15 +79,22 @@ describe("saveJsonFile", () => {
 				throw err;
 			});
 
-			saveJsonFile(filePath, data);
+			const warnSpy = spyOn(console, "warn");
+
+			try {
+				saveJsonFile(filePath, data);
+			} catch {
+				// expected to throw
+			}
 
 			// .tmp file should be cleaned up, not orphaned
 			expect(existsSync(`${filePath}.tmp`)).toBe(false);
 
 			renameSpy.mockRestore();
+			warnSpy.mockRestore();
 		});
 
-		test("fallback direct write still writes data when renameSync fails", () => {
+		test("throws StateWriteError when renameSync fails after all retries", () => {
 			const filePath = join(testDir, "test.json");
 			const data = { key: "fallback-value" };
 
@@ -93,14 +105,44 @@ describe("saveJsonFile", () => {
 				throw err;
 			});
 
-			saveJsonFile(filePath, data);
+			const warnSpy = spyOn(console, "warn");
 
-			// File should still be written correctly via fallback
-			expect(existsSync(filePath)).toBe(true);
-			const content = JSON.parse(readFileSync(filePath, "utf-8"));
-			expect(content).toEqual(data);
+			try {
+				expect(() => saveJsonFile(filePath, data)).toThrow(StateWriteError);
+			} finally {
+				renameSpy.mockRestore();
+				warnSpy.mockRestore();
+			}
+		});
 
-			renameSpy.mockRestore();
+		test("thrown error contains original rename error as cause", () => {
+			const filePath = join(testDir, "test.json");
+			const data = { key: "cause-value" };
+
+			const originalError = new Error("EPERM: operation not permitted");
+			(originalError as NodeJS.ErrnoException).code = "EPERM";
+
+			// Mock renameSync to throw EPERM
+			const renameSpy = spyOn(fs, "renameSync").mockImplementation(() => {
+				throw originalError;
+			});
+
+			const warnSpy = spyOn(console, "warn");
+
+			try {
+				let caughtError: unknown;
+				try {
+					saveJsonFile(filePath, data);
+				} catch (error) {
+					caughtError = error;
+				}
+
+				expect(caughtError).toBeInstanceOf(StateWriteError);
+				expect((caughtError as StateWriteError).cause).toBe(originalError);
+			} finally {
+				renameSpy.mockRestore();
+				warnSpy.mockRestore();
+			}
 		});
 	});
 
@@ -147,7 +189,7 @@ describe("saveJsonFile", () => {
 			warnSpy.mockRestore();
 		});
 
-		test("all retries exhausted triggers fallback", () => {
+		test("all retries exhausted throws StateWriteError", () => {
 			const filePath = join(testDir, "test.json");
 			const data = { key: "exhausted-value" };
 
@@ -160,25 +202,22 @@ describe("saveJsonFile", () => {
 
 			const warnSpy = spyOn(console, "warn");
 
-			saveJsonFile(filePath, data);
+			try {
+				expect(() => saveJsonFile(filePath, data)).toThrow(StateWriteError);
 
-			// Rename should have been called 3 times (all retries)
-			expect(renameSpy).toHaveBeenCalledTimes(3);
+				// Rename should have been called 3 times (all retries)
+				expect(renameSpy).toHaveBeenCalledTimes(3);
 
-			// Warning should be logged after all retries exhausted
-			expect(warnSpy).toHaveBeenCalled();
-			expect(warnSpy.mock.calls[0][0]).toContain("[STATE WARN]");
+				// Warning should be logged after all retries exhausted
+				expect(warnSpy).toHaveBeenCalled();
+				expect(warnSpy.mock.calls[0][0]).toContain("[STATE WARN]");
 
-			// File should still be written via fallback
-			expect(existsSync(filePath)).toBe(true);
-			const content = JSON.parse(readFileSync(filePath, "utf-8"));
-			expect(content).toEqual(data);
-
-			// .tmp file should be cleaned up
-			expect(existsSync(`${filePath}.tmp`)).toBe(false);
-
-			renameSpy.mockRestore();
-			warnSpy.mockRestore();
+				// File should NOT be written (no fallback)
+				expect(existsSync(filePath)).toBe(false);
+			} finally {
+				renameSpy.mockRestore();
+				warnSpy.mockRestore();
+			}
 		});
 	});
 
