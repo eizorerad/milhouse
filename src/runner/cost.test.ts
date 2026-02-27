@@ -294,3 +294,100 @@ describe("BudgetGuard integration", () => {
 		expect(runCost.totalCost).toBeGreaterThan(costConfig.budgetLimit);
 	});
 });
+
+describe("cost consistency after retries", () => {
+	const costConfig: CostConfig = {
+		inputPerMillion: 5,
+		outputPerMillion: 25,
+		budgetLimit: 100,
+	};
+
+	test("totalCost == inputCost + outputCost after simulated retries", async () => {
+		const guard = new BudgetGuard();
+		const runCost = createRunCost();
+
+		// Simulate original execution: 3 items
+		const originalItems = [
+			{ inputTokens: 1000, outputTokens: 400 },
+			{ inputTokens: 2000, outputTokens: 800 },
+			{ inputTokens: 1500, outputTokens: 600 },
+		];
+
+		for (const item of originalItems) {
+			const actualCost =
+				(item.inputTokens / 1_000_000) * costConfig.inputPerMillion +
+				(item.outputTokens / 1_000_000) * costConfig.outputPerMillion;
+			await guard.reserve(runCost, costConfig, 1);
+			await guard.settle(runCost, 1, actualCost, item.inputTokens, item.outputTokens, costConfig);
+		}
+
+		// Simulate retry: items 0 and 2 are retried with different token counts
+		const retryItems = [
+			{ inputTokens: 1200, outputTokens: 500 },
+			{ inputTokens: 1800, outputTokens: 700 },
+		];
+
+		for (const item of retryItems) {
+			const actualCost =
+				(item.inputTokens / 1_000_000) * costConfig.inputPerMillion +
+				(item.outputTokens / 1_000_000) * costConfig.outputPerMillion;
+			await guard.reserve(runCost, costConfig, 1);
+			await guard.settle(runCost, 1, actualCost, item.inputTokens, item.outputTokens, costConfig);
+		}
+
+		// Core invariant: totalCost must equal inputCost + outputCost
+		expect(runCost.totalCost).toBeCloseTo(runCost.inputCost + runCost.outputCost, 10);
+
+		// inputCost reflects ALL tokens (original + retry), not just final results
+		const allInputTokens = [...originalItems, ...retryItems].reduce((sum, i) => sum + i.inputTokens, 0);
+		const allOutputTokens = [...originalItems, ...retryItems].reduce((sum, i) => sum + i.outputTokens, 0);
+
+		expect(runCost.inputCost).toBeCloseTo((allInputTokens / 1_000_000) * costConfig.inputPerMillion, 10);
+		expect(runCost.outputCost).toBeCloseTo((allOutputTokens / 1_000_000) * costConfig.outputPerMillion, 10);
+
+		// Token counters reflect all attempts
+		expect(runCost.inputTokens).toBe(allInputTokens);
+		expect(runCost.outputTokens).toBe(allOutputTokens);
+		expect(runCost.totalTokens).toBe(allInputTokens + allOutputTokens);
+	});
+
+	test("concurrent retry simulation maintains cost consistency", async () => {
+		const guard = new BudgetGuard();
+		const runCost = createRunCost();
+
+		// Simulate 4 original items executed concurrently
+		await Promise.all(
+			[
+				{ inputTokens: 1000, outputTokens: 400 },
+				{ inputTokens: 2000, outputTokens: 800 },
+				{ inputTokens: 1500, outputTokens: 600 },
+				{ inputTokens: 3000, outputTokens: 1200 },
+			].map(async (item) => {
+				const actualCost =
+					(item.inputTokens / 1_000_000) * costConfig.inputPerMillion +
+					(item.outputTokens / 1_000_000) * costConfig.outputPerMillion;
+				await guard.reserve(runCost, costConfig, 2);
+				await new Promise((r) => setTimeout(r, 2));
+				await guard.settle(runCost, 2, actualCost, item.inputTokens, item.outputTokens, costConfig);
+			}),
+		);
+
+		// Simulate 2 concurrent retries
+		await Promise.all(
+			[
+				{ inputTokens: 1100, outputTokens: 450 },
+				{ inputTokens: 1600, outputTokens: 650 },
+			].map(async (item) => {
+				const actualCost =
+					(item.inputTokens / 1_000_000) * costConfig.inputPerMillion +
+					(item.outputTokens / 1_000_000) * costConfig.outputPerMillion;
+				await guard.reserve(runCost, costConfig, 2);
+				await new Promise((r) => setTimeout(r, 2));
+				await guard.settle(runCost, 2, actualCost, item.inputTokens, item.outputTokens, costConfig);
+			}),
+		);
+
+		// Core invariant holds after concurrent execution with retries
+		expect(runCost.totalCost).toBeCloseTo(runCost.inputCost + runCost.outputCost, 10);
+	});
+});
