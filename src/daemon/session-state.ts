@@ -117,7 +117,13 @@ export function loadState(workDir: string): DaemonState | null {
 	try {
 		return JSON.parse(readFileSync(path, "utf-8"));
 	} catch {
-		return null;
+		// Retry once after a short delay — handles transient read during atomic write
+		try {
+			Bun.sleepSync(50);
+			return JSON.parse(readFileSync(path, "utf-8"));
+		} catch {
+			return null;
+		}
 	}
 }
 
