@@ -386,12 +386,47 @@ describe("Concurrent run operations", () => {
 		}
 	});
 
-	it.skip("should not mix tasks between concurrent plan operations", async () => {
-		// TODO: Implement when we have a test harness for concurrent planning
-		// This test would:
-		// 1. Create two runs with different issues
-		// 2. Run plan command on both concurrently
-		// 3. Verify tasks are created in the correct runs
+	it("should not mix tasks between concurrent plan operations", async () => {
+		const run1 = await createRun({ scope: "plan-scope-A", workDir: testDir });
+		const run2 = await createRun({ scope: "plan-scope-B", workDir: testDir });
+
+		// Populate each run with different issues
+		const run1IssueIds = simulateScanPhase(run1.id, testDir, "planA", 3);
+		const run2IssueIds = simulateScanPhase(run2.id, testDir, "planB", 3);
+
+		// Run plan phase on both runs concurrently
+		const [run1TaskIds, run2TaskIds] = await Promise.all([
+			Promise.resolve(simulatePlanPhase(run1.id, testDir)),
+			Promise.resolve(simulatePlanPhase(run2.id, testDir)),
+		]);
+
+		// Verify task counts match (one task per issue)
+		expect(run1TaskIds.length).toBe(3);
+		expect(run2TaskIds.length).toBe(3);
+
+		// Verify tasks in run1 reference only run1's issue IDs
+		const run1Tasks = loadTasksForRun(run1.id, testDir);
+		for (const task of run1Tasks) {
+			expect(run1IssueIds).toContain(task.issue_id);
+			expect(run2IssueIds).not.toContain(task.issue_id);
+		}
+
+		// Verify tasks in run2 reference only run2's issue IDs
+		const run2Tasks = loadTasksForRun(run2.id, testDir);
+		for (const task of run2Tasks) {
+			expect(run2IssueIds).toContain(task.issue_id);
+			expect(run1IssueIds).not.toContain(task.issue_id);
+		}
+
+		// Verify no task IDs leak between runs
+		const run1TaskIdSet = new Set(run1TaskIds);
+		const run2TaskIdSet = new Set(run2TaskIds);
+		for (const id of run1TaskIds) {
+			expect(run2TaskIdSet.has(id)).toBe(false);
+		}
+		for (const id of run2TaskIds) {
+			expect(run1TaskIdSet.has(id)).toBe(false);
+		}
 	});
 
 	it.skip("should handle concurrent exec operations on different runs", async () => {
