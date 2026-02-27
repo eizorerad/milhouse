@@ -564,6 +564,48 @@ export class MergeService implements IMergeService {
 		return ok(checkResult.ok && checkResult.value.exitCode === 0);
 	}
 	/**
+	 * Verify that a merge actually completed by checking if HEAD is a merge commit.
+	 *
+	 * Checks:
+	 * 1. HEAD has a second parent (i.e., is a merge commit) via `git rev-parse HEAD^2`
+	 * 2. If preHeadSha is provided, HEAD must have advanced from it
+	 *
+	 * @param workDir - Working directory
+	 * @param preHeadSha - Optional SHA of HEAD before the merge attempt
+	 * @returns ok(true) if positive evidence of merge completion, ok(false) otherwise
+	 */
+	async verifyMergeCompleted(
+		workDir: string,
+		preHeadSha?: string,
+	): Promise<VcsResult<boolean>> {
+		// Check if HEAD is a merge commit by verifying it has a second parent
+		const headParent2Result = await runGitCommand(["rev-parse", "HEAD^2"], workDir);
+		if (!headParent2Result.ok) {
+			return headParent2Result;
+		}
+
+		if (headParent2Result.value.exitCode !== 0) {
+			// HEAD is not a merge commit (no second parent)
+			return ok(false);
+		}
+
+		// If preHeadSha is provided, verify HEAD actually advanced
+		if (preHeadSha) {
+			const headResult = await runGitCommand(["rev-parse", "HEAD"], workDir);
+			if (!headResult.ok) {
+				return headResult;
+			}
+
+			if (headResult.value.exitCode === 0 && headResult.value.stdout.trim() === preHeadSha) {
+				// HEAD didn't advance — merge didn't complete
+				return ok(false);
+			}
+		}
+
+		return ok(true);
+	}
+
+	/**
 	 * Check if workDir is clean enough for merge operations
 	 */
 	async checkMergeReadiness(workDir: string): Promise<VcsResult<MergeReadinessResult>> {
@@ -1265,6 +1307,17 @@ export async function getConflictedFiles(workDir: string): Promise<VcsResult<str
  */
 export async function isMergeInProgress(workDir: string): Promise<VcsResult<boolean>> {
 	return defaultService.isMergeInProgress(workDir);
+}
+
+/**
+ * Verify that a merge actually completed by checking if HEAD is a merge commit
+ * @see MergeService.verifyMergeCompleted
+ */
+export async function verifyMergeCompleted(
+	workDir: string,
+	preHeadSha?: string,
+): Promise<VcsResult<boolean>> {
+	return defaultService.verifyMergeCompleted(workDir, preHeadSha);
 }
 
 /**
