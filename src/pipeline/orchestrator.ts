@@ -278,7 +278,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
 			// After scan, capture the runId for subsequent phases
 			if (phase === "scan" && result.runId) runId = result.runId;
-			phasesCompleted.push(phase);
+			if (result.success) phasesCompleted.push(phase);
 			outcomes.push({ phase, success: result.success, duration: result.duration });
 
 			if (!result.success && config.failFast) {
