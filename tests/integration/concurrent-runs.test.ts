@@ -11,10 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import {
-	createIssueForRun,
-	loadIssuesForRun,
-} from "../../src/state/issues.ts";
+import { createIssueForRun, loadIssuesForRun } from "../../src/state/issues.ts";
 import { createRun, loadRunsIndex } from "../../src/state/runs.ts";
 import {
 	createTaskForRun,
@@ -429,12 +426,53 @@ describe("Concurrent run operations", () => {
 		}
 	});
 
-	it.skip("should handle concurrent exec operations on different runs", async () => {
-		// TODO: Implement when we have a test harness for concurrent execution
-		// This test would:
-		// 1. Create two runs with tasks ready for execution
-		// 2. Run exec command on both concurrently
-		// 3. Verify task status updates are isolated to their respective runs
+	it("should handle concurrent exec operations on different runs", async () => {
+		const run1 = await createRun({ scope: "exec-scope-A", workDir: testDir });
+		const run2 = await createRun({ scope: "exec-scope-B", workDir: testDir });
+
+		// Populate each run: scan then plan (sequentially per run)
+		simulateScanPhase(run1.id, testDir, "execA", 3);
+		simulatePlanPhase(run1.id, testDir);
+		simulateScanPhase(run2.id, testDir, "execB", 2);
+		simulatePlanPhase(run2.id, testDir);
+
+		// Verify tasks are pending before exec
+		const run1TasksBefore = loadTasksForRun(run1.id, testDir);
+		const run2TasksBefore = loadTasksForRun(run2.id, testDir);
+		expect(run1TasksBefore.length).toBe(3);
+		expect(run2TasksBefore.length).toBe(2);
+		expect(run1TasksBefore.every((t) => t.status === "pending")).toBe(true);
+		expect(run2TasksBefore.every((t) => t.status === "pending")).toBe(true);
+
+		// Run exec phase on both runs concurrently
+		const [run1Updated, run2Updated] = await Promise.all([
+			simulateExecPhase(run1.id, testDir),
+			simulateExecPhase(run2.id, testDir),
+		]);
+
+		// Verify all tasks in run1 are updated to 'done'
+		expect(run1Updated.length).toBe(3);
+		const run1TasksAfter = loadTasksForRun(run1.id, testDir);
+		for (const task of run1TasksAfter) {
+			expect(task.status).toBe("done");
+		}
+
+		// Verify all tasks in run2 are updated to 'done'
+		expect(run2Updated.length).toBe(2);
+		const run2TasksAfter = loadTasksForRun(run2.id, testDir);
+		for (const task of run2TasksAfter) {
+			expect(task.status).toBe("done");
+		}
+
+		// Verify task updates are isolated — no cross-run task IDs
+		const run1TaskIdSet = new Set(run1TasksAfter.map((t) => t.id));
+		const run2TaskIdSet = new Set(run2TasksAfter.map((t) => t.id));
+		for (const id of run1TaskIdSet) {
+			expect(run2TaskIdSet.has(id)).toBe(false);
+		}
+		for (const id of run2TaskIdSet) {
+			expect(run1TaskIdSet.has(id)).toBe(false);
+		}
 	});
 
 	it("should maintain run index integrity under concurrent run creation", async () => {
