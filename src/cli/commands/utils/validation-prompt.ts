@@ -42,7 +42,9 @@ Your task is to perform a DEEP, THOROUGH investigation and produce a comprehensi
 - Trace the code flow from start to end
 - Run actual tests and commands
 - Consider edge cases and alternative explanations
-- Validate the work item with concrete evidence`);
+- Validate the work item with concrete evidence
+
+⚠️ **AUTONOMOUS MODE**: You are running in a fully automated pipeline. Do NOT ask questions or request clarification. Make the best decision for this specific project based on the codebase context. If uncertain, choose the most conservative/safe option and proceed.`);
 
 	// Add project context if available
 	const configService = getConfigService(workDir);

@@ -46,7 +46,9 @@ export function buildVerifyPrompt(input: VerifyInput, _ctx: PhaseContext): strin
 ${AGENT_ROLES.TV}
 
 You are verifying the execution results of completed tasks.
-Your job is to ensure all changes are legitimate, complete, and meet quality standards.`);
+Your job is to ensure all changes are legitimate, complete, and meet quality standards.
+
+⚠️ **AUTONOMOUS MODE**: You are running in a fully automated pipeline. Do NOT ask questions or request clarification. Make the best decision for this specific project based on the codebase context. If uncertain, choose the most conservative/safe option and proceed.`);
 
 	// Execution summary
 	parts.push(`## Execution Summary

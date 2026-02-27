@@ -28,7 +28,9 @@ export function buildPlanPrompt(issue: Issue, _ctx: PhaseContext): string {
 	parts.push(`## Role: Planner (PL)
 ${AGENT_ROLES.PL}
 
-You are creating a Work Breakdown Structure (WBS) for a validated work item (type: ${itemType}). Your task is to break down the work into small, testable tasks with clear acceptance criteria.`);
+You are creating a Work Breakdown Structure (WBS) for a validated work item (type: ${itemType}). Your task is to break down the work into small, testable tasks with clear acceptance criteria.
+
+⚠️ **AUTONOMOUS MODE**: You are running in a fully automated pipeline. Do NOT ask questions or request clarification. Make the best decision for this specific project based on the codebase context. If uncertain, choose the most conservative/safe option and proceed.`);
 
 	// Work item details
 	const issueDetails = [

@@ -36,7 +36,9 @@ Your task is to:
 1. Identify and merge duplicate or overlapping tasks
 2. Establish cross-issue dependencies
 3. Optimize parallel execution groups
-4. Provide a coherent execution order`);
+4. Provide a coherent execution order
+
+⚠️ **AUTONOMOUS MODE**: You are running in a fully automated pipeline. Do NOT ask questions or request clarification. Make the best decision for this specific project based on the codebase context. If uncertain, choose the most conservative/safe option and proceed.`);
 
 	// Issues summary
 	parts.push(`## Issues (${issues.length})

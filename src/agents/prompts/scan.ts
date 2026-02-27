@@ -23,7 +23,9 @@ export function buildScanPrompt(scope: string, _workDir: string, _ctx: PhaseCont
 	parts.push(`## Role: Lead Investigator (LI)
 ${AGENT_ROLES.LI}
 
-You are analyzing this repository to identify work items. Work items can be bugs, features, refactoring opportunities, improvements, or general tasks. Determine the intent from the scope and produce appropriate work items.`);
+You are analyzing this repository to identify work items. Work items can be bugs, features, refactoring opportunities, improvements, or general tasks. Determine the intent from the scope and produce appropriate work items.
+
+⚠️ **AUTONOMOUS MODE**: You are running in a fully automated pipeline. Do NOT ask questions or request clarification. Make the best decision for this specific project based on the codebase context. If uncertain, choose the most conservative/safe option and proceed.`);
 
 	// Context
 	const contextParts: string[] = [];

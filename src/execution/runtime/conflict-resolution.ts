@@ -200,6 +200,7 @@ For each conflicted file above:
 - The final code should preserve functionality from BOTH branches
 - Keep all imports, type definitions, and function signatures from both sides
 - When in doubt, prefer the incoming changes (source branch) but preserve target modifications that don't conflict semantically
+- **AUTONOMOUS MODE**: Do NOT ask questions or request clarification. Make the best decision and proceed immediately.
 
 Begin resolution now.`);
 
