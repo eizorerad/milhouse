@@ -802,6 +802,7 @@ export async function runParallelByIssue(
 			let issueOutputTokens = 0;
 			let slotNum = 0;
 			let analysisComplete = false;
+			let executionError: string | undefined;
 
 			try {
 				// Acquire a slot
@@ -941,10 +942,12 @@ export async function runParallelByIssue(
 				// Report success only if all tasks completed
 				const allTasksCompleted = failedTasks.length === 0;
 				spinner.releaseSlot(slotNum, allTasksCompleted);
-			} catch (_error) {
+			} catch (error) {
 				// Even on exception, try to analyze partial completion
 				// Some tasks may have been committed before the error occurred
 				// Skip if analysis already ran successfully in the try block
+				logWarn(`Issue ${issueGroup.issueId} execution failed: ${error instanceof Error ? error.message : String(error)}`);
+				executionError = error instanceof Error ? error.message : String(error);
 				if (!analysisComplete && worktreeDir) {
 					logDebug(
 						`Issue ${issueGroup.issueId} execution threw exception, attempting partial completion analysis`,
@@ -960,10 +963,10 @@ export async function runParallelByIssue(
 						logDebug(
 							`Issue ${issueGroup.issueId} partial analysis: ${taskAnalysis.completedTaskIds.length} completed, ${taskAnalysis.failedTaskIds.length} failed`,
 						);
-					} catch {
+					} catch (analysisError) {
 						// If analysis fails, mark all tasks as failed
 						logDebug(
-							`Issue ${issueGroup.issueId} partial analysis failed, marking all tasks as failed`,
+							`Issue ${issueGroup.issueId} partial analysis failed, marking all tasks as failed: ${analysisError instanceof Error ? analysisError.message : String(analysisError)}`,
 						);
 						for (const task of issueGroup.tasks) {
 							failedTasks.push(task.id);
@@ -1002,6 +1005,7 @@ export async function runParallelByIssue(
 				outputTokens: issueOutputTokens,
 				success: failedTasks.length === 0,
 				branchName,
+				error: executionError,
 			};
 
 			// Call callback (await for async-safe updates)
