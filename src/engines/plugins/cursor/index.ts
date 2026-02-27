@@ -352,6 +352,9 @@ export class CursorPlugin implements IEnginePlugin {
 						_sessionId = event.session_id;
 						durationMs = event.duration_ms || 0;
 						isError = event.is_error || false;
+						if (isError) {
+							errorMessage = event.result || event.error || undefined;
+						}
 						if (event.result && !messages.length) {
 							messages.push(event.result);
 						}

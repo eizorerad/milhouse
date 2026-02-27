@@ -56,6 +56,36 @@ describe("CursorPlugin", () => {
 			expect(result.success).toBe(false);
 		});
 
+		it("extracts error message from event.result when is_error is true", () => {
+			const output = [
+				line({ type: "system", subtype: "init", session_id: "s1" }),
+				line({ type: "result", is_error: true, result: "Model rate limit exceeded", duration_ms: 30 }),
+			].join("\n");
+			const result = plugin.parseOutput(output);
+			expect(result.success).toBe(false);
+			expect(result.error).toBe("Model rate limit exceeded");
+		});
+
+		it("extracts error message from event.error when is_error is true", () => {
+			const output = [
+				line({ type: "system", subtype: "init", session_id: "s1" }),
+				line({ type: "result", is_error: true, error: "Authentication failed", duration_ms: 15 }),
+			].join("\n");
+			const result = plugin.parseOutput(output);
+			expect(result.success).toBe(false);
+			expect(result.error).toBe("Authentication failed");
+		});
+
+		it("falls back to generic message when no error detail provided", () => {
+			const output = [
+				line({ type: "system", subtype: "init", session_id: "s1" }),
+				line({ type: "result", is_error: true, duration_ms: 10 }),
+			].join("\n");
+			const result = plugin.parseOutput(output);
+			expect(result.success).toBe(false);
+			expect(result.error).toBe("Cursor execution failed");
+		});
+
 		it("parses tool_call events with started/completed subtypes", () => {
 			const output = [
 				line({
