@@ -18,6 +18,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { StateWriteError, logStateError } from "./errors.ts";
 import { saveJsonFile } from "./json-io.ts";
 import { MILHOUSE_DIR, getMilhouseDir } from "./paths.ts";
 import { type ExecutionRecord, type GateResult, STATE_FILES, type Task } from "./types.ts";
@@ -160,7 +161,16 @@ export function recordGateResult(
 	}
 
 	const path = join(getMilhouseDir(workDir), "state", `gate_${executionId}_${gate.gate}.json`);
-	saveJsonFile(path, gate);
+	try {
+		saveJsonFile(path, gate);
+	} catch (error) {
+		if (error instanceof StateWriteError) {
+			logStateError(error, "warn");
+			writeFileSync(path, JSON.stringify(gate, null, 2));
+		} else {
+			throw error;
+		}
+	}
 }
 
 // ============================================================================

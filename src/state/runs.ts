@@ -12,8 +12,9 @@
  * The "latest run" is derived from the runs index (last entry).
  */
 
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { StateWriteError, logStateError } from "./errors.ts";
 import { stateEvents } from "./events.ts";
 import { AsyncMutex, withFileLock } from "./file-lock.ts";
 import { loadJsonFile, saveJsonFile } from "./json-io.ts";
@@ -91,7 +92,16 @@ export function saveRunsIndex(index: RunsIndex, workDir = process.cwd()): void {
 	const path = getRunsIndexPath(workDir);
 	// Strip current_run if present (legacy compat via passthrough)
 	const { current_run: _stripped, ...clean } = index as RunsIndex & { current_run?: unknown };
-	saveJsonFile(path, clean);
+	try {
+		saveJsonFile(path, clean);
+	} catch (error) {
+		if (error instanceof StateWriteError) {
+			logStateError(error, "warn");
+			writeFileSync(path, JSON.stringify(clean, null, 2));
+		} else {
+			throw error;
+		}
+	}
 }
 
 // ============================================================================
@@ -118,7 +128,16 @@ export function saveRunMeta(meta: RunMeta, workDir = process.cwd()): void {
 		mkdirSync(runDir, { recursive: true });
 	}
 	const path = getRunMetaPath(meta.id, workDir);
-	saveJsonFile(path, meta);
+	try {
+		saveJsonFile(path, meta);
+	} catch (error) {
+		if (error instanceof StateWriteError) {
+			logStateError(error, "warn");
+			writeFileSync(path, JSON.stringify(meta, null, 2));
+		} else {
+			throw error;
+		}
+	}
 }
 
 // ============================================================================
