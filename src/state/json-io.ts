@@ -47,8 +47,9 @@ export function loadJsonFile<T>(
  * withFileLock() or AsyncMutex, provides both atomic writes and
  * concurrency safety.
  *
- * On systems where rename fails (e.g., Windows with file watchers),
- * falls back to direct write.
+ * @throws {StateWriteError} When atomic rename fails after all retries
+ *   (e.g., Windows with file watchers). Callers should catch and decide
+ *   whether to fall back to direct write.
  *
  * @param filePath - Path to write the JSON file
  * @param data - Data to serialize
@@ -81,9 +82,9 @@ export function saveJsonFile(filePath: string, data: unknown, atomic = true): vo
 			}
 		}
 
-		// All retries exhausted — log warning and fall back to direct write
+		// All retries exhausted — log warning, clean up, and throw
 		const writeError = new StateWriteError(
-			`Atomic write failed for ${filePath}, falling back to direct write`,
+			`Atomic write failed for ${filePath} after ${maxRetries} retries`,
 			{
 				filePath,
 				cause: lastError instanceof Error ? lastError : new Error(String(lastError)),
@@ -97,6 +98,8 @@ export function saveJsonFile(filePath: string, data: unknown, atomic = true): vo
 		} catch {
 			// .tmp may not exist or already removed — ignore
 		}
+
+		throw writeError;
 	}
 
 	writeFileSync(filePath, content);
