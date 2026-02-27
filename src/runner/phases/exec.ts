@@ -17,7 +17,7 @@ import {
 } from "../../execution/issue-executor.ts";
 import { runParallelWithGroupOrdering } from "../../execution/steps/parallel.ts";
 import { getConfigService } from "../../services/config/index.ts";
-import { createExecution, updateExecution } from "../../state/executions.ts";
+import { createExecutionSafe, updateExecution } from "../../state/executions.ts";
 import { filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import { getMilhouseDir, updateProgress } from "../../state/manager.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
@@ -303,7 +303,7 @@ async function executeTaskWithTracking(
 
 	updateTaskForRun(runId, task.id, { status: "running" }, workDir);
 
-	const executionRecord = createExecution(
+	const executionRecord = await createExecutionSafe(
 		{
 			task_id: task.id,
 			started_at: new Date().toISOString(),
@@ -550,7 +550,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 							{ status: "done", completed_at: new Date().toISOString() },
 							workDir,
 						);
-						createExecution(
+						await createExecutionSafe(
 							{
 								task_id: taskId,
 								started_at: new Date().toISOString(),
@@ -571,7 +571,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 							{ status: "failed", error: result.error },
 							workDir,
 						);
-						createExecution(
+						await createExecutionSafe(
 							{
 								task_id: taskId,
 								started_at: new Date().toISOString(),
@@ -669,7 +669,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 						},
 						workDir,
 					);
-					createExecution(
+					await createExecutionSafe(
 						{
 							task_id: taskId,
 							started_at: new Date().toISOString(),

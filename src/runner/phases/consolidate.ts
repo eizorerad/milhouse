@@ -12,7 +12,7 @@ import { loadGraphForRun, saveGraphForRunSafe } from "../../state/graph.ts";
 import { filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import { writeExecutionPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
-import { loadTasksForRun, saveTasksForRun } from "../../state/tasks.ts";
+import { loadTasksForRun, saveTasksForRunSafe } from "../../state/tasks.ts";
 import type { GraphNode, Issue, RunPhase, Task } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
 import { displayPhaseSummaryHeader } from "../phase-runner.ts";
@@ -144,7 +144,7 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 		allTasks = assignParallelGroups(allTasks);
 
 		// Save updated tasks
-		saveTasksForRun(ctx.runId, allTasks, ctx.workDir);
+		await saveTasksForRunSafe(ctx.runId, allTasks, ctx.workDir);
 
 		// Build and save dependency graph
 		const pendingTasks = allTasks.filter((t) => t.status === "pending");

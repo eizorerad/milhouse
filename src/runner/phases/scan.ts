@@ -8,7 +8,7 @@
 import pc from "picocolors";
 import { buildScanPrompt } from "../../agents/prompts/scan.ts";
 import { SCAN_SCHEMA } from "../../agents/schemas/scan.ts";
-import { saveIssuesForRun } from "../../state/issues.ts";
+import { saveIssuesForRunSafe } from "../../state/issues.ts";
 import { writeProblemBriefForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import type { Issue, RunPhase } from "../../state/types.ts";
@@ -116,7 +116,7 @@ export const scanPhaseConfig: PhaseConfig<ScanInput, ScanResult> = {
 		);
 
 		if (issues.length > 0) {
-			saveIssuesForRun(ctx.runId, issues, ctx.workDir);
+			await saveIssuesForRunSafe(ctx.runId, issues, ctx.workDir);
 
 			// Generate Work Brief
 			const brief = generateWorkBrief(issues, ctx.runId);
