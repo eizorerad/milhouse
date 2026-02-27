@@ -507,6 +507,43 @@ describe("Issue Executor Error Scenarios", () => {
 			expect(result).toBeDefined();
 			expect(result.tasksCompleted).toBeGreaterThanOrEqual(0);
 		});
+
+		it("should not crash when onIssueComplete callback throws an error", async () => {
+			const issue = createMockIssue({ id: "P-issuecb" });
+			const tasks = [
+				createMockTask({ id: "P-issuecb-T1", issue_id: "P-issuecb", title: "Task 1" }),
+			];
+
+			const successEngine = createMockEngine({
+				execute: async () => ({
+					success: true,
+					response: "Task completed",
+					inputTokens: 100,
+					outputTokens: 50,
+				}),
+			});
+
+			const options: IssueBasedExecutionOptions = {
+				engine: successEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 1,
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+				onIssueComplete: async () => {
+					throw new Error("onIssueComplete callback exception");
+				},
+			};
+
+			const result = await runParallelByIssue(tasks, [issue], options);
+
+			expect(result).toBeDefined();
+			expect(result.tasksCompleted).toBeGreaterThanOrEqual(0);
+		});
 	});
 
 	describe("Partial Task Completion", () => {
