@@ -167,7 +167,8 @@ export class BudgetGuard {
 	/**
 	 * Settle after task completion: subtract reserved amount and add actual cost.
 	 * Under mutex, decrements reservedCost by reservedAmount, then adds actualCost
-	 * to totalCost and updates token counters.
+	 * to totalCost and updates token counters. When costConfig is provided, also
+	 * computes and adds inputCost and outputCost incrementally.
 	 */
 	async settle(
 		runCost: RunCost,
@@ -175,6 +176,7 @@ export class BudgetGuard {
 		actualCost: number,
 		inputTokens: number,
 		outputTokens: number,
+		costConfig?: CostConfig,
 	): Promise<void> {
 		await this.mutex.run(() => {
 			runCost.reservedCost -= reservedAmount;
@@ -182,6 +184,10 @@ export class BudgetGuard {
 			runCost.inputTokens += inputTokens;
 			runCost.outputTokens += outputTokens;
 			runCost.totalTokens += inputTokens + outputTokens;
+			if (costConfig) {
+				runCost.inputCost += (inputTokens / 1_000_000) * costConfig.inputPerMillion;
+				runCost.outputCost += (outputTokens / 1_000_000) * costConfig.outputPerMillion;
+			}
 		});
 	}
 }
