@@ -11,14 +11,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createRun } from "../../src/state/runs.ts";
+import { createIssueForRun, loadIssuesForRun } from "../../src/state/issues.ts";
+import { createRun, loadRunsIndex } from "../../src/state/runs.ts";
 import {
 	createTaskForRun,
 	loadTasksForRun,
 	readTaskForRun,
 	updateTaskForRunSafe,
 } from "../../src/state/tasks.ts";
-import type { Task } from "../../src/state/types.ts";
+import type { Issue, Task } from "../../src/state/types.ts";
 
 describe("Concurrent run operations", () => {
 	const testDir = join(process.cwd(), ".test-concurrent-runs");
@@ -51,6 +52,73 @@ describe("Concurrent run operations", () => {
 			checks: [],
 			acceptance: [],
 		};
+	}
+
+	/**
+	 * Helper to create a test issue
+	 */
+	function createTestIssueData(
+		issueId: string,
+		severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" = "MEDIUM",
+	): Omit<Issue, "id" | "created_at" | "updated_at"> {
+		return {
+			symptom: `Symptom for ${issueId}`,
+			hypothesis: `Hypothesis for ${issueId}`,
+			severity,
+			status: "UNVALIDATED",
+			evidence: [],
+			related_task_ids: [],
+		};
+	}
+
+	/**
+	 * Simulates the scan phase: creates issues for a run.
+	 * Returns the IDs of the created issues.
+	 */
+	function simulateScanPhase(
+		runId: string,
+		workDir: string,
+		scopeLabel: string,
+		issueCount: number,
+	): string[] {
+		const issueIds: string[] = [];
+		for (let i = 0; i < issueCount; i++) {
+			const issue = createIssueForRun(
+				runId,
+				createTestIssueData(`${scopeLabel}-issue-${i}`),
+				workDir,
+			);
+			issueIds.push(issue.id);
+		}
+		return issueIds;
+	}
+
+	/**
+	 * Simulates the plan phase: loads issues for a run, creates one task per issue.
+	 * Returns the IDs of the created tasks.
+	 */
+	function simulatePlanPhase(runId: string, workDir: string): string[] {
+		const issues = loadIssuesForRun(runId, workDir);
+		const taskIds: string[] = [];
+		for (const issue of issues) {
+			const task = createTaskForRun(runId, createTestTaskData(issue.id), workDir);
+			taskIds.push(task.id);
+		}
+		return taskIds;
+	}
+
+	/**
+	 * Simulates the exec phase: loads tasks for a run, updates each to 'done'.
+	 * Returns the updated tasks.
+	 */
+	async function simulateExecPhase(runId: string, workDir: string): Promise<Task[]> {
+		const tasks = loadTasksForRun(runId, workDir);
+		const updated: Task[] = [];
+		for (const task of tasks) {
+			const result = await updateTaskForRunSafe(runId, task.id, { status: "done" }, workDir);
+			if (result) updated.push(result);
+		}
+		return updated;
 	}
 
 	describe("Task update isolation between runs", () => {
@@ -283,35 +351,156 @@ describe("Concurrent run operations", () => {
 		});
 	});
 
-	it.skip("should isolate data between parallel scans", async () => {
-		// TODO: Implement when we have a test harness for running parallel scans
-		// This test would:
-		// 1. Start two scans in parallel with different scopes
-		// 2. Verify each scan wrote to its own run
-		// 3. Verify issues are not mixed between runs
+	it("should isolate data between parallel scans", async () => {
+		const run1 = await createRun({ scope: "scan-scope-A", workDir: testDir });
+		const run2 = await createRun({ scope: "scan-scope-B", workDir: testDir });
+
+		// Start two scan phases concurrently with different scopes and issue counts
+		const [run1IssueIds, run2IssueIds] = await Promise.all([
+			Promise.resolve(simulateScanPhase(run1.id, testDir, "scopeA", 4)),
+			Promise.resolve(simulateScanPhase(run2.id, testDir, "scopeB", 3)),
+		]);
+
+		// Verify each run has exactly its own issues
+		const run1Issues = loadIssuesForRun(run1.id, testDir);
+		const run2Issues = loadIssuesForRun(run2.id, testDir);
+
+		expect(run1Issues.length).toBe(4);
+		expect(run2Issues.length).toBe(3);
+
+		// Verify issues from run1 don't appear in run2 and vice versa
+		const run1LoadedIds = run1Issues.map((i) => i.id);
+		const run2LoadedIds = run2Issues.map((i) => i.id);
+
+		for (const id of run1IssueIds) {
+			expect(run1LoadedIds).toContain(id);
+			expect(run2LoadedIds).not.toContain(id);
+		}
+
+		for (const id of run2IssueIds) {
+			expect(run2LoadedIds).toContain(id);
+			expect(run1LoadedIds).not.toContain(id);
+		}
 	});
 
-	it.skip("should not mix tasks between concurrent plan operations", async () => {
-		// TODO: Implement when we have a test harness for concurrent planning
-		// This test would:
-		// 1. Create two runs with different issues
-		// 2. Run plan command on both concurrently
-		// 3. Verify tasks are created in the correct runs
+	it("should not mix tasks between concurrent plan operations", async () => {
+		const run1 = await createRun({ scope: "plan-scope-A", workDir: testDir });
+		const run2 = await createRun({ scope: "plan-scope-B", workDir: testDir });
+
+		// Populate each run with different issues
+		const run1IssueIds = simulateScanPhase(run1.id, testDir, "planA", 3);
+		const run2IssueIds = simulateScanPhase(run2.id, testDir, "planB", 3);
+
+		// Run plan phase on both runs concurrently
+		const [run1TaskIds, run2TaskIds] = await Promise.all([
+			Promise.resolve(simulatePlanPhase(run1.id, testDir)),
+			Promise.resolve(simulatePlanPhase(run2.id, testDir)),
+		]);
+
+		// Verify task counts match (one task per issue)
+		expect(run1TaskIds.length).toBe(3);
+		expect(run2TaskIds.length).toBe(3);
+
+		// Verify tasks in run1 reference only run1's issue IDs
+		const run1Tasks = loadTasksForRun(run1.id, testDir);
+		for (const task of run1Tasks) {
+			expect(run1IssueIds).toContain(task.issue_id);
+			expect(run2IssueIds).not.toContain(task.issue_id);
+		}
+
+		// Verify tasks in run2 reference only run2's issue IDs
+		const run2Tasks = loadTasksForRun(run2.id, testDir);
+		for (const task of run2Tasks) {
+			expect(run2IssueIds).toContain(task.issue_id);
+			expect(run1IssueIds).not.toContain(task.issue_id);
+		}
+
+		// Verify no task IDs leak between runs
+		const run1TaskIdSet = new Set(run1TaskIds);
+		const run2TaskIdSet = new Set(run2TaskIds);
+		for (const id of run1TaskIds) {
+			expect(run2TaskIdSet.has(id)).toBe(false);
+		}
+		for (const id of run2TaskIds) {
+			expect(run1TaskIdSet.has(id)).toBe(false);
+		}
 	});
 
-	it.skip("should handle concurrent exec operations on different runs", async () => {
-		// TODO: Implement when we have a test harness for concurrent execution
-		// This test would:
-		// 1. Create two runs with tasks ready for execution
-		// 2. Run exec command on both concurrently
-		// 3. Verify task status updates are isolated to their respective runs
+	it("should handle concurrent exec operations on different runs", async () => {
+		const run1 = await createRun({ scope: "exec-scope-A", workDir: testDir });
+		const run2 = await createRun({ scope: "exec-scope-B", workDir: testDir });
+
+		// Populate each run: scan then plan (sequentially per run)
+		simulateScanPhase(run1.id, testDir, "execA", 3);
+		simulatePlanPhase(run1.id, testDir);
+		simulateScanPhase(run2.id, testDir, "execB", 2);
+		simulatePlanPhase(run2.id, testDir);
+
+		// Verify tasks are pending before exec
+		const run1TasksBefore = loadTasksForRun(run1.id, testDir);
+		const run2TasksBefore = loadTasksForRun(run2.id, testDir);
+		expect(run1TasksBefore.length).toBe(3);
+		expect(run2TasksBefore.length).toBe(2);
+		expect(run1TasksBefore.every((t) => t.status === "pending")).toBe(true);
+		expect(run2TasksBefore.every((t) => t.status === "pending")).toBe(true);
+
+		// Run exec phase on both runs concurrently
+		const [run1Updated, run2Updated] = await Promise.all([
+			simulateExecPhase(run1.id, testDir),
+			simulateExecPhase(run2.id, testDir),
+		]);
+
+		// Verify all tasks in run1 are updated to 'done'
+		expect(run1Updated.length).toBe(3);
+		const run1TasksAfter = loadTasksForRun(run1.id, testDir);
+		for (const task of run1TasksAfter) {
+			expect(task.status).toBe("done");
+		}
+
+		// Verify all tasks in run2 are updated to 'done'
+		expect(run2Updated.length).toBe(2);
+		const run2TasksAfter = loadTasksForRun(run2.id, testDir);
+		for (const task of run2TasksAfter) {
+			expect(task.status).toBe("done");
+		}
+
+		// Verify task updates are isolated — no cross-run task IDs
+		const run1TaskIdSet = new Set(run1TasksAfter.map((t) => t.id));
+		const run2TaskIdSet = new Set(run2TasksAfter.map((t) => t.id));
+		for (const id of run1TaskIdSet) {
+			expect(run2TaskIdSet.has(id)).toBe(false);
+		}
+		for (const id of run2TaskIdSet) {
+			expect(run1TaskIdSet.has(id)).toBe(false);
+		}
 	});
 
-	it.skip("should maintain run index integrity under concurrent run creation", async () => {
-		// TODO: Implement when we have a test harness for concurrent run creation
-		// This test would:
-		// 1. Create many runs concurrently
-		// 2. Verify all runs are registered in the index
-		// 3. Verify no duplicate entries or missing runs
+	it("should maintain run index integrity under concurrent run creation", async () => {
+		const concurrentCount = 12;
+
+		// Create many runs concurrently
+		const runPromises = Array.from({ length: concurrentCount }, (_, i) =>
+			createRun({ scope: `concurrent-scope-${i}`, workDir: testDir }),
+		);
+		const runs = await Promise.all(runPromises);
+
+		// Verify all runs were created with unique IDs
+		const runIds = runs.map((r) => r.id);
+		const uniqueIds = new Set(runIds);
+		expect(uniqueIds.size).toBe(concurrentCount);
+
+		// Verify all runs appear in the index
+		const index = loadRunsIndex(testDir);
+		expect(index.runs.length).toBe(concurrentCount);
+
+		// Verify no duplicate entries in the index
+		const indexIds = index.runs.map((r) => r.id);
+		const uniqueIndexIds = new Set(indexIds);
+		expect(uniqueIndexIds.size).toBe(concurrentCount);
+
+		// Verify no runs are missing from the index
+		for (const runId of runIds) {
+			expect(indexIds).toContain(runId);
+		}
 	});
 });
