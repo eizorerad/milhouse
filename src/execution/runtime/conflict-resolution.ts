@@ -20,10 +20,13 @@ import { join } from "node:path";
 import type { AIEngine } from "../../engines/types.ts";
 import { bus } from "../../events/index.ts";
 import { logDebug, logError, logInfo, logWarn } from "../../ui/logger.ts";
+import { runGitCommand } from "../../vcs/backends/git-cli.ts";
 import {
 	completeMerge,
 	continueRebase,
 	getConflictedFiles,
+	isMergeInProgress,
+	verifyMergeCompleted,
 } from "../../vcs/services/merge-service.ts";
 import type {
 	ConflictResolutionResult,
@@ -282,6 +285,15 @@ export async function resolveConflictsWithEngine(
 		metadata: { maxTurns: 15 },
 	};
 
+	// Capture HEAD before AI execution so we can verify it advanced after merge
+	let preAiHeadSha: string | undefined;
+	if (mode === "merge") {
+		const headResult = await runGitCommand(["rev-parse", "HEAD"], workDir);
+		if (headResult.ok && headResult.value.exitCode === 0) {
+			preAiHeadSha = headResult.value.stdout.trim();
+		}
+	}
+
 	try {
 		const result = await engine.execute(prompt, workDir, engineOptions);
 
@@ -360,21 +372,31 @@ export async function resolveConflictsWithEngine(
 				};
 			}
 
-			// completeMerge failed — don't assume "AI already committed".
-			// During a merge, if no conflicts remain but commit fails,
-			// it likely means the AI already ran git commit (success)
-			// OR the working tree is in an unexpected state (failure).
-			// Check if merge is still in progress to disambiguate.
-			const { isMergeInProgress } = await import("../../vcs/services/merge-service.ts");
+			// completeMerge failed — check if the AI already completed the merge.
+			// First check if merge is still in progress (quick discriminator).
 			const mergeStillActive = await isMergeInProgress(workDir);
 			if (mergeStillActive.ok && !mergeStillActive.value) {
-				// No merge in progress + no conflicts = AI already committed successfully
-				logDebug("Merge completed by AI (no merge in progress, no conflicts)");
+				// Merge is no longer in progress. Verify it actually completed
+				// rather than being aborted or interrupted.
+				const verified = await verifyMergeCompleted(workDir, preAiHeadSha);
+				if (verified.ok && verified.value) {
+					logDebug("Merge verified complete by AI (HEAD is a merge commit that advanced)");
+					return {
+						success: true,
+						resolvedFiles: conflictedFiles,
+						unresolvedFiles: [],
+						tokenUsage,
+					};
+				}
+
+				// Merge not in progress but no merge commit found
+				logWarn("Merge not in progress but no merge commit found — merge may have been aborted");
 				return {
-					success: true,
+					success: false,
 					resolvedFiles: conflictedFiles,
 					unresolvedFiles: [],
 					tokenUsage,
+					error: "Merge not in progress but no merge commit found — merge may have been aborted",
 				};
 			}
 
