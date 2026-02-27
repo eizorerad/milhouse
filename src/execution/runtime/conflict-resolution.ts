@@ -275,7 +275,11 @@ export async function resolveConflictsWithEngine(
 	});
 
 	const prompt = buildConflictResolutionPrompt(conflicts, workDir, issueContext, mode);
-	const engineOptions = modelOverride ? { modelOverride } : undefined;
+	// Conflict resolution needs ~5-10 turns: read conflicted files, edit them, git add, git commit/rebase --continue
+	const engineOptions: Record<string, unknown> = {
+		...(modelOverride ? { modelOverride } : {}),
+		metadata: { maxTurns: 15 },
+	};
 
 	try {
 		const result = await engine.execute(prompt, workDir, engineOptions);

@@ -30,7 +30,7 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 	name: "consolidate",
 	role: "CDM",
 	jsonSchema: CONSOLIDATE_SCHEMA as Record<string, unknown>,
-	engineMetadata: { maxTokens: 32000, maxTurns: 3 },
+	engineMetadata: { maxTokens: 32000, maxTurns: 15 },
 	mode: "single-agent",
 	defaultParallel: 1,
 

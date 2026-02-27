@@ -45,7 +45,7 @@ export const scanPhaseConfig: PhaseConfig<ScanInput, ScanResult> = {
 	name: "scan",
 	role: "LI",
 	jsonSchema: SCAN_SCHEMA as Record<string, unknown>,
-	engineMetadata: { maxTurns: 50 },
+	engineMetadata: { maxTurns: 100 },
 	mode: "single-agent",
 	defaultParallel: 1,
 
