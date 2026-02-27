@@ -113,14 +113,9 @@ export function resolvePhaseWorkers(config: ResolvedConfig, phase: string): numb
 export type PhaseMode = "per-item" | "single-agent";
 
 /** Result of processing a single item */
-export interface PhaseItemResult<TResult = unknown> {
-	item: unknown;
-	result: TResult;
-	success: boolean;
-	error?: string;
-	inputTokens: number;
-	outputTokens: number;
-}
+export type PhaseItemResult<TResult = unknown> =
+	| { success: true; item: unknown; result: TResult; error?: string; inputTokens: number; outputTokens: number }
+	| { success: false; item: unknown; result?: TResult; error?: string; inputTokens: number; outputTokens: number };
 
 /** Overall result of a phase run */
 export interface PhaseRunResult<TResult = unknown> {
