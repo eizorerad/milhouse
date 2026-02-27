@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createRun } from "../../src/state/runs.ts";
+import { createRun, loadRunsIndex } from "../../src/state/runs.ts";
 import {
 	createTaskForRun,
 	loadTasksForRun,
@@ -307,11 +307,32 @@ describe("Concurrent run operations", () => {
 		// 3. Verify task status updates are isolated to their respective runs
 	});
 
-	it.skip("should maintain run index integrity under concurrent run creation", async () => {
-		// TODO: Implement when we have a test harness for concurrent run creation
-		// This test would:
-		// 1. Create many runs concurrently
-		// 2. Verify all runs are registered in the index
-		// 3. Verify no duplicate entries or missing runs
+	it("should maintain run index integrity under concurrent run creation", async () => {
+		const concurrentCount = 12;
+
+		// Create many runs concurrently
+		const runPromises = Array.from({ length: concurrentCount }, (_, i) =>
+			createRun({ scope: `concurrent-scope-${i}`, workDir: testDir }),
+		);
+		const runs = await Promise.all(runPromises);
+
+		// Verify all runs were created with unique IDs
+		const runIds = runs.map((r) => r.id);
+		const uniqueIds = new Set(runIds);
+		expect(uniqueIds.size).toBe(concurrentCount);
+
+		// Verify all runs appear in the index
+		const index = loadRunsIndex(testDir);
+		expect(index.runs.length).toBe(concurrentCount);
+
+		// Verify no duplicate entries in the index
+		const indexIds = index.runs.map((r) => r.id);
+		const uniqueIndexIds = new Set(indexIds);
+		expect(uniqueIndexIds.size).toBe(concurrentCount);
+
+		// Verify no runs are missing from the index
+		for (const runId of runIds) {
+			expect(indexIds).toContain(runId);
+		}
 	});
 });
