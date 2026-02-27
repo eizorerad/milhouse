@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as gitCli from "../backends/git-cli";
-import { ok } from "../types";
+import { createVcsError, err, ok } from "../types";
 import { MergeService } from "./merge-service";
 
 describe("MergeService.mergeInIsolatedWorktree — stash backup", () => {
@@ -557,6 +557,137 @@ describe("MergeService.continueRebase", () => {
 		expect(result.ok).toBe(true);
 		if (result.ok) {
 			expect(result.value).toBe(false);
+		}
+	});
+});
+
+describe("MergeService.verifyMergeCompleted", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function successResult(stdout = "", stderr = "") {
+		return ok({
+			exitCode: 0,
+			stdout,
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+	});
+
+	test("returns true when HEAD is a merge commit", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git rev-parse HEAD^2 — succeeds (HEAD has second parent)
+			if (args[0] === "rev-parse" && args[1] === "HEAD^2") {
+				return successResult("abc123def456");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.verifyMergeCompleted("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(true);
+		}
+	});
+
+	test("returns true when HEAD is a merge commit and advanced from preHeadSha", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git rev-parse HEAD^2 — succeeds
+			if (args[0] === "rev-parse" && args[1] === "HEAD^2") {
+				return successResult("abc123def456");
+			}
+			// git rev-parse HEAD — returns different SHA than preHeadSha
+			if (args[0] === "rev-parse" && args[1] === "HEAD") {
+				return successResult("newsha789");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.verifyMergeCompleted("/tmp/test-repo", "oldsha123");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(true);
+		}
+	});
+
+	test("returns false when HEAD is not a merge commit", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git rev-parse HEAD^2 — fails (HEAD has no second parent)
+			if (args[0] === "rev-parse" && args[1] === "HEAD^2") {
+				return failedResult(128, "fatal: invalid revision 'HEAD^2'");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.verifyMergeCompleted("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(false);
+		}
+	});
+
+	test("returns false when HEAD hasn't changed from preHeadSha", async () => {
+		const sameSha = "abc123def456";
+
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git rev-parse HEAD^2 — succeeds
+			if (args[0] === "rev-parse" && args[1] === "HEAD^2") {
+				return successResult("parent2sha");
+			}
+			// git rev-parse HEAD — returns same SHA as preHeadSha
+			if (args[0] === "rev-parse" && args[1] === "HEAD") {
+				return successResult(sameSha);
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.verifyMergeCompleted("/tmp/test-repo", sameSha);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(false);
+		}
+	});
+
+	test("propagates git command error", async () => {
+		const gitError = createVcsError("COMMAND_FAILED", "git command failed");
+
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git rev-parse HEAD^2 — returns an err result
+			if (args[0] === "rev-parse" && args[1] === "HEAD^2") {
+				return err(gitError);
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.verifyMergeCompleted("/tmp/test-repo");
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.message).toBe("git command failed");
 		}
 	});
 });
