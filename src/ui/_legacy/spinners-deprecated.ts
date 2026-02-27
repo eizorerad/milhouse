@@ -92,9 +92,22 @@ export class ProgressSpinner {
 
 		const settingsStr = this.settings ? ` ${pc.yellow(this.settings)}` : "";
 		const countsStr = pc.dim(this.formatCounts());
-		const stepWithDetail = this.currentDetail
-			? `${this.currentStep} ${pc.dim(this.currentDetail)}`
-			: this.currentStep;
+
+		// Truncate step text to prevent line wrap that breaks spinner overwrite
+		const maxStepLen = 50;
+		const truncatedStep =
+			this.currentStep.length > maxStepLen
+				? `${this.currentStep.slice(0, maxStepLen - 3)}...`
+				: this.currentStep;
+		const truncatedDetail = this.currentDetail
+			? this.currentDetail.length > 30
+				? `${this.currentDetail.slice(0, 27)}...`
+				: this.currentDetail
+			: undefined;
+
+		const stepWithDetail = truncatedDetail
+			? `${truncatedStep} ${pc.dim(truncatedDetail)}`
+			: truncatedStep;
 
 		return `${pc.cyan(stepWithDetail)} ${countsStr}${settingsStr} ${pc.dim(`[${time}]`)} ${this.task}`;
 	}
@@ -330,14 +343,18 @@ export class DynamicAgentSpinner {
 	private formatText(): string {
 		const parts: string[] = [];
 
-		// Active slots display
+		// Active slots display — truncate IDs and status to prevent line wrap
 		for (let i = 1; i <= this.maxSlots; i++) {
 			const slot = this.slots.get(i);
 			if (slot?.issueId && slot.status !== "idle") {
-				// Truncate status if too long
+				// Show only last segment of issue ID (e.g., "P-mm4fdz7i-w90cyt" → "w9")
+				const shortId = slot.issueId.length > 15
+					? slot.issueId.slice(slot.issueId.lastIndexOf("-") + 1, slot.issueId.lastIndexOf("-") + 3)
+					: slot.issueId;
+				// Truncate status to prevent spinner line overflow
 				const statusShort =
-					slot.status.length > 15 ? `${slot.status.slice(0, 12)}...` : slot.status;
-				parts.push(`IV-${i}: ${slot.issueId} ${pc.cyan(statusShort)}`);
+					slot.status.length > 18 ? `${slot.status.slice(0, 15)}...` : slot.status;
+				parts.push(`IV-${i}: ${shortId} ${pc.cyan(statusShort)}`);
 			}
 		}
 
