@@ -148,6 +148,8 @@ describe("DroidPlugin", () => {
 				(s) => s.type === "tool_use" && s.metadata?.isError === true,
 			);
 			expect(toolResultStep).toBeDefined();
+			expect(result.success).toBe(false);
+			expect(result.error).toBeDefined();
 		});
 
 		it("parses completion event with finalText", () => {
@@ -158,6 +160,41 @@ describe("DroidPlugin", () => {
 			const multiline = `${line({ type: "system", subtype: "init" })}\n${line({ type: "completion", session_id: "s1", durationMs: 300, finalText: "Summary" })}`;
 			const result = plugin.parseOutput(multiline);
 			expect(result.output).toContain("Summary");
+		});
+
+		it("tool_result with isError produces success=false", () => {
+			const output = [
+				line({ type: "system", subtype: "init", session_id: "s1", model: "claude" }),
+				line({ type: "tool_call", toolName: "write_file", toolId: "t1", id: "c1" }),
+				line({ type: "tool_result", toolId: "t1", id: "c1", isError: true, value: "permission denied" }),
+				line({ type: "completion", session_id: "s1", durationMs: 150 }),
+			].join("\n");
+			const result = plugin.parseOutput(output);
+			expect(result.success).toBe(false);
+			expect(result.error).toBeDefined();
+		});
+
+		it("completion with isError produces success=false", () => {
+			const output = [
+				line({ type: "system", subtype: "init", session_id: "s1", model: "claude" }),
+				line({ type: "message", role: "assistant", text: "Attempting task" }),
+				line({ type: "completion", session_id: "s1", durationMs: 100, isError: true }),
+			].join("\n");
+			const result = plugin.parseOutput(output);
+			expect(result.success).toBe(false);
+		});
+
+		it("normal execution without errors produces success=true", () => {
+			const output = [
+				line({ type: "system", subtype: "init", session_id: "s1", model: "claude" }),
+				line({ type: "tool_call", toolName: "read_file", toolId: "t1", id: "c1" }),
+				line({ type: "tool_result", toolId: "t1", id: "c1", isError: false, value: "file contents" }),
+				line({ type: "message", role: "assistant", text: "Done" }),
+				line({ type: "completion", session_id: "s1", durationMs: 500 }),
+			].join("\n");
+			const result = plugin.parseOutput(output);
+			expect(result.success).toBe(true);
+			expect(result.error).toBeUndefined();
 		});
 	});
 
