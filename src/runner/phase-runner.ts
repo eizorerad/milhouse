@@ -18,6 +18,7 @@ import { DynamicAgentSpinner, ProgressSpinner } from "../ui/spinners.ts";
 import { phaseIcons, theme } from "../ui/theme.ts";
 import {
 	BudgetExceededError,
+	BudgetGuard,
 	type RunCost,
 	calculateCost,
 	checkBudget,
@@ -434,40 +435,50 @@ async function executePool<TItem, TResult>(
 
 	// Multi-item mode: DynamicAgentSpinner with slot tracking
 	const spinner = new DynamicAgentSpinner(maxParallel, items.length, getPhaseLabel(phaseConfig));
+	const guard = new BudgetGuard();
+	let remainingItems = items.length;
 
 	const tasks = items.map((item, idx) =>
 		limit(async () => {
+			// Compute estimated cost per remaining item, clamped to minimum floor
+			const headroom = config.cost.budgetLimit - runCost.totalCost - runCost.reservedCost;
+			const estimatedCost = Math.max(headroom / Math.max(remainingItems, 1), 0.01);
+			remainingItems--;
+
 			try {
-				checkBudget(runCost, config.cost);
+				await guard.reserve(runCost, config.cost, estimatedCost);
 			} catch (e) {
 				if (e instanceof BudgetExceededError) {
 					spinner.error("Budget exceeded");
 					throw e;
 				}
+				throw e;
 			}
 
 			const itemId = getItemId(item, idx);
 			const slot = spinner.acquireSlot(itemId);
 
-			const result = await executeItem(phaseConfig, item, ctx, model, (step) => {
-				const label = typeof step === "string" ? step : (step.shortDetail ?? step.category);
-				spinner.updateSlot(slot, label);
-			});
+			try {
+				const result = await executeItem(phaseConfig, item, ctx, model, (step) => {
+					const label = typeof step === "string" ? step : (step.shortDetail ?? step.category);
+					spinner.updateSlot(slot, label);
+				});
 
-			// Update runCost incrementally so budget checks see real-time spend
-			if (result.inputTokens > 0 || result.outputTokens > 0) {
-				const itemCost = calculateCost(
-					{ input: result.inputTokens, output: result.outputTokens },
-					config.cost,
-				);
-				runCost.totalCost += itemCost;
-				runCost.inputTokens += result.inputTokens;
-				runCost.outputTokens += result.outputTokens;
-				runCost.totalTokens += result.inputTokens + result.outputTokens;
+				// Settle: reconcile reserved amount with actual cost
+				const actualCost =
+					result.inputTokens > 0 || result.outputTokens > 0
+						? calculateCost({ input: result.inputTokens, output: result.outputTokens }, config.cost)
+						: 0;
+				await guard.settle(runCost, estimatedCost, actualCost, result.inputTokens, result.outputTokens);
+
+				spinner.releaseSlot(slot, result.success);
+				return result;
+			} catch (error) {
+				// Settle with 0 actual cost on error to release the reservation
+				await guard.settle(runCost, estimatedCost, 0, 0, 0);
+				spinner.releaseSlot(slot, false);
+				throw error;
 			}
-
-			spinner.releaseSlot(slot, result.success);
-			return result;
 		}),
 	);
 
