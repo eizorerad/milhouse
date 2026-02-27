@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { loggers } from "../observability/logger.ts";
 import { StateWriteError } from "./errors.ts";
 import { stateEvents } from "./events.ts";
 import { AsyncMutex, withFileLock } from "./file-lock.ts";
@@ -647,9 +648,19 @@ export function getTaskDependencies(taskId: string, workDir = process.cwd()): Ta
 		return [];
 	}
 
-	return task.depends_on
-		.map((depId) => tasks.find((t) => t.id === depId))
-		.filter((t): t is Task => t !== undefined);
+	const result: Task[] = [];
+	for (const depId of task.depends_on) {
+		const dep = tasks.find((t) => t.id === depId);
+		if (dep) {
+			result.push(dep);
+		} else {
+			loggers.state.warn(
+				{ taskId, missingDepId: depId },
+				"Dependency not found in task list during getTaskDependencies",
+			);
+		}
+	}
+	return result;
 }
 
 /**
@@ -808,7 +819,13 @@ export function topologicalSort(workDir = process.cwd()): Task[] {
 		visited.add(id);
 
 		const task = tasks.find((t) => t.id === id);
-		if (!task) return;
+		if (!task) {
+			loggers.state.warn(
+				{ missingTaskId: id },
+				"Task not found during topological sort, skipping",
+			);
+			return;
+		}
 
 		for (const depId of task.depends_on) {
 			visit(depId);

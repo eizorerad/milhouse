@@ -10,6 +10,7 @@ import { type ConsolidateInput, buildConsolidatePrompt } from "../../agents/prom
 import { CONSOLIDATE_SCHEMA } from "../../agents/schemas/consolidate.ts";
 import { loadGraphForRun, saveGraphForRunSafe } from "../../state/graph.ts";
 import { filterIssues, loadIssuesForRun } from "../../state/issues.ts";
+import { logWarn } from "../../ui/logger.ts";
 import { writeExecutionPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import { loadTasksForRun, saveTasksForRunSafe } from "../../state/tasks.ts";
@@ -154,6 +155,16 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 			parallel_group: t.parallel_group,
 		}));
 		await saveGraphForRunSafe(ctx.runId, graph, ctx.workDir);
+
+		// Validate graph for missing dependency references (warn-only)
+		const graphNodeIds = new Set(graph.map((n) => n.id));
+		for (const node of graph) {
+			for (const depId of node.depends_on) {
+				if (!graphNodeIds.has(depId)) {
+					logWarn(`Graph node '${node.id}' references missing dependency '${depId}'`);
+				}
+			}
+		}
 
 		// Generate execution plan markdown
 		const markdown = generateExecutionPlanMarkdown(pendingTasks, issues, duplicatesRemoved);
