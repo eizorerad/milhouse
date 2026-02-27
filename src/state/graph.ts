@@ -411,9 +411,19 @@ export function getNodeDependencies(nodeId: string, workDir = process.cwd()): Gr
 		return [];
 	}
 
-	return node.depends_on
-		.map((depId) => nodes.find((n) => n.id === depId))
-		.filter((n): n is GraphNode => n !== undefined);
+	const result: GraphNode[] = [];
+	for (const depId of node.depends_on) {
+		const dep = nodes.find((n) => n.id === depId);
+		if (dep) {
+			result.push(dep);
+		} else {
+			loggers.state.warn(
+				{ nodeId, missingDepId: depId },
+				"Dependency not found in graph during getNodeDependencies",
+			);
+		}
+	}
+	return result;
 }
 
 /**
