@@ -310,7 +310,7 @@ export class DroidPlugin implements IEnginePlugin {
 		const steps: ExecutionStep[] = [];
 		let _sessionId: string | undefined;
 		let durationMs = 0;
-		const isError = false;
+		let isError = false;
 		let _model: string | undefined;
 
 		for (const line of lines) {
@@ -377,6 +377,9 @@ export class DroidPlugin implements IEnginePlugin {
 								value: event.value,
 							},
 						});
+						if (event.isError) {
+							isError = true;
+						}
 						break;
 
 					case "completion":
@@ -384,6 +387,9 @@ export class DroidPlugin implements IEnginePlugin {
 						durationMs = event.durationMs || 0;
 						if (event.finalText) {
 							messages.push(event.finalText);
+						}
+						if (event.isError || event.is_error) {
+							isError = true;
 						}
 						break;
 				}
