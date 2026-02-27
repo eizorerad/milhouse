@@ -1271,8 +1271,14 @@ export async function runParallelByIssue(
 			logDebug(
 				`Calling onMergeComplete with ${mergeResultsWithIssue.length} results: ${JSON.stringify(mergeResultsWithIssue)}`,
 			);
-			await options.onMergeComplete(mergeResultsWithIssue);
-			logDebug("onMergeComplete callback completed");
+			try {
+				await options.onMergeComplete(mergeResultsWithIssue);
+				logDebug("onMergeComplete callback completed");
+			} catch (callbackError) {
+				logError(
+					`onMergeComplete callback threw an error: ${callbackError instanceof Error ? callbackError.message : String(callbackError)}`,
+				);
+			}
 		}
 	} else if (options.skipMerge) {
 		logInfo("Merge phase skipped (--skip-merge flag)");
