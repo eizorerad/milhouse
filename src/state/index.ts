@@ -186,6 +186,10 @@ export {
 	deleteFailedExecutions,
 	deleteExecutionsOlderThan,
 	clearAllExecutions,
+	withExecutionsLock,
+	createExecutionSafe,
+	updateExecutionSafe,
+	deleteExecutionSafe,
 } from "./executions.ts";
 
 // Runs module - Run management
