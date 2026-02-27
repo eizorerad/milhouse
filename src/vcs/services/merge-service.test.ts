@@ -373,3 +373,190 @@ describe("MergeService.mergeInIsolatedWorktree — stash backup", () => {
 		expect(updateRef.length).toBe(0);
 	});
 });
+
+describe("MergeService.continueRebase", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function successResult(stdout = "", stderr = "") {
+		return ok({
+			exitCode: 0,
+			stdout,
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+	});
+
+	test("returns ok(true) when rebase --continue succeeds (exit 0)", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git add -A
+			if (args[0] === "add" && args[1] === "-A") {
+				return successResult();
+			}
+			// rebase --continue succeeds
+			if (args.includes("rebase") && args.includes("--continue")) {
+				return successResult();
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.continueRebase("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(true);
+		}
+	});
+
+	test("returns ok(true) when reflog shows rebase (finish) after non-zero exit", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git add -A
+			if (args[0] === "add" && args[1] === "-A") {
+				return successResult();
+			}
+			// rebase --continue exits 1
+			if (args.includes("rebase") && args.includes("--continue")) {
+				return failedResult(1, "No rebase in progress?");
+			}
+			// isRebaseInProgress: rev-parse --git-path rebase-merge
+			if (args[0] === "rev-parse" && args[1] === "--git-path") {
+				return successResult(".git/rebase-merge");
+			}
+			// isRebaseInProgress: rev-parse --verify REBASE_HEAD — no rebase
+			if (args[0] === "rev-parse" && args[1] === "--verify" && args[2] === "REBASE_HEAD") {
+				return failedResult(128, "fatal: Needed a single revision");
+			}
+			// reflog -1 --format=%gs — rebase finished
+			if (args[0] === "reflog" && args[1] === "-1") {
+				return successResult("rebase (finish): returning to refs/heads/feature");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.continueRebase("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(true);
+		}
+	});
+
+	test("returns ok(false) when reflog shows rebase (abort) after non-zero exit", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git add -A
+			if (args[0] === "add" && args[1] === "-A") {
+				return successResult();
+			}
+			// rebase --continue exits 1
+			if (args.includes("rebase") && args.includes("--continue")) {
+				return failedResult(1, "No rebase in progress?");
+			}
+			// isRebaseInProgress: rev-parse --git-path rebase-merge
+			if (args[0] === "rev-parse" && args[1] === "--git-path") {
+				return successResult(".git/rebase-merge");
+			}
+			// isRebaseInProgress: rev-parse --verify REBASE_HEAD — no rebase
+			if (args[0] === "rev-parse" && args[1] === "--verify" && args[2] === "REBASE_HEAD") {
+				return failedResult(128, "fatal: Needed a single revision");
+			}
+			// reflog -1 --format=%gs — rebase aborted
+			if (args[0] === "reflog" && args[1] === "-1") {
+				return successResult("rebase (abort): returning to abc123");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.continueRebase("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(false);
+		}
+	});
+
+	test("falls back to ok(true) when reflog check fails", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git add -A
+			if (args[0] === "add" && args[1] === "-A") {
+				return successResult();
+			}
+			// rebase --continue exits 1
+			if (args.includes("rebase") && args.includes("--continue")) {
+				return failedResult(1, "No rebase in progress?");
+			}
+			// isRebaseInProgress: rev-parse --git-path rebase-merge
+			if (args[0] === "rev-parse" && args[1] === "--git-path") {
+				return successResult(".git/rebase-merge");
+			}
+			// isRebaseInProgress: rev-parse --verify REBASE_HEAD — no rebase
+			if (args[0] === "rev-parse" && args[1] === "--verify" && args[2] === "REBASE_HEAD") {
+				return failedResult(128, "fatal: Needed a single revision");
+			}
+			// reflog command fails
+			if (args[0] === "reflog") {
+				return failedResult(1, "fatal: bad default revision 'HEAD'");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.continueRebase("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(true);
+		}
+	});
+
+	test("returns ok(false) when rebase is still in progress with new conflicts", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// git add -A
+			if (args[0] === "add" && args[1] === "-A") {
+				return successResult();
+			}
+			// rebase --continue exits 1
+			if (args.includes("rebase") && args.includes("--continue")) {
+				return failedResult(1, "Could not apply patch");
+			}
+			// isRebaseInProgress: rev-parse --git-path rebase-merge
+			if (args[0] === "rev-parse" && args[1] === "--git-path") {
+				return successResult(".git/rebase-merge");
+			}
+			// isRebaseInProgress: rev-parse --verify REBASE_HEAD — rebase still active
+			if (args[0] === "rev-parse" && args[1] === "--verify" && args[2] === "REBASE_HEAD") {
+				return successResult("abc123");
+			}
+			// getConflictedFiles: status --porcelain
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("UU file.ts");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.continueRebase("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(false);
+		}
+	});
+});

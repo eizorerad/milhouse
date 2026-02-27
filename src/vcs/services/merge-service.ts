@@ -498,7 +498,35 @@ export class MergeService implements IMergeService {
 			// (e.g., the AI already ran git rebase --continue itself)
 			const rebaseActive = await this.isRebaseInProgress(workDir);
 			if (rebaseActive.ok && !rebaseActive.value) {
-				// Rebase is no longer active — it succeeded despite non-zero exit
+				// Rebase is no longer active. Check reflog to distinguish
+				// successful completion from abort (the AI may have already
+				// run rebase --continue or --abort before we got here).
+				const reflogResult = await runGitCommand(
+					["reflog", "-1", "--format=%gs"],
+					workDir,
+				);
+				if (reflogResult.ok && reflogResult.value.exitCode === 0) {
+					const subject = reflogResult.value.stdout.trim();
+					if (subject.includes("rebase (abort)")) {
+						logDebug(
+							`continueRebase: reflog indicates rebase was aborted: ${subject}`,
+						);
+						return ok(false);
+					}
+					if (
+						subject.includes("rebase (finish)") ||
+						subject.includes("rebase (continue)")
+					) {
+						logDebug(
+							`continueRebase: reflog confirms rebase completed: ${subject}`,
+						);
+						return ok(true);
+					}
+				}
+				// Reflog unavailable or unrecognized — fall back to assuming success
+				logDebug(
+					"continueRebase: rebase no longer active, reflog inconclusive — assuming success",
+				);
 				return ok(true);
 			}
 
