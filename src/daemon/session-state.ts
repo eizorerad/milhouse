@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getMilhouseDir } from "../state/paths.ts";
+import { saveJsonFile } from "../state/json-io.ts";
 import type {
 	DaemonLogEntry,
 	DaemonEventType,
@@ -106,7 +107,7 @@ export function markSessionCrashed(workDir: string): void {
 
 export function saveState(state: DaemonState, workDir: string): void {
 	const path = getDaemonStatePath(workDir);
-	writeFileSync(path, JSON.stringify(state, null, 2));
+	saveJsonFile(path, state);
 }
 
 export function loadState(workDir: string): DaemonState | null {
