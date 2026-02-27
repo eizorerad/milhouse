@@ -126,6 +126,11 @@ async function main(): Promise<void> {
 
 		// Handle --run (new pipeline orchestrator)
 		if (runMode || resumeMode) {
+			// If --run "some scope" was used, set scanFocus from the task argument
+			// (the task arg is the positional arg, not consumed by --run which is boolean)
+			if (task && !options.scanFocus) {
+				options.scanFocus = task;
+			}
 			await runPipelineV2(options, {
 				startPhase,
 				endPhase,

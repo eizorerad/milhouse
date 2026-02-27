@@ -48,13 +48,18 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 
 	loadItems(ctx) {
 		const issues = loadIssuesForRun(ctx.runId, ctx.workDir);
-		return filterIssues(issues, {
+		logDebug(
+			`[validate] loadItems: ${issues.length} issues loaded, severityFilter=${JSON.stringify(ctx.config.severityFilter)}, minSeverity=${ctx.config.minSeverity}`,
+		);
+		const filtered = filterIssues(issues, {
 			issueIds: ctx.config.issueIds,
 			excludeIssueIds: ctx.config.excludeIssueIds,
 			severityFilter: ctx.config.severityFilter,
 			minSeverity: ctx.config.minSeverity,
 			statusFilter: ["UNVALIDATED"],
 		});
+		logDebug(`[validate] After filter: ${filtered.length} issues (from ${issues.length})`);
+		return filtered;
 	},
 
 	buildPrompt(issue, ctx) {
