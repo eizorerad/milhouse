@@ -1009,7 +1009,13 @@ export async function runParallelByIssue(
 			};
 
 			// Call callback (await for async-safe updates)
-			await options.onIssueComplete?.(issueGroup.issueId, issueResult);
+			try {
+				await options.onIssueComplete?.(issueGroup.issueId, issueResult);
+			} catch (callbackError) {
+				logError(
+					`onIssueComplete callback threw an error for issue ${issueGroup.issueId}: ${callbackError instanceof Error ? callbackError.message : String(callbackError)}`,
+				);
+			}
 
 			// Track ALL branches for detailed status reporting
 			if (branchName) {
@@ -1271,8 +1277,14 @@ export async function runParallelByIssue(
 			logDebug(
 				`Calling onMergeComplete with ${mergeResultsWithIssue.length} results: ${JSON.stringify(mergeResultsWithIssue)}`,
 			);
-			await options.onMergeComplete(mergeResultsWithIssue);
-			logDebug("onMergeComplete callback completed");
+			try {
+				await options.onMergeComplete(mergeResultsWithIssue);
+				logDebug("onMergeComplete callback completed");
+			} catch (callbackError) {
+				logError(
+					`onMergeComplete callback threw an error: ${callbackError instanceof Error ? callbackError.message : String(callbackError)}`,
+				);
+			}
 		}
 	} else if (options.skipMerge) {
 		logInfo("Merge phase skipped (--skip-merge flag)");
