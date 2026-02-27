@@ -21,6 +21,9 @@ import {
 	type WorktreeEntry,
 } from "./types.ts";
 
+/** Well-known SHA-1 hash of the empty tree object in git. */
+export const EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf899d69f8255809c";
+
 /**
  * Custom error class for Git command failures
  */
@@ -404,13 +407,13 @@ export async function getCommitsSinceBase(
 }
 
 /**
-	* Get diff stats for a specific commit (files changed, insertions, deletions).
-	* Used to verify a commit has actual code changes (not an empty commit).
-	*
-	* @param workDir - Working directory
-	* @param commitHash - The commit hash to check
-	* @returns Object with filesChanged, insertions, deletions
-	*/
+ * Get diff stats for a specific commit (files changed, insertions, deletions).
+ * Used to verify a commit has actual code changes (not an empty commit).
+ *
+ * @param workDir - Working directory
+ * @param commitHash - The commit hash to check
+ * @returns Object with filesChanged, insertions, deletions
+ */
 export async function getCommitDiffStats(
 	workDir: string,
 	commitHash: string,
@@ -427,7 +430,7 @@ export async function getCommitDiffStats(
 	if (result.value.exitCode !== 0) {
 		// Might be the first commit — try diff against empty tree
 		const altResult = await runGitCommand(
-			["diff", "--shortstat", "4b825dc642cb6eb9a060e54bf899d69f82559", commitHash],
+			["diff", "--shortstat", EMPTY_TREE_HASH, commitHash],
 			workDir,
 		);
 		if (!altResult.ok || altResult.value.exitCode !== 0) {
@@ -440,9 +443,9 @@ export async function getCommitDiffStats(
 }
 
 /**
-	* Parse `git diff --shortstat` output into structured data.
-	* Format: " 3 files changed, 10 insertions(+), 2 deletions(-)"
-	*/
+ * Parse `git diff --shortstat` output into structured data.
+ * Format: " 3 files changed, 10 insertions(+), 2 deletions(-)"
+ */
 function parseShortstat(output: string): {
 	filesChanged: number;
 	insertions: number;

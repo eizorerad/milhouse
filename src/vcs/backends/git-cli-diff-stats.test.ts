@@ -14,23 +14,29 @@ describe("getCommitDiffStats", () => {
 	test("uses correct 40-character empty tree hash when first diff fails", async () => {
 		const capturedArgs: string[][] = [];
 
-		runGitCommandSpy = spyOn(gitCli, "runGitCommand").mockImplementation(
-			async (args: string[]) => {
-				capturedArgs.push([...args]);
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand").mockImplementation(async (args: string[]) => {
+			capturedArgs.push([...args]);
 
-				// First call: commitHash~1 diff fails with non-zero exit code
-				if (args[2]?.includes("~1")) {
-					return ok({ exitCode: 128, stdout: "", stderr: "unknown revision" });
-				}
-
-				// Second call: fallback with empty tree hash — return valid stats
+			// First call: commitHash~1 diff fails with non-zero exit code
+			if (args[2]?.includes("~1")) {
 				return ok({
-					exitCode: 0,
-					stdout: " 3 files changed, 10 insertions(+), 2 deletions(-)\n",
-					stderr: "",
+					exitCode: 128,
+					stdout: "",
+					stderr: "unknown revision",
+					timedOut: false,
+					duration: 10,
 				});
-			},
-		);
+			}
+
+			// Second call: fallback with empty tree hash — return valid stats
+			return ok({
+				exitCode: 0,
+				stdout: " 3 files changed, 10 insertions(+), 2 deletions(-)\n",
+				stderr: "",
+				timedOut: false,
+				duration: 10,
+			});
+		});
 
 		await gitCli.getCommitDiffStats("/tmp/repo", "abc123");
 
@@ -42,25 +48,29 @@ describe("getCommitDiffStats", () => {
 		expect(fallbackArgs).toContain(CORRECT_EMPTY_TREE_HASH);
 
 		// Verify the hash is exactly 40 characters
-		const hashArg = fallbackArgs.find(
-			(arg) => arg.length === 40 && /^[0-9a-f]+$/.test(arg),
-		);
+		const hashArg = fallbackArgs.find((arg) => arg.length === 40 && /^[0-9a-f]+$/.test(arg));
 		expect(hashArg).toBe(CORRECT_EMPTY_TREE_HASH);
 	});
 
 	test("returns parsed stats from fallback empty tree diff", async () => {
-		runGitCommandSpy = spyOn(gitCli, "runGitCommand").mockImplementation(
-			async (args: string[]) => {
-				if (args[2]?.includes("~1")) {
-					return ok({ exitCode: 128, stdout: "", stderr: "unknown revision" });
-				}
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand").mockImplementation(async (args: string[]) => {
+			if (args[2]?.includes("~1")) {
 				return ok({
-					exitCode: 0,
-					stdout: " 5 files changed, 20 insertions(+), 8 deletions(-)\n",
-					stderr: "",
+					exitCode: 128,
+					stdout: "",
+					stderr: "unknown revision",
+					timedOut: false,
+					duration: 10,
 				});
-			},
-		);
+			}
+			return ok({
+				exitCode: 0,
+				stdout: " 5 files changed, 20 insertions(+), 8 deletions(-)\n",
+				stderr: "",
+				timedOut: false,
+				duration: 10,
+			});
+		});
 
 		const result = await gitCli.getCommitDiffStats("/tmp/repo", "abc123");
 
