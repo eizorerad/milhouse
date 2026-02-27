@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { loggers } from "../observability/logger.ts";
 import { withFileLock } from "./file-lock.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
 import { type GraphNode, GraphNodeSchema, STATE_FILES, type Task } from "./types.ts";
@@ -274,6 +275,11 @@ export function topologicalSortNodes(nodes: GraphNode[]): TopologicalSortResult 
 					adj.push(node.id);
 				}
 				inDegree.set(node.id, (inDegree.get(node.id) ?? 0) + 1);
+			} else {
+				loggers.state.warn(
+					{ nodeId: node.id, missingDepId: depId },
+					"Dependency not found in graph, skipping",
+				);
 			}
 		}
 	}
