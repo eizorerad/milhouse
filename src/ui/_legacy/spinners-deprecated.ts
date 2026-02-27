@@ -117,12 +117,25 @@ export class ProgressSpinner {
 	 */
 	updateStep(step: string | DetailedStep): void {
 		if (typeof step === "string") {
-			this.currentStep = step;
-			this.currentDetail = undefined;
+			// Filter out verbose "Thinking" streaming text — just show "Thinking"
+			if (step.startsWith("Thinking") && step.length > 15) {
+				this.currentStep = "Thinking";
+				this.currentDetail = undefined;
+			} else {
+				this.currentStep = step;
+				this.currentDetail = undefined;
+			}
 		} else {
 			// DetailedStep object
-			this.currentStep = formatStepForDisplay(step, "compact");
-			this.currentDetail = step.shortDetail;
+			const formatted = formatStepForDisplay(step, "compact");
+			// Filter out verbose thinking text from DetailedStep too
+			if (formatted.startsWith("Thinking") && formatted.length > 15) {
+				this.currentStep = "Thinking";
+				this.currentDetail = undefined;
+			} else {
+				this.currentStep = formatted;
+				this.currentDetail = step.shortDetail;
+			}
 
 			// Update counters
 			this.incrementCounter(step);
