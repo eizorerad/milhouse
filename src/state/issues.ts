@@ -502,3 +502,25 @@ export async function batchUpdateIssuesForRunSafe(
 		return updates.map(({ issueId, update }) => updateIssueForRun(runId, issueId, update, workDir));
 	});
 }
+
+/**
+ * Save issues for a specific run with cross-process file locking for concurrent safety.
+ *
+ * This function uses proper-lockfile to ensure atomic write operations
+ * even when multiple milhouse processes access the same file.
+ *
+ * @param runId - The run ID to save issues to
+ * @param issues - Array of issues to save
+ * @param workDir - Working directory (defaults to process.cwd())
+ */
+export async function saveIssuesForRunSafe(
+	runId: string,
+	issues: Issue[],
+	workDir = process.cwd(),
+): Promise<void> {
+	const issuesPath = getIssuesPathForRun(runId, workDir);
+
+	return withFileLock(issuesPath, () => {
+		return saveIssuesForRun(runId, issues, workDir);
+	});
+}
