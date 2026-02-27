@@ -180,6 +180,10 @@ export async function runPhase<TItem, TResult>(
 
 		let allResults: PhaseItemResult<TResult>[];
 
+		// Snapshot tokens before execution for delta-based byPhase tracking
+		const startInputTokens = runCost.inputTokens;
+		const startOutputTokens = runCost.outputTokens;
+
 		if (phaseConfig.customExecute) {
 			// Custom execution path (used by exec phase)
 			displayPhaseHeader(phaseConfig.name, config.engine, runId);
@@ -234,23 +238,28 @@ export async function runPhase<TItem, TResult>(
 			await phaseConfig.afterRun(allResults, ctx);
 		}
 
-		// 13. Calculate totals
-		let totalInput = 0;
-		let totalOutput = 0;
-		for (const r of allResults) {
-			totalInput += r.inputTokens;
-			totalOutput += r.outputTokens;
+		// 13. Calculate phase totals
+		// For standard path, use deltas (includes all retry costs tracked incrementally).
+		// For customExecute path, sum from allResults (custom execute manages its own tracking).
+		let totalInput: number;
+		let totalOutput: number;
+		if (phaseConfig.customExecute) {
+			totalInput = 0;
+			totalOutput = 0;
+			for (const r of allResults) {
+				totalInput += r.inputTokens;
+				totalOutput += r.outputTokens;
+			}
+		} else {
+			totalInput = runCost.inputTokens - startInputTokens;
+			totalOutput = runCost.outputTokens - startOutputTokens;
 		}
-
-		// Set phase breakdown (totals already updated incrementally in executePool)
 		const phaseCost = calculateCost({ input: totalInput, output: totalOutput }, config.cost);
 		runCost.byPhase[phaseConfig.name] = {
 			inputTokens: totalInput,
 			outputTokens: totalOutput,
 			cost: phaseCost,
 		};
-		runCost.inputCost += (totalInput / 1_000_000) * config.cost.inputPerMillion;
-		runCost.outputCost += (totalOutput / 1_000_000) * config.cost.outputPerMillion;
 
 		// 14. Display summary
 		if (phaseConfig.formatSummary) {
@@ -415,6 +424,8 @@ async function executePool<TItem, TResult>(
 				config.cost,
 			);
 			runCost.totalCost += itemCost;
+			runCost.inputCost += (result.inputTokens / 1_000_000) * config.cost.inputPerMillion;
+			runCost.outputCost += (result.outputTokens / 1_000_000) * config.cost.outputPerMillion;
 			runCost.inputTokens += result.inputTokens;
 			runCost.outputTokens += result.outputTokens;
 			runCost.totalTokens += result.inputTokens + result.outputTokens;
@@ -467,13 +478,13 @@ async function executePool<TItem, TResult>(
 					result.inputTokens > 0 || result.outputTokens > 0
 						? calculateCost({ input: result.inputTokens, output: result.outputTokens }, config.cost)
 						: 0;
-				await guard.settle(runCost, estimatedCost, actualCost, result.inputTokens, result.outputTokens);
+				await guard.settle(runCost, estimatedCost, actualCost, result.inputTokens, result.outputTokens, config.cost);
 
 				spinner.releaseSlot(slot, result.success);
 				return result;
 			} catch (error) {
 				// Settle with 0 actual cost on error to release the reservation
-				await guard.settle(runCost, estimatedCost, 0, 0, 0);
+				await guard.settle(runCost, estimatedCost, 0, 0, 0, config.cost);
 				spinner.releaseSlot(slot, false);
 				throw error;
 			}
