@@ -286,5 +286,32 @@ describe("resume-validator", () => {
 			expect(result.valid).toBe(false);
 			expect(result.firstInvalidPhase).toBe("exec");
 		});
+
+		test("fallback — firstInvalidPhase can be used as new startPhase", () => {
+			// Simulates the orchestrator integration: when validation fails,
+			// the orchestrator sets startPhase = firstInvalidPhase
+			writeStateFile("issues.json", [makeIssue({ status: "CONFIRMED" })]);
+			// Missing tasks.json -> plan is invalid
+
+			const result = validateResumeOutputs(runId, "exec", testDir);
+			expect(result.valid).toBe(false);
+			expect(result.firstInvalidPhase).toBe("plan");
+
+			// Re-validating from the fallback phase should pass
+			// (because plan has no prior phases that need tasks)
+			expect(result.firstInvalidPhase).toBeDefined();
+			const recheck = validateResumeOutputs(runId, result.firstInvalidPhase as string, testDir);
+			expect(recheck.valid).toBe(true);
+		});
+
+		test("errors contain descriptive messages for diagnostics", () => {
+			const result = validateResumeOutputs(runId, "exec", testDir);
+			expect(result.valid).toBe(false);
+			// Should have multiple descriptive errors
+			for (const err of result.errors) {
+				expect(typeof err).toBe("string");
+				expect(err.length).toBeGreaterThan(10);
+			}
+		});
 	});
 });
