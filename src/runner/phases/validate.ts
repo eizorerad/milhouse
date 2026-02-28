@@ -59,16 +59,21 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 			);
 		}
 
-		const filtered = filterIssues(issues, {
+		const afterSeverity = filterIssues(issues, {
 			issueIds: ctx.config.issueIds,
 			excludeIssueIds: ctx.config.excludeIssueIds,
 			severityFilter: ctx.config.severityFilter,
 			minSeverity: ctx.config.minSeverity,
-			statusFilter: ["UNVALIDATED"],
 		});
 
 		if (ctx.config.severityFilter?.length || ctx.config.minSeverity) {
-			logWarn(`[validate] After severity filter: ${filtered.length} issues (from ${issues.length})`);
+			logWarn(`[validate] After severity filter: ${afterSeverity.length} issues (from ${issues.length})`);
+		}
+
+		const filtered = filterIssues(afterSeverity, { statusFilter: ["UNVALIDATED"] });
+
+		if (ctx.config.severityFilter?.length || ctx.config.minSeverity) {
+			logWarn(`[validate] After status filter (UNVALIDATED): ${filtered.length} issues (from ${afterSeverity.length})`);
 		}
 
 		return filtered;
