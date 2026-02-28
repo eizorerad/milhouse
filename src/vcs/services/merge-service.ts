@@ -1132,9 +1132,7 @@ export class MergeService implements IMergeService {
 			if (!removeResult.ok || removeResult.value.exitCode !== 0) {
 				// Force-remove directory if git couldn't
 				try {
-					if (existsSync(tempWorktreePath)) {
-						rmSync(tempWorktreePath, { recursive: true, force: true });
-					}
+					rmSync(tempWorktreePath, { recursive: true, force: true });
 				} catch {
 					logDebug(`Failed to remove merge worktree directory: ${tempWorktreePath}`);
 				}
