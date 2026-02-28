@@ -1051,13 +1051,41 @@ export class MergeService implements IMergeService {
 				}
 
 				for (const file of resolvedFiles) {
-					await runGitCommand(["checkout", "--ours", "--", file], workDir);
-					await runGitCommand(["add", "--", file], workDir);
+					const checkoutResult = await runGitCommand(["checkout", "--ours", "--", file], workDir);
+					if (!checkoutResult.ok || checkoutResult.value.exitCode !== 0) {
+						return err(
+							createVcsError("COMMAND_FAILED", `checkout --ours failed for file: ${file}`, {
+								context: { stderr: checkoutResult.ok ? checkoutResult.value.stderr : "" },
+							}),
+						);
+					}
+					const addResult = await runGitCommand(["add", "--", file], workDir);
+					if (!addResult.ok || addResult.value.exitCode !== 0) {
+						return err(
+							createVcsError("COMMAND_FAILED", `git add failed for file: ${file}`, {
+								context: { stderr: addResult.ok ? addResult.value.stderr : "" },
+							}),
+						);
+					}
 				}
 				// After conflicted stash pop, the stash entry is NOT auto-dropped
-				await runGitCommand(["stash", "drop"], workDir);
+				const stashDropResult = await runGitCommand(["stash", "drop"], workDir);
+				if (!stashDropResult.ok || stashDropResult.value.exitCode !== 0) {
+					return err(
+						createVcsError("COMMAND_FAILED", "stash drop failed after conflict resolution", {
+							context: { stderr: stashDropResult.ok ? stashDropResult.value.stderr : "" },
+						}),
+					);
+				}
 				// Reset index so resolved files don't stay staged
-				await runGitCommand(["reset", "HEAD"], workDir);
+				const resetResult = await runGitCommand(["reset", "HEAD"], workDir);
+				if (!resetResult.ok || resetResult.value.exitCode !== 0) {
+					return err(
+						createVcsError("COMMAND_FAILED", "reset HEAD failed after conflict resolution", {
+							context: { stderr: resetResult.ok ? resetResult.value.stderr : "" },
+						}),
+					);
+				}
 
 				return ok({
 					success: true,
