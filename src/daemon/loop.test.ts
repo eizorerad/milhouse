@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+	type CostTracker,
 	type DaemonState,
 	checkSafetyRails,
 	createDaemonState,
 	extractRunCost,
+	extractRunCostData,
 	processRunCompletion,
 	recordRunComplete,
 } from "./loop.ts";
@@ -116,6 +118,109 @@ describe("extractRunCost", () => {
 
 		const cost = extractRunCost(runId, testDir);
 		expect(cost).toBe(0);
+	});
+});
+
+describe("extractRunCostData", () => {
+	const testDir = join(process.cwd(), ".test-extract-cost-data");
+
+	afterEach(() => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true, force: true });
+		}
+	});
+
+	test("returns runId, cost, and extractionFailed: false when report.json exists with valid cost", () => {
+		const runId = "run-20240115-costdata-abc1";
+		const runsDir = join(testDir, ".milhouse", "runs", runId, "reports");
+		const indexDir = join(testDir, ".milhouse");
+
+		mkdirSync(runsDir, { recursive: true });
+
+		const report = {
+			version: "0.2.0",
+			run_id: runId,
+			cost: { total: 2.75, currency: "USD", by_phase: {} },
+		};
+		writeFileSync(join(runsDir, "report.json"), JSON.stringify(report));
+
+		const runsIndex = {
+			runs: [{ id: runId, created_at: new Date().toISOString(), phase: "completed" }],
+		};
+		writeFileSync(join(indexDir, "runs-index.json"), JSON.stringify(runsIndex));
+
+		const result = extractRunCostData(
+			{ exitCode: 0, killedByWatchdog: false, duration: 5000 },
+			testDir,
+		);
+
+		expect(result.runId).toBe(runId);
+		expect(result.cost).toBe(2.75);
+		expect(result.extractionFailed).toBe(false);
+	});
+
+	test("returns extractionFailed: true when report.json does not exist", () => {
+		const runId = "run-20240115-costdata-miss1";
+		const runsDir = join(testDir, ".milhouse", "runs", runId, "reports");
+		const indexDir = join(testDir, ".milhouse");
+
+		mkdirSync(runsDir, { recursive: true });
+		// No report.json
+
+		const runsIndex = {
+			runs: [{ id: runId, created_at: new Date().toISOString(), phase: "completed" }],
+		};
+		writeFileSync(join(indexDir, "runs-index.json"), JSON.stringify(runsIndex));
+
+		const result = extractRunCostData(
+			{ exitCode: 0, killedByWatchdog: false, duration: 5000 },
+			testDir,
+		);
+
+		expect(result.runId).toBe(runId);
+		expect(result.cost).toBeUndefined();
+		expect(result.extractionFailed).toBe(true);
+	});
+
+	test("returns extractionFailed: true when report.json is corrupt", () => {
+		const runId = "run-20240115-costdata-corrupt1";
+		const runsDir = join(testDir, ".milhouse", "runs", runId, "reports");
+		const indexDir = join(testDir, ".milhouse");
+
+		mkdirSync(runsDir, { recursive: true });
+		writeFileSync(join(runsDir, "report.json"), "not valid json {{{");
+
+		const runsIndex = {
+			runs: [{ id: runId, created_at: new Date().toISOString(), phase: "completed" }],
+		};
+		writeFileSync(join(indexDir, "runs-index.json"), JSON.stringify(runsIndex));
+
+		const result = extractRunCostData(
+			{ exitCode: 0, killedByWatchdog: false, duration: 5000 },
+			testDir,
+		);
+
+		expect(result.runId).toBe(runId);
+		expect(result.cost).toBeUndefined();
+		expect(result.extractionFailed).toBe(true);
+	});
+
+	test("returns extractionFailed: true when no run ID found", () => {
+		const indexDir = join(testDir, ".milhouse");
+		mkdirSync(indexDir, { recursive: true });
+
+		// Empty runs index — no current run
+		const runsIndex = { runs: [] };
+		writeFileSync(join(indexDir, "runs-index.json"), JSON.stringify(runsIndex));
+
+		const result = extractRunCostData(
+			{ exitCode: 1, killedByWatchdog: false, duration: 1000 },
+			testDir,
+		);
+
+		expect(result.runId).toBeUndefined();
+		expect(result.cost).toBeUndefined();
+		expect(result.extractionFailed).toBe(true);
 	});
 });
 
