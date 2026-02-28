@@ -197,6 +197,8 @@ export interface DaemonState {
 	consecutiveFailures: number;
 	/** Total cost across all runs */
 	totalCost: number;
+	/** Number of runs where cost extraction failed */
+	costExtractionFailures: number;
 	/** Total runs completed */
 	totalRuns: number;
 	/** Orchestrator decision history */

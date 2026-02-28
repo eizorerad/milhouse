@@ -69,6 +69,7 @@ export function createSession(
 		runs: [],
 		consecutiveFailures: 0,
 		totalCost: 0,
+		costExtractionFailures: 0,
 		totalRuns: 0,
 		orchestratorDecisions: [],
 	};

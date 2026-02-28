@@ -26,6 +26,7 @@ function makeDaemonState(overrides: Partial<DaemonState> = {}): DaemonState {
 		runs: [],
 		consecutiveFailures: 0,
 		totalCost: 0,
+		costExtractionFailures: 0,
 		totalRuns: 0,
 		orchestratorDecisions: [],
 		...overrides,
