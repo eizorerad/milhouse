@@ -168,6 +168,10 @@ describe("MergeService.mergeInIsolatedWorktree — stash backup", () => {
 	function buildPreciseConflictFlowMock(overrides: {
 		revParseFails?: boolean;
 		stashPopSucceeds?: boolean;
+		checkoutOursFails?: boolean | "err";
+		addFails?: boolean;
+		stashDropFails?: boolean;
+		resetHeadFails?: boolean;
 	} = {}) {
 		const calls: string[][] = [];
 		let stashPushDone = false;
@@ -246,21 +250,36 @@ describe("MergeService.mergeInIsolatedWorktree — stash backup", () => {
 
 			// checkout --ours
 			if (args[0] === "checkout" && args[1] === "--ours") {
+				if (overrides.checkoutOursFails === "err") {
+					return err(createVcsError("COMMAND_FAILED", "checkout --ours spawn failed"));
+				}
+				if (overrides.checkoutOursFails) {
+					return failedResult(1, "error: path 'dirty-file.ts' does not have our version");
+				}
 				return successResult();
 			}
 
 			// add
 			if (args[0] === "add") {
+				if (overrides.addFails) {
+					return failedResult(1, "fatal: unable to stat 'dirty-file.ts': Permission denied");
+				}
 				return successResult();
 			}
 
 			// stash drop
 			if (args[0] === "stash" && args[1] === "drop") {
+				if (overrides.stashDropFails) {
+					return failedResult(1, "fatal: log for 'stash' is empty");
+				}
 				return successResult();
 			}
 
 			// reset HEAD
 			if (args[0] === "reset" && args[1] === "HEAD") {
+				if (overrides.resetHeadFails) {
+					return failedResult(1, "fatal: Failed to resolve 'HEAD' as a valid ref");
+				}
 				return successResult();
 			}
 
@@ -371,6 +390,81 @@ describe("MergeService.mergeInIsolatedWorktree — stash backup", () => {
 		);
 		expect(revParseStash.length).toBe(0);
 		expect(updateRef.length).toBe(0);
+	});
+
+	test("returns error when checkout --ours fails during stash conflict resolution", async () => {
+		buildPreciseConflictFlowMock({ checkoutOursFails: true });
+
+		const result = await mergeService.mergeInIsolatedWorktree({
+			workDir: "/tmp/test-repo",
+			baseBranch: "main",
+			operation: noopOperation,
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("COMMAND_FAILED");
+		}
+	});
+
+	test("returns error when git add fails during stash conflict resolution", async () => {
+		buildPreciseConflictFlowMock({ addFails: true });
+
+		const result = await mergeService.mergeInIsolatedWorktree({
+			workDir: "/tmp/test-repo",
+			baseBranch: "main",
+			operation: noopOperation,
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("COMMAND_FAILED");
+		}
+	});
+
+	test("returns error when stash drop fails during stash conflict resolution", async () => {
+		buildPreciseConflictFlowMock({ stashDropFails: true });
+
+		const result = await mergeService.mergeInIsolatedWorktree({
+			workDir: "/tmp/test-repo",
+			baseBranch: "main",
+			operation: noopOperation,
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("COMMAND_FAILED");
+		}
+	});
+
+	test("returns error when reset HEAD fails during stash conflict resolution", async () => {
+		buildPreciseConflictFlowMock({ resetHeadFails: true });
+
+		const result = await mergeService.mergeInIsolatedWorktree({
+			workDir: "/tmp/test-repo",
+			baseBranch: "main",
+			operation: noopOperation,
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("COMMAND_FAILED");
+		}
+	});
+
+	test("returns error when checkout --ours command itself fails (ok: false)", async () => {
+		buildPreciseConflictFlowMock({ checkoutOursFails: "err" });
+
+		const result = await mergeService.mergeInIsolatedWorktree({
+			workDir: "/tmp/test-repo",
+			baseBranch: "main",
+			operation: noopOperation,
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("COMMAND_FAILED");
+		}
 	});
 });
 
