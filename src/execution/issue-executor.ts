@@ -1127,9 +1127,7 @@ export async function runParallelByIssue(
 				logDebug(`Force cleanup failed, waiting 3s then attempting manual removal: ${worktreeDir}`);
 				await new Promise((resolve) => setTimeout(resolve, 3000));
 				try {
-					if (existsSync(worktreeDir)) {
-						rmSync(worktreeDir, { recursive: true, force: true });
-					}
+					rmSync(worktreeDir, { recursive: true, force: true });
 					await runGitCommand(["worktree", "prune"], workDir);
 					logDebug(
 						`Manual cleanup succeeded: ${worktreeDir} (branch ${branchName} preserved)`,
