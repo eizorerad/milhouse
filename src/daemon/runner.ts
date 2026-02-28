@@ -246,7 +246,7 @@ export async function runDaemonLoop(
 		appendLog(workDir, "daemon:crash", {
 			error: error instanceof Error ? error.message : String(error),
 		});
-		markSessionCrashed(workDir);
+		markSessionCrashed(workDir, sessionState);
 		throw error;
 	} finally {
 		process.off("SIGINT", shutdownHandler);

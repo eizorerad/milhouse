@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { saveState, loadState, getDaemonStatePath } from "./session-state.ts";
+import { saveState, loadState, markSessionCrashed, getDaemonStatePath } from "./session-state.ts";
 import type { DaemonState } from "./types.ts";
 
 function makeTempDir(): string {
@@ -124,6 +124,39 @@ describe("session-state", () => {
 			expect(loaded).toBeNull();
 
 			readSpy.mockRestore();
+		});
+	});
+
+	describe("markSessionCrashed", () => {
+		test("with inMemoryState preserves the provided totalCost rather than loading stale data from disk", () => {
+			// Save initial state with low totalCost to disk (simulates stale persisted state)
+			const staleState = makeDaemonState({ totalCost: 1.0, costExtractionFailures: 0 });
+			saveState(staleState, workDir);
+
+			// Create in-memory state with higher totalCost (the accurate value)
+			const inMemoryState = makeDaemonState({ totalCost: 25.50, costExtractionFailures: 3 });
+
+			markSessionCrashed(workDir, inMemoryState);
+
+			// Verify the saved state has the in-memory values, not the stale disk values
+			const loaded = loadState(workDir);
+			expect(loaded).not.toBeNull();
+			expect(loaded!.status).toBe("crashed");
+			expect(loaded!.totalCost).toBe(25.50);
+			expect(loaded!.costExtractionFailures).toBe(3);
+		});
+
+		test("without inMemoryState falls back to loading state from disk", () => {
+			const state = makeDaemonState({ totalCost: 5.0, scope: "fallback-test" });
+			saveState(state, workDir);
+
+			markSessionCrashed(workDir);
+
+			const loaded = loadState(workDir);
+			expect(loaded).not.toBeNull();
+			expect(loaded!.status).toBe("crashed");
+			expect(loaded!.totalCost).toBe(5.0);
+			expect(loaded!.scope).toBe("fallback-test");
 		});
 	});
 });

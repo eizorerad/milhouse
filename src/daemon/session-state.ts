@@ -94,9 +94,13 @@ export function endSession(
 
 /**
  * Mark session as crashed.
+ *
+ * When inMemoryState is provided, uses it directly (preserving accurate
+ * totalCost and other fields) instead of loading potentially stale state
+ * from disk.
  */
-export function markSessionCrashed(workDir: string): void {
-	const state = loadState(workDir);
+export function markSessionCrashed(workDir: string, inMemoryState?: DaemonState): void {
+	const state = inMemoryState ?? loadState(workDir);
 	if (state) {
 		state.status = "crashed";
 		saveState(state, workDir);
