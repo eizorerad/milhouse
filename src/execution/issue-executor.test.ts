@@ -698,6 +698,87 @@ describe("Issue Executor Error Scenarios", () => {
 			expect(maxConcurrentObserved).toBeLessThanOrEqual(2);
 		});
 	});
+
+	describe("Worktree cleanup on post-execution error", () => {
+		it("should clean up worktrees after successful execution with skipMerge", async () => {
+			const issue = createMockIssue({ id: "P-cleanup" });
+			const tasks = [createMockTask({ id: "P-cleanup-T1", issue_id: "P-cleanup" })];
+
+			const cleanupEngine = createMockEngine({
+				execute: async () => ({
+					success: true,
+					response: "Task completed",
+					inputTokens: 100,
+					outputTokens: 50,
+				}),
+			});
+
+			const options: IssueBasedExecutionOptions = {
+				engine: cleanupEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 1,
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+			};
+
+			const result = await runParallelByIssue(tasks, [issue], options);
+
+			expect(result).toBeDefined();
+
+			// Verify no leftover worktree directories remain after execution
+			// This confirms the cleanup phase ran (either no worktrees were created,
+			// or they were properly cleaned up in the finally block)
+			const worktreesDir = join(testDir, ".milhouse", "work", "worktrees");
+			if (existsSync(worktreesDir)) {
+				const { readdirSync } = await import("node:fs");
+				const remaining = readdirSync(worktreesDir);
+				expect(remaining.length).toBe(0);
+			}
+		});
+
+		it("should not leave worktrees behind when execution fails", async () => {
+			const issue = createMockIssue({ id: "P-failclean" });
+			const tasks = [createMockTask({ id: "P-failclean-T1", issue_id: "P-failclean" })];
+
+			const failEngine = createMockEngine({
+				execute: async () => {
+					throw new Error("Engine failure during execution");
+				},
+			});
+
+			const options: IssueBasedExecutionOptions = {
+				engine: failEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 1,
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+			};
+
+			const result = await runParallelByIssue(tasks, [issue], options);
+
+			expect(result).toBeDefined();
+			expect(result.tasksFailed).toBeGreaterThanOrEqual(1);
+
+			// Verify no leftover worktree directories after failed execution
+			// The finally block should guarantee cleanup regardless of execution outcome
+			const worktreesDir = join(testDir, ".milhouse", "work", "worktrees");
+			if (existsSync(worktreesDir)) {
+				const { readdirSync } = await import("node:fs");
+				const remaining = readdirSync(worktreesDir);
+				expect(remaining.length).toBe(0);
+			}
+		});
+	});
 });
 
 // ============================================================================
