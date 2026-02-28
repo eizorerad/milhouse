@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { bus } from "../../events/bus.ts";
-import { logDebug } from "../../ui/logger.ts";
+import { logDebug, logWarn } from "../../ui/logger.ts";
 import { parseStatusPorcelain, runGitCommand } from "../backends/git-cli.ts";
 import { makeIntegrationBranchName } from "../policies/naming.ts";
 import type {
@@ -814,7 +814,12 @@ export class MergeService implements IMergeService {
 			const conflictedFilesResult = await this.getConflictedFiles(mergeWorktreePath);
 			if (conflictedFilesResult.ok && conflictedFilesResult.value.length > 0) {
 				// Abort merge in worktree
-				await runGitCommand(["merge", "--abort"], mergeWorktreePath);
+				const abortResult = await runGitCommand(["merge", "--abort"], mergeWorktreePath);
+				if (!abortResult.ok || abortResult.value.exitCode !== 0) {
+					logWarn(
+						`merge --abort failed in worktree: ${!abortResult.ok ? abortResult.error.message : abortResult.value.stderr}`,
+					);
+				}
 
 				bus.emit("git:merge:conflict", {
 					source: sourceBranch,
@@ -836,7 +841,12 @@ export class MergeService implements IMergeService {
 			);
 		} finally {
 			// Always cleanup the temporary worktree
-			await runGitCommand(["worktree", "remove", "-f", mergeWorktreePath], workDir);
+			const worktreeRemoveResult = await runGitCommand(["worktree", "remove", "-f", mergeWorktreePath], workDir);
+			if (!worktreeRemoveResult.ok || worktreeRemoveResult.value.exitCode !== 0) {
+				logWarn(
+					`Failed to remove merge worktree ${mergeWorktreePath}: ${!worktreeRemoveResult.ok ? worktreeRemoveResult.error.message : worktreeRemoveResult.value.stderr}`,
+				);
+			}
 		}
 	}
 
@@ -940,7 +950,12 @@ export class MergeService implements IMergeService {
 		const tempWorktreePath = join(workDir, ".milhouse", "work", "merge-worktrees", mergeId);
 
 		// Prune stale worktrees before creating a new one
-		await runGitCommand(["worktree", "prune"], workDir);
+		const preSetupPruneResult = await runGitCommand(["worktree", "prune"], workDir);
+		if (!preSetupPruneResult.ok || preSetupPruneResult.value.exitCode !== 0) {
+			logWarn(
+				`Worktree prune before isolated merge failed: ${!preSetupPruneResult.ok ? preSetupPruneResult.error.message : preSetupPruneResult.value.stderr}`,
+			);
+		}
 
 		// Ensure parent directory exists
 		const parentDir = join(workDir, ".milhouse", "work", "merge-worktrees");
@@ -1125,8 +1140,19 @@ export class MergeService implements IMergeService {
 				}
 			}
 
-			await runGitCommand(["worktree", "prune"], workDir);
-			await runGitCommand(["branch", "-D", tempBranch], workDir);
+			const pruneResult = await runGitCommand(["worktree", "prune"], workDir);
+			if (!pruneResult.ok || pruneResult.value.exitCode !== 0) {
+				logWarn(
+					`Worktree prune failed during cleanup: ${!pruneResult.ok ? pruneResult.error.message : pruneResult.value.stderr}`,
+				);
+			}
+
+			const branchDeleteResult = await runGitCommand(["branch", "-D", tempBranch], workDir);
+			if (!branchDeleteResult.ok || branchDeleteResult.value.exitCode !== 0) {
+				logWarn(
+					`Failed to delete temp branch ${tempBranch}: ${!branchDeleteResult.ok ? branchDeleteResult.error.message : branchDeleteResult.value.stderr}`,
+				);
+			}
 		}
 	}
 }

@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as gitCli from "../backends/git-cli";
+import * as logger from "../../ui/logger";
 import { createVcsError, err, ok } from "../types";
 import { MergeService } from "./merge-service";
 
@@ -783,5 +784,188 @@ describe("MergeService.verifyMergeCompleted", () => {
 		if (!result.ok) {
 			expect(result.error.message).toBe("git command failed");
 		}
+	});
+});
+
+describe("Cleanup failure warning logging", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let existsSyncSpy: ReturnType<typeof spyOn>;
+	let mkdirSyncSpy: ReturnType<typeof spyOn>;
+	let rmSyncSpy: ReturnType<typeof spyOn>;
+	let logWarnSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function successResult(stdout = "", stderr = "") {
+		return ok({
+			exitCode: 0,
+			stdout,
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+		existsSyncSpy = spyOn(fs, "existsSync").mockReturnValue(true);
+		mkdirSyncSpy = spyOn(fs, "mkdirSync").mockReturnValue(undefined as any);
+		rmSyncSpy = spyOn(fs, "rmSync").mockReturnValue(undefined);
+		logWarnSpy = spyOn(logger, "logWarn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+		existsSyncSpy.mockRestore();
+		mkdirSyncSpy.mockRestore();
+		rmSyncSpy.mockRestore();
+		logWarnSpy.mockRestore();
+	});
+
+	const noopOperation = async () => {};
+
+	test("mergeInIsolatedWorktree — worktree prune failure in finally logs warning", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[], _workDir?: string) => {
+			// Pre-setup prune succeeds
+			if (args[0] === "worktree" && args[1] === "prune") {
+				// Distinguish pre-setup vs finally prune by tracking call count
+				const pruneCalls = runGitCommandSpy.mock.calls.filter(
+					(c: any) => c[0][0] === "worktree" && c[0][1] === "prune",
+				);
+				if (pruneCalls.length <= 1) {
+					return successResult();
+				}
+				// Finally block prune fails
+				return failedResult(1, "error: worktree prune failed");
+			}
+			if (args[0] === "worktree" && args[1] === "add") return successResult();
+			if (args[0] === "worktree" && args[1] === "remove") return successResult();
+			if (args[0] === "merge" && args[1] === "--ff-only") return successResult();
+			if (args[0] === "branch" && args[1] === "-D") return successResult();
+			return successResult();
+		});
+
+		await mergeService.mergeInIsolatedWorktree({
+			workDir: "/tmp/test-repo",
+			baseBranch: "main",
+			operation: noopOperation,
+		});
+
+		const warnCalls = logWarnSpy.mock.calls.filter(
+			(c: any) => typeof c[0] === "string" && c[0].includes("Worktree prune failed during cleanup"),
+		);
+		expect(warnCalls.length).toBe(1);
+	});
+
+	test("mergeInIsolatedWorktree — branch -D failure in finally logs warning", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[], _workDir?: string) => {
+			if (args[0] === "worktree" && args[1] === "prune") return successResult();
+			if (args[0] === "worktree" && args[1] === "add") return successResult();
+			if (args[0] === "worktree" && args[1] === "remove") return successResult();
+			if (args[0] === "merge" && args[1] === "--ff-only") return successResult();
+			if (args[0] === "branch" && args[1] === "-D") {
+				return failedResult(1, "error: branch not found");
+			}
+			return successResult();
+		});
+
+		await mergeService.mergeInIsolatedWorktree({
+			workDir: "/tmp/test-repo",
+			baseBranch: "main",
+			operation: noopOperation,
+		});
+
+		const warnCalls = logWarnSpy.mock.calls.filter(
+			(c: any) => typeof c[0] === "string" && c[0].includes("Failed to delete temp branch"),
+		);
+		expect(warnCalls.length).toBe(1);
+	});
+
+	test("safeMergeInWorktree — merge --abort failure logs warning and still returns conflicts", async () => {
+		let mergeCallCount = 0;
+
+		runGitCommandSpy.mockImplementation(async (args: string[], _workDir?: string) => {
+			if (args[0] === "worktree" && args[1] === "prune") return successResult();
+			if (args[0] === "worktree" && args[1] === "add") return successResult();
+			if (args[0] === "worktree" && args[1] === "remove") return successResult();
+			// Merge source branch — fails with conflicts
+			if (args[0] === "merge" && args[1] !== "--abort") {
+				return failedResult(1, "CONFLICT (content): Merge conflict in file.ts");
+			}
+			// merge --abort fails
+			if (args[0] === "merge" && args[1] === "--abort") {
+				return failedResult(128, "fatal: There is no merge to abort");
+			}
+			// getConflictedFiles: status --porcelain returns conflicted files
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("UU file.ts");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.safeMergeInWorktree({
+			sourceBranch: "feature",
+			targetBranch: "main",
+			workDir: "/tmp/test-repo",
+			runId: "run-1",
+		});
+
+		// Should still return conflict result successfully
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.hasConflicts).toBe(true);
+			expect(result.value.conflictedFiles).toEqual(["file.ts"]);
+		}
+
+		// Should have logged a warning about merge --abort failure
+		const warnCalls = logWarnSpy.mock.calls.filter(
+			(c: any) => typeof c[0] === "string" && c[0].includes("merge --abort failed"),
+		);
+		expect(warnCalls.length).toBe(1);
+	});
+
+	test("safeMergeInWorktree — worktree remove failure in finally logs warning", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[], _workDir?: string) => {
+			if (args[0] === "worktree" && args[1] === "prune") return successResult();
+			if (args[0] === "worktree" && args[1] === "add") return successResult();
+			// worktree remove fails
+			if (args[0] === "worktree" && args[1] === "remove") {
+				return failedResult(1, "error: failed to remove worktree");
+			}
+			// Merge succeeds
+			if (args[0] === "merge") return successResult();
+			// rev-parse HEAD for merge commit
+			if (args[0] === "rev-parse" && args[1] === "HEAD") return successResult("abc123");
+			return successResult();
+		});
+
+		const result = await mergeService.safeMergeInWorktree({
+			sourceBranch: "feature",
+			targetBranch: "main",
+			workDir: "/tmp/test-repo",
+			runId: "run-1",
+		});
+
+		// Should still return success
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.success).toBe(true);
+		}
+
+		// Should have logged a warning about worktree remove failure
+		const warnCalls = logWarnSpy.mock.calls.filter(
+			(c: any) => typeof c[0] === "string" && c[0].includes("Failed to remove merge worktree"),
+		);
+		expect(warnCalls.length).toBe(1);
 	});
 });
