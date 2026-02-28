@@ -226,7 +226,13 @@ export async function runDaemonLoop(
 				logWarn(`Cost data unreliable: ${sessionState.costExtractionFailures} of ${sessionState.runs.length} runs have missing cost data`);
 			}
 
-			saveState(sessionState, workDir);
+			try {
+				saveState(sessionState, workDir);
+			} catch (saveError) {
+				logError(`Failed to persist session state: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+				appendLog(workDir, "daemon:crash", { error: "saveState failed", details: saveError instanceof Error ? saveError.message : String(saveError) });
+				// Continue — in-memory sessionState still has correct cost data for budget enforcement
+			}
 
 			// ── Step 8: Sleep ──
 
