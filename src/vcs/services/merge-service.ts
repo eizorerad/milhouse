@@ -814,7 +814,12 @@ export class MergeService implements IMergeService {
 			const conflictedFilesResult = await this.getConflictedFiles(mergeWorktreePath);
 			if (conflictedFilesResult.ok && conflictedFilesResult.value.length > 0) {
 				// Abort merge in worktree
-				await runGitCommand(["merge", "--abort"], mergeWorktreePath);
+				const abortResult = await runGitCommand(["merge", "--abort"], mergeWorktreePath);
+				if (!abortResult.ok || abortResult.value.exitCode !== 0) {
+					logWarn(
+						`merge --abort failed in worktree: ${!abortResult.ok ? abortResult.error.message : abortResult.value.stderr}`,
+					);
+				}
 
 				bus.emit("git:merge:conflict", {
 					source: sourceBranch,
@@ -836,7 +841,12 @@ export class MergeService implements IMergeService {
 			);
 		} finally {
 			// Always cleanup the temporary worktree
-			await runGitCommand(["worktree", "remove", "-f", mergeWorktreePath], workDir);
+			const worktreeRemoveResult = await runGitCommand(["worktree", "remove", "-f", mergeWorktreePath], workDir);
+			if (!worktreeRemoveResult.ok || worktreeRemoveResult.value.exitCode !== 0) {
+				logWarn(
+					`Failed to remove merge worktree ${mergeWorktreePath}: ${!worktreeRemoveResult.ok ? worktreeRemoveResult.error.message : worktreeRemoveResult.value.stderr}`,
+				);
+			}
 		}
 	}
 
