@@ -16,11 +16,11 @@ import { getCurrentRunId, getRunDir } from "../state/runs.ts";
 import { logWarn } from "../ui/logger.ts";
 
 // ============================================================================
-// DAEMON STATE TYPES
+// COST TRACKING TYPES (internal to loop.ts — canonical types in types.ts)
 // ============================================================================
 
-/** A single run entry tracked by the daemon */
-export interface DaemonRunEntry {
+/** A single run entry tracked by the cost tracker */
+export interface CostRunEntry {
 	/** Run ID from the child process */
 	runId?: string;
 	/** Child process exit code */
@@ -35,24 +35,31 @@ export interface DaemonRunEntry {
 	completedAt: string;
 }
 
-/** Daemon session state — tracks accumulated cost across child runs */
-export interface DaemonState {
+/** Cost tracker state — tracks accumulated cost across child runs */
+export interface CostTracker {
 	/** Total accumulated cost across all child runs (USD) */
 	totalCost: number;
 	/** Number of runs where cost extraction failed (null cost) */
 	costExtractionFailures: number;
 	/** Completed run entries */
-	runs: DaemonRunEntry[];
+	runs: CostRunEntry[];
 	/** Daemon start time */
 	startedAt: string;
 }
 
-/** Result from a child process spawn */
-export interface WatchdogResult {
+/** Minimal watchdog result for cost extraction (canonical WatchdogResult in types.ts includes stdout/stderr/killReason) */
+export interface CostWatchdogResult {
 	exitCode: number;
 	killedByWatchdog: boolean;
 	duration: number;
 }
+
+/** @deprecated Use CostRunEntry instead */
+export type DaemonRunEntry = CostRunEntry;
+/** @deprecated Use CostTracker instead */
+export type DaemonState = CostTracker;
+/** @deprecated Use CostWatchdogResult instead */
+export type WatchdogResult = CostWatchdogResult;
 
 /** Safety rail check result */
 export interface SafetyRailResult {
@@ -67,7 +74,7 @@ export interface SafetyRailResult {
 // ============================================================================
 
 /** Create initial daemon state */
-export function createDaemonState(): DaemonState {
+export function createDaemonState(): CostTracker {
 	return {
 		totalCost: 0,
 		costExtractionFailures: 0,
@@ -121,6 +128,27 @@ export function extractRunCost(runId: string, workDir: string): number | null {
 	return total;
 }
 
+/**
+ * Extract cost data from a completed run without mutating any state object.
+ *
+ * Combines getCurrentRunId + extractRunCost into a single pure call that
+ * returns structured cost data. Used by runner.ts to update sessionState
+ * directly without an intermediate CostTracker object.
+ */
+export function extractRunCostData(
+	result: CostWatchdogResult,
+	workDir: string,
+): { runId?: string; cost?: number; extractionFailed: boolean } {
+	const childRunId = getCurrentRunId(workDir) ?? undefined;
+	const runCost = childRunId ? extractRunCost(childRunId, workDir) : null;
+
+	return {
+		runId: childRunId,
+		cost: runCost ?? undefined,
+		extractionFailed: runCost === null,
+	};
+}
+
 // ============================================================================
 // RUN COMPLETION
 // ============================================================================
@@ -128,14 +156,14 @@ export function extractRunCost(runId: string, workDir: string): number | null {
 /**
  * Record a completed child run with cost data.
  *
- * Creates a DaemonRunEntry from the watchdog result and extracted cost,
+ * Creates a CostRunEntry from the watchdog result and extracted cost,
  * then pushes it onto state.runs.
  */
 export function recordRunComplete(
-	state: DaemonState,
-	result: WatchdogResult & { runId?: string; cost?: number },
-): DaemonRunEntry {
-	const entry: DaemonRunEntry = {
+	state: CostTracker,
+	result: CostWatchdogResult & { runId?: string; cost?: number },
+): CostRunEntry {
+	const entry: CostRunEntry = {
 		runId: result.runId,
 		exitCode: result.exitCode,
 		killedByWatchdog: result.killedByWatchdog,
@@ -158,10 +186,10 @@ export function recordRunComplete(
  * 4. Accumulate state.totalCost so the budget safety rail can trigger
  */
 export function processRunCompletion(
-	state: DaemonState,
-	result: WatchdogResult,
+	state: CostTracker,
+	result: CostWatchdogResult,
 	workDir: string,
-): DaemonRunEntry {
+): CostRunEntry {
 	// 1. Get the run ID the child process created
 	const childRunId = getCurrentRunId(workDir) ?? undefined;
 
@@ -201,7 +229,7 @@ export function processRunCompletion(
  * Returns a result indicating which rail was violated (if any).
  * Budget check: if budget > 0 and state.totalCost >= budget, return budget-exceeded.
  */
-export function checkSafetyRails(state: DaemonState, budget: number): SafetyRailResult {
+export function checkSafetyRails(state: { totalCost: number }, budget: number): SafetyRailResult {
 	if (budget > 0 && state.totalCost >= budget) {
 		return {
 			violated: "budget-exceeded",

@@ -12,8 +12,7 @@ import { logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { hardcodedDecision } from "./hardcoded-fallback.ts";
 import {
 	checkSafetyRails,
-	createDaemonState,
-	processRunCompletion,
+	extractRunCostData,
 } from "./loop.ts";
 import { getOrchestratorDirective } from "./orchestrator.ts";
 import { isAnyProcessRunning, waitForProcesses } from "./process-detect.ts";
@@ -21,7 +20,6 @@ import {
 	appendLog,
 	createSession,
 	endSession,
-	loadState,
 	markSessionCrashed,
 	recordOrchestratorDecision,
 	recordRunStart,
@@ -55,11 +53,8 @@ export async function runDaemonLoop(
 	process.on("SIGINT", shutdownHandler);
 	process.on("SIGTERM", shutdownHandler);
 
-	// Create session state (persistent)
+	// Create session state (single source of truth for all daemon state)
 	const sessionState = createSession(scope, workDir, options.inputPath);
-
-	// Create daemon state (cost tracking from loop.ts)
-	const daemonState = createDaemonState();
 
 	appendLog(workDir, "daemon:start", {
 		scope,
@@ -78,8 +73,6 @@ export async function runDaemonLoop(
 	);
 
 	const sessionStart = Date.now();
-	let consecutiveFailures = 0;
-	let totalRuns = 0;
 
 	try {
 		while (!abortController.signal.aborted) {
@@ -87,7 +80,7 @@ export async function runDaemonLoop(
 
 			// Budget (from loop.ts helpers)
 			const budgetLimit = resolve(options.budget, config.safety.budgetLimit);
-			const budgetCheck = checkSafetyRails(daemonState, budgetLimit);
+			const budgetCheck = checkSafetyRails(sessionState, budgetLimit);
 			if (budgetCheck.violated) {
 				appendLog(workDir, "safety:budget-exceeded", { reason: budgetCheck.message });
 				logWarn(`Safety stop: ${budgetCheck.message}`);
@@ -96,18 +89,18 @@ export async function runDaemonLoop(
 
 			// Max runs
 			const maxRuns = resolve(options.maxRuns, config.safety.maxRuns);
-			if (maxRuns > 0 && totalRuns >= maxRuns) {
+			if (maxRuns > 0 && sessionState.totalRuns >= maxRuns) {
 				appendLog(workDir, "safety:max-runs-reached", { maxRuns });
 				logWarn(`Max runs limit (${maxRuns}) reached`);
 				break;
 			}
 
 			// Consecutive failures
-			if (consecutiveFailures >= config.safety.maxConsecutiveFailures) {
+			if (sessionState.consecutiveFailures >= config.safety.maxConsecutiveFailures) {
 				appendLog(workDir, "safety:consecutive-failures", {
-					count: consecutiveFailures,
+					count: sessionState.consecutiveFailures,
 				});
-				logWarn(`${consecutiveFailures} consecutive failures — stopping`);
+				logWarn(`${sessionState.consecutiveFailures} consecutive failures — stopping`);
 				break;
 			}
 
@@ -186,7 +179,6 @@ export async function runDaemonLoop(
 
 			const args = buildMilhouseArgs(directive, options);
 			const runEntry = recordRunStart(sessionState, directive);
-			totalRuns++;
 
 			appendLog(workDir, "run:start", { args, reasoning: directive.reasoning }, undefined, runEntry.number);
 			logInfo(`\nRun #${runEntry.number}: ${directive.reasoning}`);
@@ -206,38 +198,41 @@ export async function runDaemonLoop(
 
 			// ── Step 7: Record result with cost extraction ──
 
-			const entry = processRunCompletion(daemonState, result, workDir);
-
-			// Sync cost to persistent session state
-			sessionState.totalCost = daemonState.totalCost;
+			const costData = extractRunCostData(result, workDir);
+			if (costData.extractionFailed) sessionState.costExtractionFailures++;
+			if (typeof costData.cost === "number") sessionState.totalCost += costData.cost;
 
 			// Track consecutive failures
 			if (result.exitCode === 0) {
-				consecutiveFailures = 0;
+				sessionState.consecutiveFailures = 0;
 			} else {
-				consecutiveFailures++;
+				sessionState.consecutiveFailures++;
 			}
 
 			const durationMin = Math.round(result.duration / 60_000);
 			if (result.killedByWatchdog) {
-				appendLog(workDir, "watchdog:kill", { reason: result.killReason, duration: result.duration }, entry.runId, runEntry.number);
+				appendLog(workDir, "watchdog:kill", { reason: result.killReason, duration: result.duration }, costData.runId, runEntry.number);
 				logWarn(`Run #${runEntry.number} killed by watchdog after ${durationMin}min`);
 			} else if (result.exitCode === 0) {
-				appendLog(workDir, "run:complete", { duration: result.duration, cost: entry.cost }, entry.runId, runEntry.number);
-				const costStr = typeof entry.cost === "number" ? `$${entry.cost.toFixed(2)}` : "unknown";
+				appendLog(workDir, "run:complete", { duration: result.duration, cost: costData.cost }, costData.runId, runEntry.number);
+				const costStr = typeof costData.cost === "number" ? `$${costData.cost.toFixed(2)}` : "unknown";
 				logSuccess(`Run #${runEntry.number} completed in ${durationMin}min (cost: ${costStr})`);
 			} else {
-				appendLog(workDir, "run:failed", { exitCode: result.exitCode, duration: result.duration }, entry.runId, runEntry.number);
+				appendLog(workDir, "run:failed", { exitCode: result.exitCode, duration: result.duration }, costData.runId, runEntry.number);
 				logError(`Run #${runEntry.number} failed (exit ${result.exitCode}) after ${durationMin}min`);
 			}
 
-			if (daemonState.costExtractionFailures > 0) {
-				logWarn(`Cost data unreliable: ${daemonState.costExtractionFailures} of ${daemonState.runs.length} runs have missing cost data`);
+			if (sessionState.costExtractionFailures > 0) {
+				logWarn(`Cost data unreliable: ${sessionState.costExtractionFailures} of ${sessionState.runs.length} runs have missing cost data`);
 			}
 
-			sessionState.totalRuns = totalRuns;
-			sessionState.consecutiveFailures = consecutiveFailures;
-			saveState(sessionState, workDir);
+			try {
+				saveState(sessionState, workDir);
+			} catch (saveError) {
+				logError(`Failed to persist session state: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+				appendLog(workDir, "daemon:crash", { error: "saveState failed", details: saveError instanceof Error ? saveError.message : String(saveError) });
+				// Continue — in-memory sessionState still has correct cost data for budget enforcement
+			}
 
 			// ── Step 8: Sleep ──
 
@@ -251,7 +246,7 @@ export async function runDaemonLoop(
 		appendLog(workDir, "daemon:crash", {
 			error: error instanceof Error ? error.message : String(error),
 		});
-		markSessionCrashed(workDir);
+		markSessionCrashed(workDir, sessionState);
 		throw error;
 	} finally {
 		process.off("SIGINT", shutdownHandler);
@@ -271,13 +266,13 @@ export async function runDaemonLoop(
 	}
 
 	appendLog(workDir, "daemon:stop", {
-		totalRuns,
-		totalCost: daemonState.totalCost,
-		consecutiveFailures,
+		totalRuns: sessionState.totalRuns,
+		totalCost: sessionState.totalCost,
+		consecutiveFailures: sessionState.consecutiveFailures,
 	});
 
 	endSession(sessionState, workDir);
-	logSuccess(`\nDaemon session complete. Runs: ${totalRuns}, Cost: $${daemonState.totalCost.toFixed(2)}`);
+	logSuccess(`\nDaemon session complete. Runs: ${sessionState.totalRuns}, Cost: $${sessionState.totalCost.toFixed(2)}`);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
