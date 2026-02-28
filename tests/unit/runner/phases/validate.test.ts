@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { validatePhaseConfig } from "../../../../src/runner/phases/validate.ts";
+import * as issuesModule from "../../../../src/state/issues.ts";
 import * as logger from "../../../../src/ui/logger.ts";
 import { createMockIssue, createMockPhaseContext } from "../helpers.ts";
 
@@ -319,6 +320,103 @@ describe("validatePhaseConfig", () => {
 				},
 			];
 			expect(validatePhaseConfig.nextPhase!(results, ctx)).toBe("plan");
+		});
+	});
+
+	// ============================================================================
+	// loadItems — two-step filter logging
+	// ============================================================================
+
+	describe("loadItems", () => {
+		let loadIssuesSpy: ReturnType<typeof spyOn>;
+
+		afterEach(() => {
+			loadIssuesSpy?.mockRestore();
+		});
+
+		it("emits separate severity and status filter log messages when severity filter is active", () => {
+			const issues = [
+				createMockIssue({ id: "ISS-1", severity: "HIGH", status: "UNVALIDATED" }),
+				createMockIssue({ id: "ISS-2", severity: "LOW", status: "UNVALIDATED" }),
+				createMockIssue({ id: "ISS-3", severity: "HIGH", status: "CONFIRMED" }),
+			];
+			loadIssuesSpy = spyOn(issuesModule, "loadIssuesForRun").mockReturnValue(issues);
+
+			const ctx = createMockPhaseContext({
+				config: { severityFilter: ["HIGH"] },
+			});
+
+			const result = validatePhaseConfig.loadItems(ctx);
+
+			// Should return only HIGH + UNVALIDATED
+			expect(result.length).toBe(1);
+			expect(result[0].id).toBe("ISS-1");
+
+			// Verify separate log messages
+			const logCalls = logWarnSpy.mock.calls.map((c: unknown[]) => c[0] as string);
+			const severityLog = logCalls.find((m: string) => m.includes("After severity filter"));
+			const statusLog = logCalls.find((m: string) => m.includes("After status filter"));
+
+			expect(severityLog).toBeDefined();
+			expect(statusLog).toBeDefined();
+			// Severity filter: 3 issues -> 2 (ISS-1 and ISS-3 are HIGH)
+			expect(severityLog).toContain("2 issues (from 3)");
+			// Status filter: 2 issues -> 1 (only ISS-1 is UNVALIDATED)
+			expect(statusLog).toContain("1 issues (from 2)");
+		});
+
+		it("shows correct counts for severity vs status filtering", () => {
+			const issues = [
+				createMockIssue({ id: "ISS-1", severity: "CRITICAL", status: "UNVALIDATED" }),
+				createMockIssue({ id: "ISS-2", severity: "HIGH", status: "UNVALIDATED" }),
+				createMockIssue({ id: "ISS-3", severity: "MEDIUM", status: "UNVALIDATED" }),
+				createMockIssue({ id: "ISS-4", severity: "CRITICAL", status: "CONFIRMED" }),
+				createMockIssue({ id: "ISS-5", severity: "LOW", status: "UNVALIDATED" }),
+			];
+			loadIssuesSpy = spyOn(issuesModule, "loadIssuesForRun").mockReturnValue(issues);
+
+			const ctx = createMockPhaseContext({
+				config: { minSeverity: "MEDIUM" },
+			});
+
+			const result = validatePhaseConfig.loadItems(ctx);
+
+			// minSeverity MEDIUM keeps CRITICAL, HIGH, MEDIUM -> ISS-1, ISS-2, ISS-3, ISS-4
+			// Status UNVALIDATED keeps ISS-1, ISS-2, ISS-3
+			expect(result.length).toBe(3);
+
+			const logCalls = logWarnSpy.mock.calls.map((c: unknown[]) => c[0] as string);
+			const severityLog = logCalls.find((m: string) => m.includes("After severity filter"));
+			const statusLog = logCalls.find((m: string) => m.includes("After status filter"));
+
+			expect(severityLog).toContain("4 issues (from 5)");
+			expect(statusLog).toContain("3 issues (from 4)");
+		});
+
+		it("does not emit severity-related logs when no severity filter is active", () => {
+			const issues = [
+				createMockIssue({ id: "ISS-1", severity: "HIGH", status: "UNVALIDATED" }),
+				createMockIssue({ id: "ISS-2", severity: "LOW", status: "CONFIRMED" }),
+			];
+			loadIssuesSpy = spyOn(issuesModule, "loadIssuesForRun").mockReturnValue(issues);
+
+			const ctx = createMockPhaseContext();
+
+			const result = validatePhaseConfig.loadItems(ctx);
+
+			// Without severity filter, only status filter applies
+			expect(result.length).toBe(1);
+			expect(result[0].id).toBe("ISS-1");
+
+			// No severity or status filter logs should be emitted
+			const logCalls = logWarnSpy.mock.calls.map((c: unknown[]) => c[0] as string);
+			const severityLog = logCalls.find((m: string) => m.includes("After severity filter"));
+			const statusLog = logCalls.find((m: string) => m.includes("After status filter"));
+			const activeLog = logCalls.find((m: string) => m.includes("Severity filter active"));
+
+			expect(severityLog).toBeUndefined();
+			expect(statusLog).toBeUndefined();
+			expect(activeLog).toBeUndefined();
 		});
 	});
 
