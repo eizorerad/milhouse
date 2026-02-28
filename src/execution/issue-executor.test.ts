@@ -26,6 +26,10 @@ import {
 	groupTasksByIssue,
 	runParallelByIssue,
 } from "./issue-executor.ts";
+import {
+	registerSignalHandlers,
+	removeSignalHandlers,
+} from "./tmux/tmux-executor.ts";
 
 // ============================================================================
 // Test Fixtures
@@ -827,5 +831,68 @@ describe("filterBranchesForMerge", () => {
 
 		// branch-a should still be included since it's not in failedCleanupBranches
 		expect(result).toEqual(["branch-a"]);
+	});
+});
+
+describe("Signal Handler Cleanup", () => {
+	it("should not leak signal handlers when an error occurs between registration and removal", () => {
+		const baselineSigInt = process.listenerCount("SIGINT");
+		const baselineSigTerm = process.listenerCount("SIGTERM");
+
+		// Stub minimal objects to satisfy registerSignalHandlers signature
+		const fakeServers: never[] = [];
+		const fakeTmuxManager = {} as Parameters<typeof registerSignalHandlers>[1];
+
+		let handlers: ReturnType<typeof registerSignalHandlers> | null = null;
+		try {
+			handlers = registerSignalHandlers(fakeServers, fakeTmuxManager);
+
+			// Verify handlers were registered
+			expect(process.listenerCount("SIGINT")).toBe(baselineSigInt + 1);
+			expect(process.listenerCount("SIGTERM")).toBe(baselineSigTerm + 1);
+
+			// Simulate an error during execution
+			throw new Error("simulated execution failure");
+		} catch {
+			// Error is expected — the point is that finally runs
+		} finally {
+			if (handlers) {
+				removeSignalHandlers(handlers);
+			}
+		}
+
+		// After the try-finally pattern, listener counts must return to baseline
+		expect(process.listenerCount("SIGINT")).toBe(baselineSigInt);
+		expect(process.listenerCount("SIGTERM")).toBe(baselineSigTerm);
+	});
+
+	it("should leak signal handlers without try-finally (demonstrates the bug)", () => {
+		const baselineSigInt = process.listenerCount("SIGINT");
+		const baselineSigTerm = process.listenerCount("SIGTERM");
+
+		const fakeServers: never[] = [];
+		const fakeTmuxManager = {} as Parameters<typeof registerSignalHandlers>[1];
+
+		let handlers: ReturnType<typeof registerSignalHandlers> | null = null;
+		try {
+			handlers = registerSignalHandlers(fakeServers, fakeTmuxManager);
+
+			// Simulate an error — without finally, cleanup would be skipped
+			throw new Error("simulated execution failure");
+
+			// This line would never run without try-finally:
+			// removeSignalHandlers(handlers);
+		} catch {
+			// Without try-finally, handlers would leak here
+		}
+
+		// Handlers are still registered (leaked)
+		expect(process.listenerCount("SIGINT")).toBe(baselineSigInt + 1);
+		expect(process.listenerCount("SIGTERM")).toBe(baselineSigTerm + 1);
+
+		// Manual cleanup to avoid polluting other tests
+		if (handlers) {
+			removeSignalHandlers(handlers);
+		}
 	});
 });

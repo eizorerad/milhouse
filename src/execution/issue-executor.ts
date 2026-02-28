@@ -751,6 +751,7 @@ export async function runParallelByIssue(
 		signalHandlers = registerSignalHandlers(tmuxServers, tmuxManager);
 	}
 
+	try {
 	const limit = pLimit(maxConcurrent);
 	let totalCompleted = 0;
 	let totalFailed = 0;
@@ -1318,15 +1319,16 @@ export async function runParallelByIssue(
 		logInfo("OpenCode servers stopped. Tmux sessions preserved for inspection.");
 	}
 
-	// Remove signal handlers to prevent leaks across invocations
-	if (signalHandlers) {
-		removeSignalHandlers(signalHandlers);
-	}
-
 	return {
 		tasksCompleted: totalCompleted,
 		tasksFailed: totalFailed,
 		totalInputTokens,
 		totalOutputTokens,
 	};
+	} finally {
+		// Remove signal handlers to prevent leaks across invocations
+		if (signalHandlers) {
+			removeSignalHandlers(signalHandlers);
+		}
+	}
 }
