@@ -428,6 +428,47 @@ describe("Attach Instructions UI", () => {
 			const fullOutput = output.join("\n");
 			expect(fullOutput).toContain("TMUX MODE ENABLED");
 		});
+
+		it("should center title with correct padding accounting for ANSI codes", () => {
+			displayTmuxModeHeader();
+
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes use control characters by definition
+			const ansiPattern = /\x1b\[[0-9;]*m/g;
+
+			// Determine the inner width from the top border line (e.g. ╔═══...═══╗)
+			const borderLine = output.find((line) => line.includes("╔"));
+			expect(borderLine).toBeDefined();
+			if (!borderLine) return;
+			const strippedBorder = borderLine.replace(ansiPattern, "");
+			const innerWidth = strippedBorder.length - 2; // subtract ╔ and ╗
+
+			// Find the line containing the title text
+			const titleLine = output.find((line) => line.includes("TMUX MODE ENABLED"));
+			expect(titleLine).toBeDefined();
+			if (!titleLine) return;
+
+			// Strip ANSI escape codes to get the visible content
+			const stripped = titleLine.replace(ansiPattern, "");
+
+			// Extract content between the box vertical bars (║)
+			const match = stripped.match(/║(.*)║/);
+			expect(match).not.toBeNull();
+			if (!match) return;
+			const inner = match[1];
+
+			// Calculate actual left padding and implied right padding from the box width.
+			// centerText() only adds left padding; the right side extends to the ║ border.
+			// If ANSI codes were incorrectly included in the width calculation, left padding
+			// would be too small, making the title appear off-center.
+			const title = "TMUX MODE ENABLED";
+			const leftPad = inner.length - inner.trimStart().length;
+			const impliedRightPad = innerWidth - leftPad - title.length;
+
+			// Left and right padding should be nearly equal (differ by at most 1 due to rounding)
+			expect(leftPad).toBeGreaterThan(0);
+			expect(impliedRightPad).toBeGreaterThanOrEqual(0);
+			expect(Math.abs(leftPad - impliedRightPad)).toBeLessThanOrEqual(1);
+		});
 	});
 
 	describe("displayServerInfo", () => {
