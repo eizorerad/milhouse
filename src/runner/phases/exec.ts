@@ -658,6 +658,12 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 			totalInputTokens = issueResult.totalInputTokens;
 			totalOutputTokens = issueResult.totalOutputTokens;
 
+			if (issueResult.callbackErrors && issueResult.callbackErrors.length > 0) {
+				for (const cbError of issueResult.callbackErrors) {
+					logWarn(`Callback error during execution — task state may be inconsistent: ${cbError}`);
+				}
+			}
+
 			const reloadedTasks = loadTasksForRun(runId, workDir);
 			for (const task of reloadedTasks) {
 				if (task.status === "failed" && task.error) errors.push(`${task.id}: ${task.error}`);

@@ -751,6 +751,12 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 		totalInputTokens = issueResult.totalInputTokens;
 		totalOutputTokens = issueResult.totalOutputTokens;
 
+		if (issueResult.callbackErrors && issueResult.callbackErrors.length > 0) {
+			for (const cbError of issueResult.callbackErrors) {
+				logWarn(`Callback error during execution — task state may be inconsistent: ${cbError}`);
+			}
+		}
+
 		// Collect errors from failed tasks
 		const reloadedTasks = loadTasksForRun(runId, workDir);
 		for (const task of reloadedTasks) {
