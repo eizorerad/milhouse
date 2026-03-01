@@ -123,6 +123,9 @@ export const box = {
 
 // Progress bar helper
 export const progressBar = (current: number, total: number, width = 20): string => {
+	if (total === 0) {
+		return theme.dim("░".repeat(width));
+	}
 	const filled = Math.round((current / total) * width);
 	const empty = width - filled;
 	const bar = theme.primary("█".repeat(filled)) + theme.dim("░".repeat(empty));
