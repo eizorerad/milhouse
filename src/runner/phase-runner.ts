@@ -417,6 +417,7 @@ async function executePool<TItem, TResult>(
 				spinner.error("Budget exceeded");
 				throw e;
 			}
+			throw e;
 		}
 
 		const result = await executeItem(phaseConfig, items[0], ctx, model, (step) =>
