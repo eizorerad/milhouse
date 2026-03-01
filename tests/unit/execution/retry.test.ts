@@ -15,6 +15,7 @@ import {
 	executeWithRetry,
 	isErrorRetryable,
 	isRetryableError,
+	sleepWithAbort,
 } from "../../../src/execution/runtime/retry.ts";
 import type { MilhouseRetryConfig } from "../../../src/execution/runtime/types.ts";
 import { DEFAULT_RETRY_CONFIG } from "../../../src/execution/runtime/types.ts";
@@ -525,5 +526,52 @@ describe("calculateRetryDelay", () => {
 
 		expect(calculateRetryDelay(5, config)).toBe(5000); // Would be 16000, capped to 5000
 		expect(calculateRetryDelay(10, config)).toBe(5000); // Would be huge, capped to 5000
+	});
+});
+
+describe("sleepWithAbort", () => {
+	it("removes abort listener after normal timeout completion", async () => {
+		const controller = new AbortController();
+		const removeEventListenerSpy = spyOn(controller.signal, "removeEventListener");
+
+		await sleepWithAbort(1, controller.signal);
+
+		expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function));
+	});
+
+	it("does not accumulate listeners when called multiple times with the same signal", async () => {
+		const controller = new AbortController();
+		const addEventListenerSpy = spyOn(controller.signal, "addEventListener");
+		const removeEventListenerSpy = spyOn(controller.signal, "removeEventListener");
+
+		const iterations = 5;
+		for (let i = 0; i < iterations; i++) {
+			await sleepWithAbort(1, controller.signal);
+		}
+
+		// Each call should have added and then removed a listener
+		expect(addEventListenerSpy).toHaveBeenCalledTimes(iterations);
+		expect(removeEventListenerSpy).toHaveBeenCalledTimes(iterations);
+	});
+
+	it("rejects with 'Aborted' when signal is aborted during sleep", async () => {
+		const controller = new AbortController();
+
+		const promise = sleepWithAbort(10000, controller.signal);
+		controller.abort();
+
+		await expect(promise).rejects.toThrow("Aborted");
+	});
+
+	it("rejects immediately when signal is already aborted", async () => {
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(sleepWithAbort(1, controller.signal)).rejects.toThrow("Aborted");
+	});
+
+	it("resolves normally without signal", async () => {
+		await sleepWithAbort(1);
+		// Should resolve without error
 	});
 });
