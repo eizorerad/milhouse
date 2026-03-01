@@ -714,7 +714,7 @@ export class MergeService implements IMergeService {
 	 * 3. Cleans up the worktree (branch remains with merged commits)
 	 */
 	async safeMergeInWorktree(options: SafeMergeOptions): Promise<VcsResult<SafeMergeResult>> {
-		const { sourceBranch, targetBranch, workDir, runId, message } = options;
+		const { sourceBranch, targetBranch, workDir, runId, message, onConflict } = options;
 
 		// Generate unique ID for merge worktree
 		const mergeId = `merge-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -780,6 +780,37 @@ export class MergeService implements IMergeService {
 			// Check for conflicts
 			const conflictedFilesResult = await this.getConflictedFiles(mergeWorktreePath);
 			if (conflictedFilesResult.ok && conflictedFilesResult.value.length > 0) {
+				// Try conflict resolution callback before aborting — the worktree
+				// is still alive so the callback can actually resolve the files.
+				if (onConflict) {
+					let resolved = false;
+					try {
+						resolved = await onConflict(conflictedFilesResult.value, mergeWorktreePath);
+					} catch (e) {
+						logWarn(
+							`onConflict callback threw: ${e instanceof Error ? e.message : String(e)}`,
+						);
+					}
+
+					if (resolved) {
+						// Callback resolved conflicts — complete the merge
+						const headResult = await runGitCommand(["rev-parse", "HEAD"], mergeWorktreePath);
+						const mergeCommit =
+							headResult.ok && headResult.value.exitCode === 0
+								? headResult.value.stdout.trim()
+								: undefined;
+
+						bus.emit("git:merge:complete", { source: sourceBranch, target: targetBranch });
+
+						return ok({
+							success: true,
+							hasConflicts: false,
+							conflictedFiles: [],
+							mergeCommit,
+						});
+					}
+				}
+
 				// Abort merge in worktree
 				const abortResult = await runGitCommand(["merge", "--abort"], mergeWorktreePath);
 				if (!abortResult.ok || abortResult.value.exitCode !== 0) {
@@ -844,12 +875,16 @@ export class MergeService implements IMergeService {
 			let lastError = "";
 
 			for (let attempt = 1; attempt <= maxRetries; attempt++) {
-				// Use safe merge in worktree
+				// Use safe merge in worktree, forwarding onConflict so resolution
+				// happens inside the worktree before it is cleaned up.
 				const mergeResult = await this.safeMergeInWorktree({
 					sourceBranch: branch,
 					targetBranch,
 					workDir,
 					runId,
+					onConflict: onConflict
+						? (files, worktreePath) => onConflict(files, branch, worktreePath)
+						: undefined,
 				});
 
 				if (!mergeResult.ok) {
@@ -867,17 +902,8 @@ export class MergeService implements IMergeService {
 				}
 
 				if (mergeResult.value.hasConflicts) {
-					// Try conflict resolution if callback provided
-					if (onConflict) {
-						const resolved = await onConflict(mergeResult.value.conflictedFiles, branch, workDir);
-
-						if (resolved) {
-							// Retry after resolution
-							continue;
-						}
-					}
-
-					// Cannot resolve conflicts
+					// safeMergeInWorktree already tried onConflict (if provided)
+					// and it either wasn't provided or couldn't resolve — unresolvable.
 					conflicted.push({
 						branch,
 						files: mergeResult.value.conflictedFiles,
@@ -1209,6 +1235,10 @@ export interface SafeMergeOptions {
 	runId: string;
 	/** Custom commit message for the merge (human-readable, no technical metadata) */
 	message?: string;
+	/** Optional callback for conflict resolution inside the worktree (before cleanup).
+	 *  Receives the conflicted file list and the worktree path where conflicts exist.
+	 *  Return true if conflicts were resolved, false otherwise. */
+	onConflict?: (files: string[], worktreePath: string) => Promise<boolean>;
 }
 
 /**
@@ -1265,8 +1295,10 @@ export interface BatchMergeWithRetryOptions {
 	runId: string;
 	/** Maximum retry attempts per branch (default: 3) */
 	maxRetries?: number;
-	/** Optional callback for AI conflict resolution */
-	onConflict?: (files: string[], branch: string, workDir: string) => Promise<boolean>;
+	/** Optional callback for AI conflict resolution.
+	 *  Receives conflicted files, branch name, and the temporary worktree path
+	 *  where conflicts exist (resolution must happen at this path). */
+	onConflict?: (files: string[], branch: string, worktreePath: string) => Promise<boolean>;
 }
 
 /**
