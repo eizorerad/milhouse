@@ -1,6 +1,6 @@
 {
 	"name": "milhouse-cli",
-	"version": "1.0.0",
+	"version": "0.2.1",
 	"description": "Correctness-first AI coding orchestrator - Evidence-based diagnostics, WBS planning, and iterative execution",
 	"type": "module",
 	"packageManager": "pnpm@9.15.0",
