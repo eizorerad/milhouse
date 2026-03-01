@@ -112,12 +112,20 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 				}));
 			}
 
-			// Apply cross-dependencies
+			// Apply cross-dependencies (filtering out dangling dep IDs)
+			const validTaskIds = new Set(allTasks.map((t) => t.id));
 			for (const crossDep of consolidation.cross_dependencies) {
 				const idx = allTasks.findIndex((t) => t.id === crossDep.task_id);
 				if (idx !== -1) {
 					const task = allTasks[idx];
-					const newDeps = [...new Set([...task.depends_on, ...crossDep.depends_on])];
+					const filteredCrossDeps = crossDep.depends_on.filter((depId) => {
+						if (!validTaskIds.has(depId)) {
+							logWarn(`Stripping dangling cross-dependency '${depId}' from task '${crossDep.task_id}'`);
+							return false;
+						}
+						return true;
+					});
+					const newDeps = [...new Set([...task.depends_on, ...filteredCrossDeps])];
 					allTasks = [
 						...allTasks.slice(0, idx),
 						{ ...task, depends_on: newDeps },
@@ -140,6 +148,19 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 				}
 			}
 		}
+
+		// Strip any remaining dangling dependency references
+		const allValidIds = new Set(allTasks.map((t) => t.id));
+		allTasks = allTasks.map((t) => {
+			const filtered = t.depends_on.filter((depId) => {
+				if (!allValidIds.has(depId)) {
+					logWarn(`Stripping dangling dependency '${depId}' from task '${t.id}'`);
+					return false;
+				}
+				return true;
+			});
+			return filtered.length !== t.depends_on.length ? { ...t, depends_on: filtered } : t;
+		});
 
 		// Assign parallel groups based on dependencies
 		allTasks = assignParallelGroups(allTasks);

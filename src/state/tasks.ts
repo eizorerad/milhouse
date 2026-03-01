@@ -585,7 +585,14 @@ export function areDependenciesSatisfied(taskId: string, workDir = process.cwd()
 
 	return task.depends_on.every((depId) => {
 		const dep = tasks.find((t) => t.id === depId);
-		return dep?.status === "done";
+		if (!dep) {
+			loggers.state.warn(
+				{ taskId, missingDepId: depId },
+				"Dangling dependency not found in task list, treating as satisfied",
+			);
+			return true;
+		}
+		return dep.status === "done";
 	});
 }
 
@@ -603,7 +610,14 @@ export function getReadyTasks(workDir = process.cwd()): Task[] {
 
 		return task.depends_on.every((depId) => {
 			const dep = tasks.find((t) => t.id === depId);
-			return dep?.status === "done";
+			if (!dep) {
+				loggers.state.warn(
+					{ taskId: task.id, missingDepId: depId },
+					"Dangling dependency not found in task list, treating as satisfied",
+				);
+				return true;
+			}
+			return dep.status === "done";
 		});
 	});
 }

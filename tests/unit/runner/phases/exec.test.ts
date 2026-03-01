@@ -631,6 +631,81 @@ describe("execPhaseConfig", () => {
 	});
 
 	// ============================================================================
+	// Dangling dependency handling
+	// ============================================================================
+
+	describe("getReadyTasksForRun - dangling dependencies", () => {
+		const testDir = join(process.cwd(), ".test-exec-dangling");
+
+		beforeEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+			mkdirSync(join(testDir, ".milhouse"), { recursive: true });
+		});
+
+		afterEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+		});
+
+		function createTestTaskData(
+			issueId: string,
+			overrides: Partial<Omit<Task, "id" | "created_at" | "updated_at">> = {},
+		): Omit<Task, "id" | "created_at" | "updated_at"> {
+			return {
+				title: `Task for ${issueId}`,
+				issue_id: issueId,
+				status: "pending",
+				parallel_group: 0,
+				depends_on: [],
+				files: [],
+				checks: [],
+				acceptance: [],
+				...overrides,
+			};
+		}
+
+		it("returns task as ready when depends_on references a non-existent task ID", async () => {
+			const run = await createRun({ scope: "dangling dep test", workDir: testDir });
+			createTaskForRun(
+				run.id,
+				createTestTaskData("ISS-1", {
+					status: "pending",
+					depends_on: ["NON-EXISTENT-TASK-ID"],
+				}),
+				testDir,
+			);
+
+			const ready = getReadyTasksForRun(run.id, testDir);
+			// Task with dangling dep should be treated as ready, not blocked
+			expect(ready.length).toBe(1);
+		});
+
+		it("returns task as ready when some deps exist and are done but one is dangling", async () => {
+			const run = await createRun({ scope: "mixed dangling dep test", workDir: testDir });
+			const t1 = createTaskForRun(
+				run.id,
+				createTestTaskData("ISS-1", { status: "done" }),
+				testDir,
+			);
+			createTaskForRun(
+				run.id,
+				createTestTaskData("ISS-1", {
+					status: "pending",
+					depends_on: [t1.id, "DANGLING-DEP-ID"],
+				}),
+				testDir,
+			);
+
+			const ready = getReadyTasksForRun(run.id, testDir);
+			// Task should be ready since existing dep is done and dangling dep should be treated as satisfied
+			expect(ready.length).toBe(1);
+		});
+	});
+
+	// ============================================================================
 	// Config assertions
 	// ============================================================================
 
