@@ -669,4 +669,63 @@ describe("runPhase", () => {
 		createRunSpy.mockRestore();
 		lockSpy.mockRestore();
 	});
+
+	it("propagates non-BudgetExceededError from single-item budget check", async () => {
+		const engine = createMockEngine({
+			defaultResult: {
+				success: true,
+				response: "ok",
+				inputTokens: 100,
+				outputTokens: 50,
+			},
+		});
+
+		const enginesModule = await import("../../../src/engines/index.ts");
+		const createEngineSpy = spyOn(enginesModule, "createEngine").mockResolvedValue(engine);
+
+		const runsModule = await import("../../../src/state/runs.ts");
+		const createRunSpy = spyOn(runsModule, "createRun").mockResolvedValue({
+			id: "test-run-budget-err",
+			phase: "scan",
+			created_at: new Date().toISOString(),
+			updated_at: new Date().toISOString(),
+		});
+		const updatePhaseSpy = spyOn(runsModule, "updateRunPhaseInMetaWithLock").mockResolvedValue(undefined as never);
+
+		const lockModule = await import("../../../src/state/run-lock.ts");
+		const lockSpy = spyOn(lockModule, "acquireRunLock").mockReturnValue({ release: () => {} } as never);
+
+		const loaderModule = await import("../../../src/config/loader.ts");
+		const loadConfigSpy = spyOn(loaderModule, "loadUserConfig").mockResolvedValue({});
+
+		// Mock checkBudget to throw a non-BudgetExceededError
+		const costModule = await import("../../../src/runner/cost.ts");
+		const checkBudgetSpy = spyOn(costModule, "checkBudget").mockImplementation(() => {
+			throw new Error("unexpected internal error");
+		});
+
+		// Single item triggers the single-item (items.length === 1) code path
+		const phaseConfig = createMinimalPhaseConfig({
+			name: "scan",
+			loadItems: () => ["single-item"],
+		});
+
+		const config = createMockResolvedConfig();
+
+		// The non-BudgetExceededError must propagate, not be silently swallowed
+		await expect(
+			runPhase(phaseConfig, {
+				workDir: testDir,
+				config,
+				scope: "non-budget-error test",
+			}),
+		).rejects.toThrow("unexpected internal error");
+
+		checkBudgetSpy.mockRestore();
+		createEngineSpy.mockRestore();
+		createRunSpy.mockRestore();
+		updatePhaseSpy.mockRestore();
+		lockSpy.mockRestore();
+		loadConfigSpy.mockRestore();
+	});
 });
