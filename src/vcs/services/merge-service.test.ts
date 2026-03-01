@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as gitCli from "../backends/git-cli";
 import * as logger from "../../ui/logger";
 import { createVcsError, err, ok } from "../types";
-import { MergeService } from "./merge-service";
+import { MergeService, classifyCheckoutError } from "./merge-service";
 
 describe("MergeService.mergeInIsolatedWorktree — stash backup", () => {
 	let runGitCommandSpy: ReturnType<typeof spyOn>;
@@ -787,337 +787,6 @@ describe("MergeService.verifyMergeCompleted", () => {
 	});
 });
 
-describe("MergeService.safeMergeInWorktree — onConflict callback", () => {
-	let runGitCommandSpy: ReturnType<typeof spyOn>;
-	let mergeService: MergeService;
-	let logWarnSpy: ReturnType<typeof spyOn>;
-
-	function successResult(stdout = "", stderr = "") {
-		return ok({
-			exitCode: 0,
-			stdout,
-			stderr,
-			timedOut: false,
-			duration: 10,
-		});
-	}
-
-	function failedResult(exitCode: number, stderr = "") {
-		return ok({
-			exitCode,
-			stdout: "",
-			stderr,
-			timedOut: false,
-			duration: 10,
-		});
-	}
-
-	beforeEach(() => {
-		mergeService = new MergeService();
-		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
-		logWarnSpy = spyOn(logger, "logWarn").mockImplementation(() => {});
-	});
-
-	afterEach(() => {
-		runGitCommandSpy.mockRestore();
-		logWarnSpy.mockRestore();
-	});
-
-	function buildConflictMergeMock() {
-		const calls: Array<{ args: string[]; workDir?: string }> = [];
-
-		runGitCommandSpy.mockImplementation(async (args: string[], workDir?: string) => {
-			calls.push({ args: [...args], workDir });
-
-			// worktree prune
-			if (args[0] === "worktree" && args[1] === "prune") return successResult();
-			// worktree add
-			if (args[0] === "worktree" && args[1] === "add") return successResult();
-			// worktree remove
-			if (args[0] === "worktree" && args[1] === "remove") return successResult();
-			// merge source branch — fails with conflicts
-			if (args[0] === "merge" && args[1] !== "--abort") {
-				return failedResult(1, "CONFLICT (content): Merge conflict in file.ts");
-			}
-			// merge --abort
-			if (args[0] === "merge" && args[1] === "--abort") return successResult();
-			// getConflictedFiles: status --porcelain
-			if (args[0] === "status" && args[1] === "--porcelain") {
-				return successResult("UU file.ts\nUU other.ts");
-			}
-			// rev-parse HEAD for merge commit
-			if (args[0] === "rev-parse" && args[1] === "HEAD") return successResult("resolved-sha-123");
-
-			return successResult();
-		});
-
-		return calls;
-	}
-
-	test("onConflict is called with worktree path and conflicted files", async () => {
-		const calls = buildConflictMergeMock();
-
-		let capturedFiles: string[] | undefined;
-		let capturedWorktreePath: string | undefined;
-
-		await mergeService.safeMergeInWorktree({
-			sourceBranch: "feature",
-			targetBranch: "main",
-			workDir: "/tmp/main-repo",
-			runId: "run-1",
-			onConflict: async (files, worktreePath) => {
-				capturedFiles = files;
-				capturedWorktreePath = worktreePath;
-				return false;
-			},
-		});
-
-		expect(capturedFiles).toEqual(["file.ts", "other.ts"]);
-		// The worktree path should be inside .milhouse/runs, NOT the main workDir.
-		// Normalize separators for cross-platform (Windows uses backslashes).
-		const normalized = capturedWorktreePath!.replace(/\\/g, "/");
-		expect(normalized).toContain(".milhouse/runs/run-1/merge-worktrees/");
-		expect(capturedWorktreePath).not.toBe("/tmp/main-repo");
-	});
-
-	test("resolved conflicts return success with merge commit", async () => {
-		buildConflictMergeMock();
-
-		const result = await mergeService.safeMergeInWorktree({
-			sourceBranch: "feature",
-			targetBranch: "main",
-			workDir: "/tmp/main-repo",
-			runId: "run-1",
-			onConflict: async () => true, // Conflicts resolved
-		});
-
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.value.success).toBe(true);
-			expect(result.value.hasConflicts).toBe(false);
-			expect(result.value.mergeCommit).toBe("resolved-sha-123");
-		}
-	});
-
-	test("failed resolution falls through to abort flow", async () => {
-		const calls = buildConflictMergeMock();
-
-		const result = await mergeService.safeMergeInWorktree({
-			sourceBranch: "feature",
-			targetBranch: "main",
-			workDir: "/tmp/main-repo",
-			runId: "run-1",
-			onConflict: async () => false, // Cannot resolve
-		});
-
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.value.success).toBe(false);
-			expect(result.value.hasConflicts).toBe(true);
-			expect(result.value.conflictedFiles).toEqual(["file.ts", "other.ts"]);
-		}
-
-		// merge --abort should still have been called
-		const abortCall = calls.find(
-			(c) => c.args[0] === "merge" && c.args[1] === "--abort",
-		);
-		expect(abortCall).toBeDefined();
-	});
-
-	test("onConflict exception is handled gracefully — falls through to abort", async () => {
-		buildConflictMergeMock();
-
-		const result = await mergeService.safeMergeInWorktree({
-			sourceBranch: "feature",
-			targetBranch: "main",
-			workDir: "/tmp/main-repo",
-			runId: "run-1",
-			onConflict: async () => {
-				throw new Error("callback blew up");
-			},
-		});
-
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.value.success).toBe(false);
-			expect(result.value.hasConflicts).toBe(true);
-		}
-
-		// Warning should have been logged
-		const warnCalls = logWarnSpy.mock.calls.filter(
-			(c: any) => typeof c[0] === "string" && c[0].includes("onConflict callback threw"),
-		);
-		expect(warnCalls.length).toBe(1);
-	});
-});
-
-describe("MergeService.batchMergeWithRetry — onConflict forwarding", () => {
-	let mergeService: MergeService;
-	let safeMergeSpy: ReturnType<typeof spyOn>;
-
-	beforeEach(() => {
-		mergeService = new MergeService();
-		safeMergeSpy = spyOn(mergeService, "safeMergeInWorktree");
-	});
-
-	afterEach(() => {
-		safeMergeSpy.mockRestore();
-	});
-
-	test("onConflict receives worktreePath (not main workDir) via safeMergeInWorktree forwarding", async () => {
-		const mainWorkDir = "/tmp/main-repo";
-		const fakeWorktreePath = "/tmp/main-repo/.milhouse/runs/run-1/merge-worktrees/merge-fake";
-		const conflictedFiles = ["file-a.ts", "file-b.ts"];
-
-		// Mock safeMergeInWorktree: invoke the onConflict callback with the
-		// worktree path, simulating the real behavior where resolution happens
-		// inside the worktree before cleanup.
-		safeMergeSpy.mockImplementation(async (options: any) => {
-			if (options.onConflict) {
-				const resolved = await options.onConflict(conflictedFiles, fakeWorktreePath);
-				if (resolved) {
-					return ok({
-						success: true,
-						hasConflicts: false,
-						conflictedFiles: [],
-						mergeCommit: "resolved-commit-sha",
-					});
-				}
-			}
-			return ok({
-				success: false,
-				hasConflicts: true,
-				conflictedFiles,
-			});
-		});
-
-		// Capture arguments passed to the outer onConflict
-		let capturedFiles: string[] | undefined;
-		let capturedBranch: string | undefined;
-		let capturedPath: string | undefined;
-
-		const result = await mergeService.batchMergeWithRetry({
-			branches: ["feature-branch"],
-			targetBranch: "main",
-			workDir: mainWorkDir,
-			runId: "run-1",
-			maxRetries: 1,
-			onConflict: async (files, branch, worktreePath) => {
-				capturedFiles = files;
-				capturedBranch = branch;
-				capturedPath = worktreePath;
-				return false;
-			},
-		});
-
-		expect(result.ok).toBe(true);
-
-		// Verify onConflict was called with the worktree path (not main workDir)
-		expect(capturedFiles).toEqual(conflictedFiles);
-		expect(capturedBranch).toBe("feature-branch");
-		expect(capturedPath).toBe(fakeWorktreePath);
-		expect(capturedPath).not.toBe(mainWorkDir);
-	});
-
-	test("when onConflict resolved conflicts, branch is recorded as succeeded", async () => {
-		const mainWorkDir = "/tmp/main-repo";
-		const conflictedFiles = ["conflict.ts"];
-		const fakeWorktreePath = "/tmp/main-repo/.milhouse/runs/run-1/merge-worktrees/merge-fake";
-
-		safeMergeSpy.mockImplementation(async (options: any) => {
-			if (options.onConflict) {
-				const resolved = await options.onConflict(conflictedFiles, fakeWorktreePath);
-				if (resolved) {
-					return ok({
-						success: true,
-						hasConflicts: false,
-						conflictedFiles: [],
-						mergeCommit: "resolved-commit-sha",
-					});
-				}
-			}
-			return ok({
-				success: false,
-				hasConflicts: true,
-				conflictedFiles,
-			});
-		});
-
-		const result = await mergeService.batchMergeWithRetry({
-			branches: ["feature-branch"],
-			targetBranch: "main",
-			workDir: mainWorkDir,
-			runId: "run-1",
-			maxRetries: 1,
-			onConflict: async () => true, // Resolve successfully
-		});
-
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.value.succeeded).toEqual([
-				{ branch: "feature-branch", commit: "resolved-commit-sha" },
-			]);
-			expect(result.value.conflicted).toEqual([]);
-			expect(result.value.failed).toEqual([]);
-		}
-	});
-
-	test("batchMergeWithRetry without onConflict still records conflicts correctly", async () => {
-		safeMergeSpy.mockImplementation(async (options: any) => {
-			// No onConflict provided — should not invoke any callback
-			expect(options.onConflict).toBeUndefined();
-			return ok({
-				success: false,
-				hasConflicts: true,
-				conflictedFiles: ["a.ts"],
-			});
-		});
-
-		const result = await mergeService.batchMergeWithRetry({
-			branches: ["feature-branch"],
-			targetBranch: "main",
-			workDir: "/tmp/main-repo",
-			runId: "run-1",
-			maxRetries: 1,
-			// No onConflict
-		});
-
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.value.conflicted).toEqual([
-				{ branch: "feature-branch", files: ["a.ts"] },
-			]);
-			expect(result.value.succeeded).toEqual([]);
-		}
-	});
-
-	test("batchMergeWithRetry forwards onConflict through safeMergeInWorktree options", async () => {
-		const conflictedFiles = ["file.ts"];
-
-		safeMergeSpy.mockImplementation(async (options: any) => {
-			// Verify the onConflict callback was forwarded
-			expect(typeof options.onConflict).toBe("function");
-			return ok({
-				success: false,
-				hasConflicts: true,
-				conflictedFiles,
-			});
-		});
-
-		await mergeService.batchMergeWithRetry({
-			branches: ["feature-branch"],
-			targetBranch: "main",
-			workDir: "/tmp/main-repo",
-			runId: "run-1",
-			maxRetries: 1,
-			onConflict: async () => false,
-		});
-
-		// Verify safeMergeInWorktree was called with onConflict in options
-		expect(safeMergeSpy).toHaveBeenCalledTimes(1);
-	});
-});
-
 describe("Cleanup failure warning logging", () => {
 	let runGitCommandSpy: ReturnType<typeof spyOn>;
 	let existsSyncSpy: ReturnType<typeof spyOn>;
@@ -1301,7 +970,53 @@ describe("Cleanup failure warning logging", () => {
 	});
 });
 
-describe("MergeService.mergeAgentBranch — checkout error classification", () => {
+describe("classifyCheckoutError", () => {
+	test("returns DIRTY_WORKTREE for stderr with 'local changes' and 'would be overwritten'", () => {
+		const stderr =
+			"error: Your local changes to the following files would be overwritten by checkout:\n  file.ts\nPlease commit your changes or stash them before you switch branches.";
+		const error = classifyCheckoutError("feature-branch", stderr);
+
+		expect(error.code).toBe("DIRTY_WORKTREE");
+	});
+
+	test("returns BRANCH_LOCKED for stderr with 'already used by worktree'", () => {
+		const stderr =
+			"fatal: 'feature-branch' is already used by worktree at '/tmp/worktrees/wt-1'";
+		const error = classifyCheckoutError("feature-branch", stderr);
+
+		expect(error.code).toBe("BRANCH_LOCKED");
+	});
+
+	test("returns BRANCH_LOCKED for stderr with 'already checked out at'", () => {
+		const stderr =
+			"fatal: 'feature-branch' is already checked out at '/tmp/worktrees/wt-1'";
+		const error = classifyCheckoutError("feature-branch", stderr);
+
+		expect(error.code).toBe("BRANCH_LOCKED");
+	});
+
+	test("returns BRANCH_NOT_FOUND for unrecognized error text", () => {
+		const stderr = "error: pathspec 'nonexistent' did not match any file(s) known to git";
+		const error = classifyCheckoutError("nonexistent", stderr);
+
+		expect(error.code).toBe("BRANCH_NOT_FOUND");
+	});
+
+	test("includes branchName in the error message", () => {
+		const error = classifyCheckoutError("my-branch", "some error");
+
+		expect(error.message).toContain("my-branch");
+	});
+
+	test("preserves stderr in error context", () => {
+		const stderr = "fatal: some checkout error";
+		const error = classifyCheckoutError("branch", stderr);
+
+		expect(error.context?.stderr).toBe(stderr);
+	});
+});
+
+describe("createIntegrationBranch — checkout error classification", () => {
 	let runGitCommandSpy: ReturnType<typeof spyOn>;
 	let mergeService: MergeService;
 
@@ -1334,20 +1049,60 @@ describe("MergeService.mergeAgentBranch — checkout error classification", () =
 		runGitCommandSpy.mockRestore();
 	});
 
-	test("returns DIRTY_WORKTREE when checkout stderr contains dirty worktree message", async () => {
+	test("returns BRANCH_LOCKED when checkout fails with 'already used by worktree'", async () => {
 		runGitCommandSpy.mockImplementation(async (args: string[]) => {
-			if (args[0] === "checkout") {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "fatal: 'main' is already used by worktree at '/tmp/wt'");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
+		}
+	});
+
+	test("returns BRANCH_LOCKED when checkout fails with 'already checked out at'", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "fatal: 'main' is already checked out at '/tmp/wt'");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
+		}
+	});
+
+	test("returns DIRTY_WORKTREE when checkout fails with dirty worktree stderr", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
 				return failedResult(
 					1,
-					"error: Your local changes to the following files would be overwritten by checkout:\n  file.ts\nPlease commit your changes or stash them before you switch branches.",
+					"error: Your local changes to the following files would be overwritten by checkout",
 				);
 			}
 			return successResult();
 		});
 
-		const result = await mergeService.mergeAgentBranch({
-			source: "feature",
-			target: "main",
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
 			workDir: "/tmp/test-repo",
 		});
 
@@ -1357,72 +1112,67 @@ describe("MergeService.mergeAgentBranch — checkout error classification", () =
 		}
 	});
 
-	test("returns BRANCH_LOCKED when checkout stderr contains 'already used by worktree'", async () => {
+	test("returns BRANCH_NOT_FOUND for unrecognized checkout failure (existing behavior)", async () => {
 		runGitCommandSpy.mockImplementation(async (args: string[]) => {
-			if (args[0] === "checkout") {
-				return failedResult(
-					1,
-					"fatal: 'main' is already used by worktree at '/tmp/other-worktree'",
-				);
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "error: pathspec 'main' did not match any file(s) known to git");
 			}
 			return successResult();
 		});
 
-		const result = await mergeService.mergeAgentBranch({
-			source: "feature",
-			target: "main",
-			workDir: "/tmp/test-repo",
-		});
-
-		expect(result.ok).toBe(false);
-		if (!result.ok) {
-			expect(result.error.code).toBe("BRANCH_LOCKED");
-		}
-	});
-
-	test("returns BRANCH_LOCKED when checkout stderr contains 'already checked out at'", async () => {
-		runGitCommandSpy.mockImplementation(async (args: string[]) => {
-			if (args[0] === "checkout") {
-				return failedResult(
-					1,
-					"fatal: 'main' is already checked out at '/tmp/other-worktree'",
-				);
-			}
-			return successResult();
-		});
-
-		const result = await mergeService.mergeAgentBranch({
-			source: "feature",
-			target: "main",
-			workDir: "/tmp/test-repo",
-		});
-
-		expect(result.ok).toBe(false);
-		if (!result.ok) {
-			expect(result.error.code).toBe("BRANCH_LOCKED");
-		}
-	});
-
-	test("returns BRANCH_NOT_FOUND as fallback for unrecognized checkout errors", async () => {
-		runGitCommandSpy.mockImplementation(async (args: string[]) => {
-			if (args[0] === "checkout") {
-				return failedResult(
-					1,
-					"error: pathspec 'nonexistent' did not match any file(s) known to git",
-				);
-			}
-			return successResult();
-		});
-
-		const result = await mergeService.mergeAgentBranch({
-			source: "feature",
-			target: "main",
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
 			workDir: "/tmp/test-repo",
 		});
 
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			expect(result.error.code).toBe("BRANCH_NOT_FOUND");
+		}
+	});
+});
+
+describe("mergeAgentBranch — checkout error classification", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+	});
+
+	test("returns BRANCH_LOCKED when target checkout fails with 'already checked out at'", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "fatal: 'main' is already checked out at '/tmp/wt'");
+			}
+			return ok({ exitCode: 0, stdout: "", stderr: "", timedOut: false, duration: 10 });
+		});
+
+		const result = await mergeService.mergeAgentBranch({
+			source: "feature",
+			target: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
 		}
 	});
 });
