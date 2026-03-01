@@ -184,15 +184,25 @@ export function getExecutionProgress(state: ExecutionState): number {
 /**
  * Check if a task is ready for execution
  */
-export function isTaskReady(task: Task, _allTasks: Task[], completedTaskIds: string[]): boolean {
+export function isTaskReady(task: Task, allTasks: Task[], completedTaskIds: string[]): boolean {
 	// Task must be pending
 	if (task.status !== "pending") {
 		return false;
 	}
 
-	// All dependencies must be completed
+	// All dependencies must be completed (or non-existent, i.e. dangling)
 	const completedSet = new Set(completedTaskIds);
-	return task.depends_on.every((depId) => completedSet.has(depId));
+	const allTaskIds = new Set(allTasks.map((t) => t.id));
+	return task.depends_on.every((depId) => {
+		if (completedSet.has(depId)) {
+			return true;
+		}
+		// If the dep doesn't exist in allTasks, it's a dangling reference — treat as satisfied
+		if (!allTaskIds.has(depId)) {
+			return true;
+		}
+		return false;
+	});
 }
 
 /**

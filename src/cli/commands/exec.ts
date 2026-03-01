@@ -331,7 +331,11 @@ export function getReadyTasksForRun(runId: string, workDir: string): Task[] {
 		// Check if all dependencies are done
 		const allDepsDone = task.depends_on.every((depId: string) => {
 			const dep = tasks.find((t: Task) => t.id === depId);
-			return dep?.status === "done";
+			if (!dep) {
+				logWarn(`Task '${task.id}' has dangling dependency '${depId}' (not found in task list), treating as satisfied`);
+				return true;
+			}
+			return dep.status === "done";
 		});
 
 		if (allDepsDone) {
