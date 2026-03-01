@@ -1015,3 +1015,120 @@ describe("classifyCheckoutError", () => {
 		expect(error.context?.stderr).toBe(stderr);
 	});
 });
+
+describe("createIntegrationBranch — checkout error classification", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function successResult(stdout = "", stderr = "") {
+		return ok({
+			exitCode: 0,
+			stdout,
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+	});
+
+	test("returns BRANCH_LOCKED when checkout fails with 'already used by worktree'", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "fatal: 'main' is already used by worktree at '/tmp/wt'");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
+		}
+	});
+
+	test("returns BRANCH_LOCKED when checkout fails with 'already checked out at'", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "fatal: 'main' is already checked out at '/tmp/wt'");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
+		}
+	});
+
+	test("returns DIRTY_WORKTREE when checkout fails with dirty worktree stderr", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(
+					1,
+					"error: Your local changes to the following files would be overwritten by checkout",
+				);
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("DIRTY_WORKTREE");
+		}
+	});
+
+	test("returns BRANCH_NOT_FOUND for unrecognized checkout failure (existing behavior)", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "error: pathspec 'main' did not match any file(s) known to git");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.createIntegrationBranch({
+			groupNum: 1,
+			baseBranch: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_NOT_FOUND");
+		}
+	});
+});

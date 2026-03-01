@@ -176,11 +176,7 @@ export class MergeService implements IMergeService {
 		}
 
 		if (checkoutResult.value.exitCode !== 0) {
-			return err(
-				createVcsError("BRANCH_NOT_FOUND", `Failed to checkout ${baseBranch}`, {
-					context: { stderr: checkoutResult.value.stderr },
-				}),
-			);
+			return err(classifyCheckoutError(baseBranch, checkoutResult.value.stderr));
 		}
 
 		// Delete the branch if it exists (failure is expected if branch doesn't exist)
