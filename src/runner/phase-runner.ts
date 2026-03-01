@@ -195,7 +195,11 @@ export async function runPhase<TItem, TResult>(
 			const items = await phaseConfig.loadItems(ctx);
 			if (items.length === 0 && phaseConfig.mode === "per-item") {
 				logWarn(`No items to process for phase "${phaseConfig.name}"`);
-				return makeResult(phaseConfig.name, runId, true, [], 0, 0, 0, startTime, { runId });
+				const earlyNextPhase = phaseConfig.nextPhase ? phaseConfig.nextPhase([], ctx) : undefined;
+				if (earlyNextPhase) {
+					await updateRunPhaseInMetaWithLock(runId, earlyNextPhase, workDir);
+				}
+				return makeResult(phaseConfig.name, runId, true, [], 0, 0, 0, startTime, { runId }, earlyNextPhase);
 			}
 
 			// 8b. Display phase header
@@ -276,10 +280,11 @@ export async function runPhase<TItem, TResult>(
 		}
 
 		// 15. Phase transition
+		let computedNextPhase: RunPhase | undefined;
 		if (phaseConfig.nextPhase) {
-			const nextPhase = phaseConfig.nextPhase(allResults, ctx);
-			if (nextPhase) {
-				await updateRunPhaseInMetaWithLock(runId, nextPhase, workDir);
+			computedNextPhase = phaseConfig.nextPhase(allResults, ctx);
+			if (computedNextPhase) {
+				await updateRunPhaseInMetaWithLock(runId, computedNextPhase, workDir);
 			}
 		}
 
@@ -295,6 +300,7 @@ export async function runPhase<TItem, TResult>(
 			phaseCost,
 			startTime,
 			{ runId },
+			computedNextPhase,
 		);
 	} finally {
 		// 16. Release lock
@@ -553,6 +559,7 @@ function makeResult<TResult>(
 	cost: number,
 	startTime: number,
 	data?: Record<string, unknown>,
+	nextPhase?: RunPhase,
 ): PhaseRunResult<TResult> {
 	return {
 		phase,
@@ -564,5 +571,6 @@ function makeResult<TResult>(
 		cost,
 		duration: Date.now() - startTime,
 		data,
+		nextPhase,
 	};
 }
