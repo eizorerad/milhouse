@@ -39,6 +39,7 @@ import {
 	returnToBaseBranch,
 } from "../../vcs/services/branch-service.ts";
 import { createPullRequest } from "../../vcs/services/pr-service.ts";
+import { resetStaleRunningTasks } from "../../runner/phases/exec.ts";
 import type { RuntimeOptions } from "../runtime-options.ts";
 import { selectOrRequireRun } from "./utils/run-selector.ts";
 
@@ -384,6 +385,9 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 
 	const { runId, runMeta } = runSelection;
 	let currentRun = runMeta;
+
+	// Recover tasks stuck in 'running' status from a previous crash
+	resetStaleRunningTasks(runId, workDir);
 
 	// Load tasks for the selected run
 	const allTasks = loadTasksForRun(runId, workDir);

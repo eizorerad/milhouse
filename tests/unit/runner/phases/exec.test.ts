@@ -13,6 +13,7 @@ import {
 	buildExecutorPrompt,
 	execPhaseConfig,
 	getReadyTasksForRun,
+	resetStaleRunningTasks,
 } from "../../../../src/runner/phases/exec.ts";
 import { createRun } from "../../../../src/state/runs.ts";
 import { createTaskForRun } from "../../../../src/state/tasks.ts";
@@ -420,6 +421,212 @@ describe("execPhaseConfig", () => {
 			};
 			const next = execPhaseConfig.nextPhase!([], ctx);
 			expect(next).toBe("exec");
+		});
+	});
+
+	// ============================================================================
+	// resetStaleRunningTasks
+	// ============================================================================
+
+	describe("resetStaleRunningTasks", () => {
+		const testDir = join(process.cwd(), ".test-exec-reset");
+
+		beforeEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+			mkdirSync(join(testDir, ".milhouse"), { recursive: true });
+		});
+
+		afterEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+		});
+
+		function createTestTaskData(
+			issueId: string,
+			overrides: Partial<Omit<Task, "id" | "created_at" | "updated_at">> = {},
+		): Omit<Task, "id" | "created_at" | "updated_at"> {
+			return {
+				title: `Task for ${issueId}`,
+				issue_id: issueId,
+				status: "pending",
+				parallel_group: 0,
+				depends_on: [],
+				files: [],
+				checks: [],
+				acceptance: [],
+				...overrides,
+			};
+		}
+
+		it("resets running tasks to pending on phase start", async () => {
+			const run = await createRun({ scope: "reset running", workDir: testDir });
+			const t1 = createTaskForRun(run.id, createTestTaskData("ISS-1", { status: "running" }), testDir);
+			const t2 = createTaskForRun(run.id, createTestTaskData("ISS-2", { status: "running" }), testDir);
+
+			const resetCount = resetStaleRunningTasks(run.id, testDir);
+			expect(resetCount).toBe(2);
+
+			const ready = getReadyTasksForRun(run.id, testDir);
+			const ids = ready.map((t) => t.id);
+			expect(ids).toContain(t1.id);
+			expect(ids).toContain(t2.id);
+			expect(ready.every((t) => t.status === "pending")).toBe(true);
+		});
+
+		it("does not affect tasks in other statuses", async () => {
+			const run = await createRun({ scope: "reset other statuses", workDir: testDir });
+			createTaskForRun(run.id, createTestTaskData("ISS-1", { status: "done" }), testDir);
+			createTaskForRun(run.id, createTestTaskData("ISS-2", { status: "failed" }), testDir);
+			createTaskForRun(run.id, createTestTaskData("ISS-3", { status: "pending" }), testDir);
+			createTaskForRun(run.id, createTestTaskData("ISS-4", { status: "merge_error" }), testDir);
+
+			const resetCount = resetStaleRunningTasks(run.id, testDir);
+			expect(resetCount).toBe(0);
+		});
+
+		it("is a no-op when no running tasks exist", async () => {
+			const run = await createRun({ scope: "reset noop", workDir: testDir });
+			createTaskForRun(run.id, createTestTaskData("ISS-1", { status: "pending" }), testDir);
+			createTaskForRun(run.id, createTestTaskData("ISS-2", { status: "done" }), testDir);
+
+			const resetCount = resetStaleRunningTasks(run.id, testDir);
+			expect(resetCount).toBe(0);
+		});
+
+		it("recovered running tasks are picked up by getReadyTasksForRun", async () => {
+			const run = await createRun({ scope: "reset then ready", workDir: testDir });
+			const t1 = createTaskForRun(run.id, createTestTaskData("ISS-1", { status: "running" }), testDir);
+
+			// Before reset, running task is not returned by getReadyTasksForRun
+			const beforeReady = getReadyTasksForRun(run.id, testDir);
+			expect(beforeReady.length).toBe(0);
+
+			// Reset and verify it's now picked up
+			resetStaleRunningTasks(run.id, testDir);
+			const afterReady = getReadyTasksForRun(run.id, testDir);
+			expect(afterReady.length).toBe(1);
+			expect(afterReady[0].id).toBe(t1.id);
+			expect(afterReady[0].status).toBe("pending");
+		});
+	});
+
+	// ============================================================================
+	// nextPhase with running tasks (deadlock scenario)
+	// ============================================================================
+
+	describe("nextPhase with running tasks", () => {
+		const testDir = join(process.cwd(), ".test-exec-nextphase-running");
+
+		beforeEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+			mkdirSync(join(testDir, ".milhouse"), { recursive: true });
+		});
+
+		afterEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+		});
+
+		function createTestTaskData(
+			issueId: string,
+			overrides: Partial<Omit<Task, "id" | "created_at" | "updated_at">> = {},
+		): Omit<Task, "id" | "created_at" | "updated_at"> {
+			return {
+				title: `Task for ${issueId}`,
+				issue_id: issueId,
+				status: "pending",
+				parallel_group: 0,
+				depends_on: [],
+				files: [],
+				checks: [],
+				acceptance: [],
+				...overrides,
+			};
+		}
+
+		it("returns 'exec' when tasks are stuck in running status", async () => {
+			const run = await createRun({ scope: "nextphase running", workDir: testDir });
+			createTaskForRun(run.id, createTestTaskData("ISS-1", { status: "done" }), testDir);
+			createTaskForRun(run.id, createTestTaskData("ISS-2", { status: "running" }), testDir);
+
+			const ctx = {
+				runId: run.id,
+				workDir: testDir,
+				engine: {} as never,
+				config: {} as never,
+				startTime: Date.now(),
+				userConfig: {} as never,
+				store: {},
+			};
+			const next = execPhaseConfig.nextPhase!([], ctx);
+			// Running tasks are neither done/skipped nor failed, so nextPhase returns 'exec'
+			// This documents the deadlock scenario that beforeRun now prevents
+			expect(next).toBe("exec");
+		});
+	});
+
+	// ============================================================================
+	// beforeRun hook
+	// ============================================================================
+
+	describe("beforeRun", () => {
+		it("execPhaseConfig.beforeRun is defined", () => {
+			expect(typeof execPhaseConfig.beforeRun).toBe("function");
+		});
+
+		it("beforeRun resets running tasks then getReadyTasksForRun picks them up", async () => {
+			const testDir = join(process.cwd(), ".test-exec-beforerun");
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+			mkdirSync(join(testDir, ".milhouse"), { recursive: true });
+
+			try {
+				const run = await createRun({ scope: "beforeRun integration", workDir: testDir });
+				const t1 = createTaskForRun(
+					run.id,
+					{
+						title: "Stuck task",
+						issue_id: "ISS-1",
+						status: "running",
+						parallel_group: 0,
+						depends_on: [],
+						files: [],
+						checks: [],
+						acceptance: [],
+					},
+					testDir,
+				);
+
+				const ctx = {
+					runId: run.id,
+					workDir: testDir,
+					engine: {} as never,
+					config: {} as never,
+					startTime: Date.now(),
+					userConfig: {} as never,
+					store: {},
+				};
+
+				// Call beforeRun
+				execPhaseConfig.beforeRun!(ctx);
+
+				// Verify recovered task is now picked up
+				const ready = getReadyTasksForRun(run.id, testDir);
+				expect(ready.length).toBe(1);
+				expect(ready[0].id).toBe(t1.id);
+				expect(ready[0].status).toBe("pending");
+			} finally {
+				if (existsSync(testDir)) {
+					rmSync(testDir, { recursive: true, force: true });
+				}
+			}
 		});
 	});
 

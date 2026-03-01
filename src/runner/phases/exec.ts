@@ -150,6 +150,29 @@ ${task.rollback}`);
 }
 
 /**
+ * Reset tasks stuck in 'running' status back to 'pending'.
+ *
+ * When the pipeline crashes during execution, tasks that were set to 'running'
+ * become permanently orphaned. This function recovers them so they can be
+ * retried. Safe to call at beforeRun time when no tasks are legitimately
+ * executing yet.
+ */
+export function resetStaleRunningTasks(runId: string, workDir: string): number {
+	const tasks = loadTasksForRun(runId, workDir);
+	let resetCount = 0;
+
+	for (const task of tasks) {
+		if (task.status === "running") {
+			updateTaskForRun(runId, task.id, { status: "pending" }, workDir);
+			logWarn(`Resetting stale running task ${task.id} to pending`);
+			resetCount++;
+		}
+	}
+
+	return resetCount;
+}
+
+/**
  * Get tasks ready for execution (pending or merge_error with all deps satisfied)
  */
 export function getReadyTasksForRun(runId: string, workDir: string): Task[] {
@@ -388,6 +411,10 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 	role: "EX",
 	mode: "per-item",
 	defaultParallel: 3,
+
+	beforeRun(ctx: PhaseContext) {
+		resetStaleRunningTasks(ctx.runId, ctx.workDir);
+	},
 
 	// Not used — customExecute replaces the standard flow
 	loadItems() {
