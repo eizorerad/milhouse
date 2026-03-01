@@ -248,7 +248,7 @@ export async function mergeCompletedBranches(
 						workDir,
 						modelOverride,
 						conflictIssueCtx,
-						"rebase",
+						"auto",
 					);
 					const resolved = resolutionResult.success;
 	

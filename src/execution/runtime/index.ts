@@ -123,6 +123,7 @@ export type { FollowUpTaskConfig } from "./retry.ts";
 export {
 	// Detection
 	detectMergeConflicts,
+	detectConflictMode,
 	createMergeConflictInfo,
 	// Types
 	type ConflictMode,
