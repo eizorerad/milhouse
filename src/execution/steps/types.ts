@@ -188,6 +188,8 @@ export interface ExecutionResult {
 	totalInputTokens: number;
 	/** Total output tokens */
 	totalOutputTokens: number;
+	/** Callback errors from onIssueComplete/onMergeComplete failures */
+	callbackErrors?: string[];
 }
 
 /**

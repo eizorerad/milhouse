@@ -119,6 +119,8 @@ export interface IssueExecutionResult {
 	branchName?: string;
 	/** Error message if failed */
 	error?: string;
+	/** Error message from onIssueComplete callback if it threw */
+	callbackError?: string;
 }
 
 /**
