@@ -535,7 +535,7 @@ export interface IMergeService {
 		workDir: string,
 	): Promise<VcsResult<BatchMergeResult>>;
 	abortMerge(workDir: string): Promise<VcsResult<void>>;
-	completeMerge(workDir: string, resolvedFiles: string[]): Promise<VcsResult<boolean>>;
+	completeMerge(workDir: string): Promise<VcsResult<boolean>>;
 	getConflictedFiles(workDir: string): Promise<VcsResult<string[]>>;
 	isMergeInProgress(workDir: string): Promise<VcsResult<boolean>>;
 	getMergeBase(branch1: string, branch2: string, workDir: string): Promise<VcsResult<string>>;

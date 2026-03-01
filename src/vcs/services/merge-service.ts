@@ -262,10 +262,11 @@ export class MergeService implements IMergeService {
 	}
 
 	/**
-	 * Complete a merge after conflicts have been resolved
-	 * Only stages the specific resolved files and commits if there are no remaining conflicts
+	 * Complete a merge after conflicts have been resolved.
+	 * Stages all changes with git add -A (like continueRebase) to capture
+	 * AI modifications to non-conflicted files, then commits if no conflicts remain.
 	 */
-	async completeMerge(workDir: string, resolvedFiles: string[]): Promise<VcsResult<boolean>> {
+	async completeMerge(workDir: string): Promise<VcsResult<boolean>> {
 		// Verify no conflicts remain
 		const remainingConflictsResult = await this.getConflictedFiles(workDir);
 		if (!remainingConflictsResult.ok) {
@@ -276,12 +277,10 @@ export class MergeService implements IMergeService {
 			return ok(false);
 		}
 
-		// Stage only the specific resolved files to avoid staging unrelated changes
-		for (const file of resolvedFiles) {
-			const addResult = await runGitCommand(["add", file], workDir);
-			if (!addResult.ok) {
-				return addResult;
-			}
+		// Stage all changes to capture AI modifications to non-conflicted files
+		const addResult = await runGitCommand(["add", "-A"], workDir);
+		if (!addResult.ok) {
+			return addResult;
 		}
 
 		// Use --no-edit to preserve Git's prepared merge message
@@ -1333,9 +1332,8 @@ export async function abortMerge(workDir: string): Promise<VcsResult<void>> {
  */
 export async function completeMerge(
 	workDir: string,
-	resolvedFiles: string[],
 ): Promise<VcsResult<boolean>> {
-	return defaultService.completeMerge(workDir, resolvedFiles);
+	return defaultService.completeMerge(workDir);
 }
 
 /**

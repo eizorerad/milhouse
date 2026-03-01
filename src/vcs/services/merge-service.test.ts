@@ -656,6 +656,159 @@ describe("MergeService.continueRebase", () => {
 	});
 });
 
+describe("MergeService.completeMerge", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function successResult(stdout = "", stderr = "") {
+		return ok({
+			exitCode: 0,
+			stdout,
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+	});
+
+	test("stages all changes with git add -A (not individual files)", async () => {
+		const calls: string[][] = [];
+
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			calls.push([...args]);
+
+			// getConflictedFiles: status --porcelain — no conflicts remain
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("");
+			}
+			// git add -A
+			if (args[0] === "add" && args[1] === "-A") {
+				return successResult();
+			}
+			// git commit --no-edit
+			if (args[0] === "commit" && args[1] === "--no-edit") {
+				return successResult();
+			}
+			return successResult();
+		});
+
+		await mergeService.completeMerge("/tmp/test-repo");
+
+		// git add -A should have been called exactly once
+		const addAllCalls = calls.filter(
+			(c) => c[0] === "add" && c[1] === "-A",
+		);
+		expect(addAllCalls.length).toBe(1);
+
+		// No individual file staging (add calls where second arg is a filename, not -A)
+		const individualAddCalls = calls.filter(
+			(c) => c[0] === "add" && c[1] !== "-A",
+		);
+		expect(individualAddCalls.length).toBe(0);
+	});
+
+	test("returns ok(false) when conflicts remain", async () => {
+		const calls: string[][] = [];
+
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			calls.push([...args]);
+
+			// getConflictedFiles: status --porcelain — conflicts remain
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("UU file.ts");
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.completeMerge("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(false);
+		}
+
+		// No git add or git commit should have been called
+		const addCalls = calls.filter((c) => c[0] === "add");
+		const commitCalls = calls.filter((c) => c[0] === "commit");
+		expect(addCalls.length).toBe(0);
+		expect(commitCalls.length).toBe(0);
+	});
+
+	test("returns error when git add -A fails", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			// getConflictedFiles: no conflicts
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("");
+			}
+			// git add -A fails
+			if (args[0] === "add" && args[1] === "-A") {
+				return err(createVcsError("COMMAND_FAILED", "git add -A failed"));
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.completeMerge("/tmp/test-repo");
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("COMMAND_FAILED");
+		}
+	});
+
+	test("returns ok(true) on successful merge commit", async () => {
+		const calls: string[][] = [];
+
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			calls.push([...args]);
+
+			// getConflictedFiles: no conflicts
+			if (args[0] === "status" && args[1] === "--porcelain") {
+				return successResult("");
+			}
+			// git add -A
+			if (args[0] === "add" && args[1] === "-A") {
+				return successResult();
+			}
+			// git commit --no-edit
+			if (args[0] === "commit" && args[1] === "--no-edit") {
+				return successResult();
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.completeMerge("/tmp/test-repo");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe(true);
+		}
+
+		// Verify commit was called
+		const commitCalls = calls.filter(
+			(c) => c[0] === "commit" && c[1] === "--no-edit",
+		);
+		expect(commitCalls.length).toBe(1);
+	});
+});
+
 describe("MergeService.verifyMergeCompleted", () => {
 	let runGitCommandSpy: ReturnType<typeof spyOn>;
 	let mergeService: MergeService;
