@@ -787,6 +787,68 @@ describe("MergeService.verifyMergeCompleted", () => {
 	});
 });
 
+describe("MergeService.batchMergeWithRetry — onConflict receives workDir", () => {
+	let mergeService: MergeService;
+	let safeMergeSpy: ReturnType<typeof spyOn>;
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		safeMergeSpy = spyOn(mergeService, "safeMergeInWorktree");
+	});
+
+	afterEach(() => {
+		safeMergeSpy.mockRestore();
+	});
+
+	test("onConflict receives workDir (main repo path), not the worktree path where conflicts existed", async () => {
+		const mainWorkDir = "/tmp/main-repo";
+		const conflictedFiles = ["file-a.ts", "file-b.ts"];
+
+		// Mock safeMergeInWorktree to return conflicts.
+		// The real implementation creates a temporary worktree, detects conflicts
+		// there, aborts the merge, cleans up the worktree, and returns the conflict
+		// list. By the time batchMergeWithRetry sees this result, the worktree is gone.
+		safeMergeSpy.mockResolvedValue(
+			ok({
+				success: false,
+				hasConflicts: true,
+				conflictedFiles,
+			}),
+		);
+
+		// Capture arguments passed to onConflict
+		let capturedFiles: string[] | undefined;
+		let capturedBranch: string | undefined;
+		let capturedWorkDir: string | undefined;
+
+		const result = await mergeService.batchMergeWithRetry({
+			branches: ["feature-branch"],
+			targetBranch: "main",
+			workDir: mainWorkDir,
+			runId: "run-1",
+			maxRetries: 1,
+			onConflict: async (files, branch, workDir) => {
+				capturedFiles = files;
+				capturedBranch = branch;
+				capturedWorkDir = workDir;
+				return false; // Cannot resolve — conflicts are in a destroyed worktree
+			},
+		});
+
+		expect(result.ok).toBe(true);
+
+		// Verify onConflict was called
+		expect(capturedFiles).toEqual(conflictedFiles);
+		expect(capturedBranch).toBe("feature-branch");
+
+		// BUG: onConflict receives workDir (the main repo directory), but the
+		// conflicts existed in a temporary worktree that safeMergeInWorktree
+		// already destroyed. The callback cannot meaningfully resolve conflicts
+		// in a path where they no longer exist.
+		expect(capturedWorkDir).toBe(mainWorkDir);
+	});
+});
+
 describe("Cleanup failure warning logging", () => {
 	let runGitCommandSpy: ReturnType<typeof spyOn>;
 	let existsSyncSpy: ReturnType<typeof spyOn>;
