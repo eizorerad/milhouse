@@ -67,6 +67,38 @@ export function generateMarkdownReport(report: JsonRunReport): string {
 		lines.push("");
 	}
 
+	// Verification
+	if (report.verification) {
+		const v = report.verification;
+		const statusIcon = v.overall_pass ? "PASS" : "FAIL";
+		lines.push("## Verification");
+		lines.push("");
+		lines.push(`**Overall**: ${statusIcon}`);
+		if (v.regressions_found) {
+			lines.push("**Warning**: Regressions detected");
+		}
+		lines.push("");
+		lines.push("| Task | Status | Failed Gates | Summary |");
+		lines.push("|------|--------|--------------|---------|");
+		for (const t of v.tasks) {
+			const taskStatus = t.overall_pass ? "PASS" : "FAIL";
+			const failedGates = t.gates
+				.filter((g) => !g.passed)
+				.map((g) => g.gate)
+				.join(", ") || "-";
+			lines.push(`| ${t.task_id} | ${taskStatus} | ${failedGates} | ${t.summary} |`);
+		}
+		lines.push("");
+		if (v.recommendations.length > 0) {
+			lines.push("### Recommendations");
+			lines.push("");
+			for (const rec of v.recommendations) {
+				lines.push(`- ${rec}`);
+			}
+			lines.push("");
+		}
+	}
+
 	// Errors
 	if (report.errors.length > 0) {
 		lines.push("## Errors");

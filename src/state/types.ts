@@ -290,6 +290,7 @@ export const STATE_FILES = {
 	tasks: "tasks.json",
 	graph: "graph.json",
 	executions: "executions.json",
+	verification: "verification.json",
 } as const;
 
 /**

@@ -9,11 +9,16 @@
  * Results are aggregated: all tasks must pass for the run to pass.
  */
 
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import pc from "picocolors";
 import { buildVerifyPromptForTask } from "../../agents/prompts/verify.ts";
 import { VERIFY_SCHEMA } from "../../agents/schemas/verify.ts";
+import { saveVerificationReport } from "../../cli/commands/utils/verification-report.ts";
+import type { VerificationReport } from "../../cli/commands/utils/verification-types.ts";
+import { getRunStateDir } from "../../state/runs.ts";
 import { loadTasksForRun } from "../../state/tasks.ts";
-import type { RunPhase, Task } from "../../state/types.ts";
+import { STATE_FILES, type RunPhase, type Task } from "../../state/types.ts";
 import { logWarn } from "../../ui/logger.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
 import { displayPhaseSummaryHeader } from "../phase-runner.ts";
@@ -90,9 +95,119 @@ export const verifyPhaseConfig: PhaseConfig<Task, VerifyResult> = {
 		}
 	},
 
-	saveResults() {
-		// Verification results are logged/displayed but don't mutate state
-		// The phase transition handles marking the run as completed/failed
+	saveResults(results, ctx) {
+		const now = new Date().toISOString();
+
+		// Aggregate per-task results
+		const taskResults: Array<{
+			task_id: string;
+			overall_pass: boolean;
+			gates: Array<{ gate: string; passed: boolean; message?: string }>;
+			recommendations: string[];
+			regressions_found: boolean;
+			summary: string;
+		}> = [];
+		let overallPass = true;
+		let regressionsFound = false;
+		const allRecommendations: string[] = [];
+
+		for (const r of results) {
+			if (!r.success) {
+				overallPass = false;
+				taskResults.push({
+					task_id: (r.item as Task).id,
+					overall_pass: false,
+					gates: [{ gate: "execution", passed: false, message: r.error ?? "Agent failed" }],
+					recommendations: [],
+					regressions_found: false,
+					summary: r.error ?? "Verification agent failed",
+				});
+				continue;
+			}
+			const v = r.result;
+			if (!v.overall_pass) overallPass = false;
+			if (v.regressions_found) regressionsFound = true;
+			allRecommendations.push(...v.recommendations);
+			taskResults.push({
+				task_id: v.task_id,
+				overall_pass: v.overall_pass,
+				gates: v.gates,
+				recommendations: v.recommendations,
+				regressions_found: v.regressions_found,
+				summary: v.summary,
+			});
+		}
+
+		const tasksPassedCount = taskResults.filter((t) => t.overall_pass).length;
+		const tasksFailedCount = taskResults.length - tasksPassedCount;
+
+		// Write verification.json to state directory
+		const verificationData = {
+			run_id: ctx.runId,
+			created_at: now,
+			overall_pass: overallPass,
+			tasks_verified: taskResults.length,
+			tasks_passed: tasksPassedCount,
+			tasks_failed: tasksFailedCount,
+			regressions_found: regressionsFound,
+			tasks: taskResults,
+			recommendations: [...new Set(allRecommendations)],
+		};
+
+		const stateDir = getRunStateDir(ctx.runId, ctx.workDir);
+		if (!existsSync(stateDir)) {
+			mkdirSync(stateDir, { recursive: true });
+		}
+		writeFileSync(
+			join(stateDir, STATE_FILES.verification),
+			JSON.stringify(verificationData, null, 2),
+		);
+
+		// Build and save the full VerificationReport format
+		let totalInput = 0;
+		let totalOutput = 0;
+		for (const r of results) {
+			totalInput += r.inputTokens;
+			totalOutput += r.outputTokens;
+		}
+
+		// Aggregate all gates across tasks
+		const allGateResults: Array<{ gate: string; passed: boolean; message?: string; evidence: never[] }> = [];
+		for (const t of taskResults) {
+			for (const g of t.gates) {
+				allGateResults.push({ gate: g.gate, passed: g.passed, message: g.message, evidence: [] });
+			}
+		}
+		const gatesPassed = allGateResults.filter((g) => g.passed).length;
+		const gatesFailed = allGateResults.length - gatesPassed;
+
+		const report: VerificationReport = {
+			run_id: ctx.runId,
+			created_at: now,
+			duration_ms: Date.now() - ctx.startTime,
+			overall_success: overallPass,
+			gates: {
+				total: allGateResults.length,
+				passed: gatesPassed,
+				failed: gatesFailed,
+				results: allGateResults,
+			},
+			issues: [],
+			ai_verification: {
+				overall_pass: overallPass,
+				recommendations: [...new Set(allRecommendations)],
+				regressions_found: regressionsFound,
+				summary: `${tasksPassedCount}/${taskResults.length} tasks passed verification`,
+			},
+			tokens: { input: totalInput, output: totalOutput },
+			tasks: {
+				completed: tasksPassedCount,
+				failed: tasksFailedCount,
+				total: taskResults.length,
+			},
+		};
+
+		saveVerificationReport(report, ctx.workDir, ctx.runId);
 	},
 
 	formatSummary(results, ctx) {

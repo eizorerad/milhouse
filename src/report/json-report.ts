@@ -2,12 +2,13 @@
  * JSON report generator -- machine-readable run report
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunCost } from "../runner/cost.ts";
 import { loadIssuesForRun } from "../state/issues.ts";
-import { getRunDir, loadRunMeta } from "../state/runs.ts";
+import { getRunDir, getRunStateDir, loadRunMeta } from "../state/runs.ts";
 import { loadTasksForRun } from "../state/tasks.ts";
+import { STATE_FILES } from "../state/types.ts";
 
 /** JSON report schema */
 export interface JsonRunReport {
@@ -47,6 +48,22 @@ export interface JsonRunReport {
 		tasks: string[];
 	}>;
 	errors: string[];
+	verification?: {
+		overall_pass: boolean;
+		tasks_verified: number;
+		tasks_passed: number;
+		tasks_failed: number;
+		regressions_found: boolean;
+		tasks: Array<{
+			task_id: string;
+			overall_pass: boolean;
+			gates: Array<{ gate: string; passed: boolean; message?: string }>;
+			recommendations: string[];
+			regressions_found: boolean;
+			summary: string;
+		}>;
+		recommendations: string[];
+	};
 }
 
 /**
@@ -68,6 +85,26 @@ export function generateJsonReport(
 	const partial = issues.filter((i) => i.status === "PARTIAL").length;
 	const completed = tasks.filter((t) => t.status === "done").length;
 	const failed = tasks.filter((t) => t.status === "failed").length;
+
+	// Load verification data (gracefully handle missing file)
+	let verification: JsonRunReport["verification"];
+	const verificationPath = join(getRunStateDir(runId, workDir), STATE_FILES.verification);
+	if (existsSync(verificationPath)) {
+		try {
+			const raw = JSON.parse(readFileSync(verificationPath, "utf-8"));
+			verification = {
+				overall_pass: raw.overall_pass,
+				tasks_verified: raw.tasks_verified,
+				tasks_passed: raw.tasks_passed,
+				tasks_failed: raw.tasks_failed,
+				regressions_found: raw.regressions_found,
+				tasks: raw.tasks,
+				recommendations: raw.recommendations,
+			};
+		} catch {
+			// Corrupted or invalid verification.json — skip
+		}
+	}
 
 	return {
 		version: "0.2.0",
@@ -104,6 +141,7 @@ export function generateJsonReport(
 			tasks: issue.related_task_ids,
 		})),
 		errors: [],
+		verification,
 	};
 }
 
