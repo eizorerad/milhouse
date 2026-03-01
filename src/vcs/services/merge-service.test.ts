@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as gitCli from "../backends/git-cli";
 import * as logger from "../../ui/logger";
 import { createVcsError, err, ok } from "../types";
-import { MergeService } from "./merge-service";
+import { MergeService, classifyCheckoutError } from "./merge-service";
 
 describe("MergeService.mergeInIsolatedWorktree — stash backup", () => {
 	let runGitCommandSpy: ReturnType<typeof spyOn>;
@@ -967,5 +967,51 @@ describe("Cleanup failure warning logging", () => {
 			(c: any) => typeof c[0] === "string" && c[0].includes("Failed to remove merge worktree"),
 		);
 		expect(warnCalls.length).toBe(1);
+	});
+});
+
+describe("classifyCheckoutError", () => {
+	test("returns DIRTY_WORKTREE for stderr with 'local changes' and 'would be overwritten'", () => {
+		const stderr =
+			"error: Your local changes to the following files would be overwritten by checkout:\n  file.ts\nPlease commit your changes or stash them before you switch branches.";
+		const error = classifyCheckoutError("feature-branch", stderr);
+
+		expect(error.code).toBe("DIRTY_WORKTREE");
+	});
+
+	test("returns BRANCH_LOCKED for stderr with 'already used by worktree'", () => {
+		const stderr =
+			"fatal: 'feature-branch' is already used by worktree at '/tmp/worktrees/wt-1'";
+		const error = classifyCheckoutError("feature-branch", stderr);
+
+		expect(error.code).toBe("BRANCH_LOCKED");
+	});
+
+	test("returns BRANCH_LOCKED for stderr with 'already checked out at'", () => {
+		const stderr =
+			"fatal: 'feature-branch' is already checked out at '/tmp/worktrees/wt-1'";
+		const error = classifyCheckoutError("feature-branch", stderr);
+
+		expect(error.code).toBe("BRANCH_LOCKED");
+	});
+
+	test("returns BRANCH_NOT_FOUND for unrecognized error text", () => {
+		const stderr = "error: pathspec 'nonexistent' did not match any file(s) known to git";
+		const error = classifyCheckoutError("nonexistent", stderr);
+
+		expect(error.code).toBe("BRANCH_NOT_FOUND");
+	});
+
+	test("includes branchName in the error message", () => {
+		const error = classifyCheckoutError("my-branch", "some error");
+
+		expect(error.message).toContain("my-branch");
+	});
+
+	test("preserves stderr in error context", () => {
+		const stderr = "fatal: some checkout error";
+		const error = classifyCheckoutError("branch", stderr);
+
+		expect(error.context?.stderr).toBe(stderr);
 	});
 });

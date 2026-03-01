@@ -24,6 +24,41 @@ import type {
 import { createVcsError, err, ok } from "../types.ts";
 
 /**
+ * Classify a checkout failure based on stderr output.
+ *
+ * Parses git checkout stderr to distinguish between:
+ * - DIRTY_WORKTREE: uncommitted changes would be overwritten
+ * - BRANCH_LOCKED: branch is checked out in another worktree
+ * - BRANCH_NOT_FOUND: fallback for unrecognized errors
+ */
+export function classifyCheckoutError(branchName: string, stderr: string) {
+	if (stderr.includes("local changes") && stderr.includes("would be overwritten")) {
+		return createVcsError(
+			"DIRTY_WORKTREE",
+			`Cannot checkout ${branchName}: uncommitted changes would be overwritten`,
+			{ context: { stderr } },
+		);
+	}
+
+	if (
+		stderr.includes("already used by worktree") ||
+		stderr.includes("already checked out at")
+	) {
+		return createVcsError(
+			"BRANCH_LOCKED",
+			`Cannot checkout ${branchName}: branch is checked out in another worktree`,
+			{ context: { stderr } },
+		);
+	}
+
+	return createVcsError(
+		"BRANCH_NOT_FOUND",
+		`Failed to checkout ${branchName}`,
+		{ context: { stderr } },
+	);
+}
+
+/**
  * Merge Service implementation
  *
  * Provides high-level merge operations with proper error handling
