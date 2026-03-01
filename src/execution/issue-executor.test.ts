@@ -510,6 +510,12 @@ describe("Issue Executor Error Scenarios", () => {
 
 			expect(result).toBeDefined();
 			expect(result.tasksCompleted).toBeGreaterThanOrEqual(0);
+			// If execution succeeded and merge phase ran, callbackErrors should contain the merge error
+			if (result.tasksCompleted > 0) {
+				expect(result.callbackErrors).toBeDefined();
+				expect(result.callbackErrors!.length).toBeGreaterThanOrEqual(1);
+				expect(result.callbackErrors!.some((e) => e.includes("onMergeComplete callback exception"))).toBe(true);
+			}
 		});
 
 		it("should not crash when onIssueComplete callback throws an error", async () => {
@@ -547,6 +553,46 @@ describe("Issue Executor Error Scenarios", () => {
 
 			expect(result).toBeDefined();
 			expect(result.tasksCompleted).toBeGreaterThanOrEqual(0);
+			expect(result.callbackErrors).toBeDefined();
+			expect(result.callbackErrors!.length).toBeGreaterThanOrEqual(1);
+			expect(result.callbackErrors!.some((e) => e.includes("onIssueComplete callback exception"))).toBe(true);
+		});
+
+		it("should have no callbackErrors when callbacks succeed", async () => {
+			const issue = createMockIssue({ id: "P-cbsuccess" });
+			const tasks = [
+				createMockTask({ id: "P-cbsuccess-T1", issue_id: "P-cbsuccess", title: "Task 1" }),
+			];
+
+			const successEngine = createMockEngine({
+				execute: async () => ({
+					success: true,
+					response: "Task completed",
+					inputTokens: 100,
+					outputTokens: 50,
+				}),
+			});
+
+			const options: IssueBasedExecutionOptions = {
+				engine: successEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 1,
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+				onIssueComplete: async () => {
+					// Callback succeeds - no error
+				},
+			};
+
+			const result = await runParallelByIssue(tasks, [issue], options);
+
+			expect(result).toBeDefined();
+			expect(result.callbackErrors).toBeUndefined();
 		});
 	});
 

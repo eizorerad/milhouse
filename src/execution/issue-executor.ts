@@ -119,6 +119,8 @@ export interface IssueExecutionResult {
 	branchName?: string;
 	/** Error message if failed */
 	error?: string;
+	/** Error message from onIssueComplete callback if it threw */
+	callbackError?: string;
 }
 
 /**
@@ -761,6 +763,7 @@ export async function runParallelByIssue(
 	// Queue to collect successful branches for deferred merging
 	// Map branch name to issue ID for tracking merge results
 	let branchesToMerge: string[] = [];
+	let mergeCallbackError: string | undefined;
 	const branchToIssueMap = new Map<string, string>();
 	// Map branch name to issue info for human-readable commit messages
 	const branchToIssueInfo = new Map<string, IssueInfo>();
@@ -1013,9 +1016,14 @@ export async function runParallelByIssue(
 			try {
 				await options.onIssueComplete?.(issueGroup.issueId, issueResult);
 			} catch (callbackError) {
+				const errorMsg = callbackError instanceof Error ? callbackError.message : String(callbackError);
 				logError(
-					`onIssueComplete callback threw an error for issue ${issueGroup.issueId}: ${callbackError instanceof Error ? callbackError.message : String(callbackError)}`,
+					`onIssueComplete callback threw an error for issue ${issueGroup.issueId}: ${errorMsg}`,
 				);
+				logWarn(
+					`WARNING: onIssueComplete callback failed for issue ${issueGroup.issueId} — task state may be inconsistent`,
+				);
+				issueResult.callbackError = errorMsg;
 			}
 
 			// Track ALL branches for detailed status reporting
@@ -1306,9 +1314,14 @@ export async function runParallelByIssue(
 				await options.onMergeComplete(mergeResultsWithIssue);
 				logDebug("onMergeComplete callback completed");
 			} catch (callbackError) {
+				const errorMsg = callbackError instanceof Error ? callbackError.message : String(callbackError);
 				logError(
-					`onMergeComplete callback threw an error: ${callbackError instanceof Error ? callbackError.message : String(callbackError)}`,
+					`onMergeComplete callback threw an error: ${errorMsg}`,
 				);
+				logWarn(
+					`WARNING: onMergeComplete callback failed — task state may be inconsistent`,
+				);
+				mergeCallbackError = errorMsg;
 			}
 		}
 	} else if (options.skipMerge) {
@@ -1343,11 +1356,17 @@ export async function runParallelByIssue(
 		logInfo("OpenCode servers stopped. Tmux sessions preserved for inspection.");
 	}
 
+	const callbackErrors = [
+		...results.map((r) => r.callbackError).filter((e): e is string => e !== undefined),
+		...(mergeCallbackError ? [mergeCallbackError] : []),
+	];
+
 	return {
 		tasksCompleted: totalCompleted,
 		tasksFailed: totalFailed,
 		totalInputTokens,
 		totalOutputTokens,
+		...(callbackErrors.length > 0 ? { callbackErrors } : {}),
 	};
 	} finally {
 		// Remove signal handlers to prevent leaks across invocations
