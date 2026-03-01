@@ -129,6 +129,8 @@ export interface PhaseRunResult<TResult = unknown> {
 	duration: number;
 	/** Data passed to next phase */
 	data?: Record<string, unknown>;
+	/** Next phase signal from the phase's nextPhase() function */
+	nextPhase?: RunPhase;
 }
 
 /** Context passed to phase hooks and functions */
