@@ -281,6 +281,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 			if (result.success) phasesCompleted.push(phase);
 			outcomes.push({ phase, success: result.success, duration: result.duration });
 
+			// Check if the phase signaled a terminal state — stop pipeline early
+			if (result.nextPhase === "completed" || result.nextPhase === "failed") {
+				logInfo(`Phase "${phase}" signaled '${result.nextPhase}' — skipping remaining phases.`);
+				break;
+			}
+
 			if (!result.success && config.failFast) {
 				logError(`Phase "${phase}" failed. Stopping (fail-fast enabled).`);
 				return failResult(runId, cost, phasesCompleted, phase, `Phase ${phase} failed`);
