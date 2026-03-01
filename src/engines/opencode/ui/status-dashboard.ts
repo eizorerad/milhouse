@@ -9,6 +9,7 @@
  */
 
 import pc from "picocolors";
+import { stripAnsi, truncateToWidth } from "../../../utils/ansi-string.ts";
 
 // ============================================================================
 // Types
@@ -151,22 +152,21 @@ export function formatTokenPair(inputTokens: number, outputTokens: number): stri
 }
 
 /**
- * Pad or truncate string to exact width
+ * Pad or truncate string to exact width.
+ * Uses ANSI-aware truncation to avoid breaking escape sequences.
  */
-function padString(
+export function padString(
 	str: string,
 	width: number,
 	align: "left" | "right" | "center" = "left",
 ): string {
-	// Strip ANSI codes for length calculation
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes use control characters by definition
-	const plainStr = str.replace(/\x1b\[[0-9;]*m/g, "");
+	const plainStr = stripAnsi(str);
 	const len = plainStr.length;
 
 	if (len >= width) {
-		// Truncate if too long
+		// Truncate if too long (ANSI-aware)
 		if (len > width) {
-			return `${str.slice(0, width - 1)}…`;
+			return truncateToWidth(str, width);
 		}
 		return str;
 	}

@@ -26,8 +26,10 @@ import {
 	formatTokenPair,
 	formatTokens,
 	getAllAgentStatuses,
+	padString,
 	updateAgentStatus,
 } from "../../../src/engines/opencode/ui/status-dashboard";
+import { stripAnsi } from "../../../src/utils/ansi-string";
 
 describe("Status Dashboard UI", () => {
 	describe("formatTokens", () => {
@@ -338,6 +340,68 @@ describe("Status Dashboard UI", () => {
 			const fullOutput = output.join("\n");
 			expect(fullOutput).toContain("Failed:");
 			expect(fullOutput).toContain("Test error message");
+		});
+	});
+
+	describe("padString", () => {
+		it("should pad plain text shorter than width", () => {
+			const result = padString("hello", 10);
+			expect(result).toBe("hello     ");
+			expect(result.length).toBe(10);
+		});
+
+		it("should return plain text exactly at width unchanged", () => {
+			const result = padString("hello", 5);
+			expect(result).toBe("hello");
+		});
+
+		it("should truncate plain text longer than width with ellipsis", () => {
+			const result = padString("hello world", 8);
+			const visible = stripAnsi(result);
+			expect(visible.length).toBeLessThanOrEqual(8);
+			expect(visible).toContain("…");
+		});
+
+		it("should pad ANSI-colored text based on visible length", () => {
+			const colored = "\x1b[32mhi\x1b[0m";
+			const result = padString(colored, 10);
+			const visible = stripAnsi(result);
+			expect(visible.length).toBe(10);
+			expect(visible).toBe("hi        ");
+		});
+
+		it("should truncate ANSI-colored text longer than width without broken sequences", () => {
+			// "Hello World" is 11 visible chars, colored green
+			const colored = "\x1b[32mHello World\x1b[0m";
+			const result = padString(colored, 8);
+			const visible = stripAnsi(result);
+			expect(visible.length).toBeLessThanOrEqual(8);
+			// Should not contain broken escape sequence fragments
+			expect(result).not.toMatch(/\x1b\[[0-9;]*$/);
+			expect(result).not.toMatch(/\x1b$/);
+		});
+
+		it("should not split ANSI escape sequence mid-sequence (color bleed prevention)", () => {
+			// Build a string where naive slice would cut inside an escape sequence
+			const colored = "\x1b[32mAB\x1b[31mCDEFGHIJ\x1b[0m";
+			const result = padString(colored, 5);
+			const visible = stripAnsi(result);
+			expect(visible.length).toBeLessThanOrEqual(5);
+			// Ensure no incomplete/dangling escape sequences (e.g. "\x1b[" without closing "m")
+			expect(result).not.toMatch(/\x1b\[[0-9;]*$/);
+			expect(result).not.toMatch(/\x1b$/);
+			// The visible text should end with ellipsis from truncation
+			expect(visible).toContain("…");
+		});
+
+		it("should right-align text", () => {
+			const result = padString("hi", 6, "right");
+			expect(result).toBe("    hi");
+		});
+
+		it("should center-align text", () => {
+			const result = padString("hi", 6, "center");
+			expect(result).toBe("  hi  ");
 		});
 	});
 });
