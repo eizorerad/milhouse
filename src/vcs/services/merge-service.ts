@@ -87,11 +87,7 @@ export class MergeService implements IMergeService {
 		}
 
 		if (checkoutResult.value.exitCode !== 0) {
-			return err(
-				createVcsError("BRANCH_NOT_FOUND", `Failed to checkout ${target}`, {
-					context: { stderr: checkoutResult.value.stderr },
-				}),
-			);
+			return err(classifyCheckoutError(target, checkoutResult.value.stderr));
 		}
 
 		// Build merge command
@@ -399,41 +395,7 @@ export class MergeService implements IMergeService {
 		}
 
 		if (checkoutResult.value.exitCode !== 0) {
-			const stderr = checkoutResult.value.stderr;
-
-			// Detect specific error conditions from stderr
-			if (stderr.includes("local changes") && stderr.includes("would be overwritten")) {
-				return err(
-					createVcsError(
-						"DIRTY_WORKTREE",
-						`Cannot checkout ${sourceBranch}: uncommitted changes in workDir would be overwritten`,
-						{
-							context: { stderr },
-						},
-					),
-				);
-			}
-
-			if (
-				stderr.includes("already used by worktree") ||
-				stderr.includes("already checked out at")
-			) {
-				return err(
-					createVcsError(
-						"BRANCH_LOCKED",
-						`Cannot checkout ${sourceBranch}: branch is checked out in another worktree`,
-						{
-							context: { stderr },
-						},
-					),
-				);
-			}
-
-			return err(
-				createVcsError("BRANCH_NOT_FOUND", `Failed to checkout ${sourceBranch}`, {
-					context: { stderr },
-				}),
-			);
+			return err(classifyCheckoutError(sourceBranch, checkoutResult.value.stderr));
 		}
 
 		// Attempt rebase

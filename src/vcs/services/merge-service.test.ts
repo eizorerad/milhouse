@@ -1132,3 +1132,47 @@ describe("createIntegrationBranch — checkout error classification", () => {
 		}
 	});
 });
+
+describe("mergeAgentBranch — checkout error classification", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+	});
+
+	test("returns BRANCH_LOCKED when target checkout fails with 'already checked out at'", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout" && args[1] === "main") {
+				return failedResult(1, "fatal: 'main' is already checked out at '/tmp/wt'");
+			}
+			return ok({ exitCode: 0, stdout: "", stderr: "", timedOut: false, duration: 10 });
+		});
+
+		const result = await mergeService.mergeAgentBranch({
+			source: "feature",
+			target: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
+		}
+	});
+});
