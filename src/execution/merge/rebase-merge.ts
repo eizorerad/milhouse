@@ -274,8 +274,8 @@ export async function mergeCompletedBranches(
 							? mergeResultVcs2.error.message
 							: "Merge failed after conflict resolution";
 						logWarn(`  ✗ Merge failed after AI resolution: ${lastError}`);
-						// Bug fix: use abortRebase (not abortMerge) since we're in rebase context
-						await abortRebase(workDir);
+						// After successful rebase + failed merge, we are in merge context (rebase already completed)
+						await abortMerge(workDir);
 						continue;
 					}
 
