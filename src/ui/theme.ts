@@ -1,5 +1,16 @@
 import chalk from "chalk";
 
+/** Strip ANSI escape codes to get the visible text */
+export function stripAnsi(str: string): string {
+	// biome-ignore lint: regex is correct for ANSI stripping
+	return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/** Return the visible length of a string (excluding ANSI escape codes) */
+export function visibleLength(str: string): number {
+	return stripAnsi(str).length;
+}
+
 // Milhouse brand colors - distinct from any other CLI tool
 export const theme = {
 	// Primary colors
@@ -111,11 +122,14 @@ export const box = {
 	// Create a simple box around text
 	wrap: (text: string, width = 50): string => {
 		const lines = text.split("\n");
-		const maxLen = Math.max(...lines.map((l) => l.length), width);
+		const maxLen = Math.max(...lines.map((l) => visibleLength(l)), width);
 		const top = `${box.topLeft}${box.horizontal.repeat(maxLen + 2)}${box.topRight}`;
 		const bottom = `${box.bottomLeft}${box.horizontal.repeat(maxLen + 2)}${box.bottomRight}`;
 		const middle = lines
-			.map((l) => `${box.vertical} ${l.padEnd(maxLen)} ${box.vertical}`)
+			.map((l) => {
+				const pad = " ".repeat(Math.max(0, maxLen - visibleLength(l)));
+				return `${box.vertical} ${l}${pad} ${box.vertical}`;
+			})
 			.join("\n");
 		return `${top}\n${middle}\n${bottom}`;
 	},
