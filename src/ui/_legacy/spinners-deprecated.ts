@@ -15,6 +15,54 @@ import { formatStepForDisplay } from "../../engines/base.ts";
 import type { SpinnerInstance } from "../spinners.ts";
 
 // ============================================================================
+// Terminal width utilities
+// ============================================================================
+
+/** Strip ANSI escape codes to get visible string length */
+function stripAnsi(str: string): string {
+	// biome-ignore lint: regex is correct for ANSI stripping
+	return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/**
+ * Get the usable terminal width, leaving room for the spinner character.
+ * Falls back to 80 columns if stdout is not a TTY.
+ */
+function getMaxWidth(): number {
+	const cols = process.stdout.columns || process.stderr.columns || 80;
+	// Leave 4 chars for spinner frame + space + safety margin
+	return Math.max(cols - 4, 40);
+}
+
+/**
+ * Truncate a string (which may contain ANSI codes) to fit within maxWidth visible characters.
+ * Appends "…" if truncated.
+ */
+function truncateToWidth(text: string, maxWidth: number): string {
+	const visible = stripAnsi(text);
+	if (visible.length <= maxWidth) return text;
+
+	// Walk through the original string, tracking visible char count
+	let visibleCount = 0;
+	let i = 0;
+	while (i < text.length && visibleCount < maxWidth - 1) {
+		// Skip ANSI escape sequences
+		if (text[i] === "\x1b" && text[i + 1] === "[") {
+			const end = text.indexOf("m", i);
+			if (end !== -1) {
+				i = end + 1;
+				continue;
+			}
+		}
+		visibleCount++;
+		i++;
+	}
+
+	// Include any trailing ANSI reset sequences so colors don't bleed
+	return `${text.slice(0, i)}${pc.reset("…")}`;
+}
+
+// ============================================================================
 // Legacy Spinner Classes (moved from spinners.ts for backward compatibility)
 // ============================================================================
 
@@ -109,7 +157,8 @@ export class ProgressSpinner {
 			? `${truncatedStep} ${pc.dim(truncatedDetail)}`
 			: truncatedStep;
 
-		return `${pc.cyan(stepWithDetail)} ${countsStr}${settingsStr} ${pc.dim(`[${time}]`)} ${this.task}`;
+		const raw = `${pc.cyan(stepWithDetail)} ${countsStr}${settingsStr} ${pc.dim(`[${time}]`)} ${this.task}`;
+		return truncateToWidth(raw, getMaxWidth());
 	}
 
 	/**
@@ -375,7 +424,8 @@ export class DynamicAgentSpinner {
 		const progress = pc.yellow(`[${this.completedTasks}/${this.totalTasks}]`);
 		const time = pc.dim(`[${this.formatElapsed()}]`);
 
-		return `${progress} ${slotsDisplay} ${time} ${this.baseText}`;
+		const raw = `${progress} ${slotsDisplay} ${time} ${this.baseText}`;
+		return truncateToWidth(raw, getMaxWidth());
 	}
 
 	/**
