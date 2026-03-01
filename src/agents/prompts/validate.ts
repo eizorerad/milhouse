@@ -109,11 +109,18 @@ Respond with JSON in this exact format:
 - Provide at least ONE piece of evidence for any non-FALSE status
 - For FALSE status, explain why the issue doesn't exist
 - Be specific about file paths and line numbers
-- Run actual commands if needed to verify (e.g., run tests, check configs)
 - Do NOT claim evidence without actual file references
 - If the hypothesis is wrong but there's a related real issue, mark as MISDIAGNOSED
 - Include the corrected_description for PARTIAL or MISDIAGNOSED issues
-- All evidence must have timestamps`);
+- All evidence must have timestamps
+
+### Efficiency Guidelines
+
+- **Read the specific file and line** referenced in the evidence — do NOT read unrelated files
+- **Do NOT run the full test suite.** Only run targeted test commands if a specific file is mentioned.
+- **Limit yourself to 3-5 file reads max.** Check the key evidence files, confirm the issue, and respond.
+- **Do NOT explore the entire codebase.** Focus on the specific files mentioned in the hypothesis and evidence.
+- If the evidence is already sufficient from reading 1-2 files, respond immediately.`);
 
 	return parts.join("\n\n");
 }

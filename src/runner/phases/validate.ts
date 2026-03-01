@@ -38,7 +38,7 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 	name: "validate",
 	role: "IV",
 	jsonSchema: VALIDATE_SCHEMA as Record<string, unknown>,
-	engineMetadata: { maxTurns: 30 },
+	engineMetadata: { maxTurns: 15 },
 	mode: "per-item",
 	defaultParallel: 5,
 
