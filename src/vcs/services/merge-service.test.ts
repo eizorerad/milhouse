@@ -969,3 +969,129 @@ describe("Cleanup failure warning logging", () => {
 		expect(warnCalls.length).toBe(1);
 	});
 });
+
+describe("MergeService.mergeAgentBranch — checkout error classification", () => {
+	let runGitCommandSpy: ReturnType<typeof spyOn>;
+	let mergeService: MergeService;
+
+	function successResult(stdout = "", stderr = "") {
+		return ok({
+			exitCode: 0,
+			stdout,
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	function failedResult(exitCode: number, stderr = "") {
+		return ok({
+			exitCode,
+			stdout: "",
+			stderr,
+			timedOut: false,
+			duration: 10,
+		});
+	}
+
+	beforeEach(() => {
+		mergeService = new MergeService();
+		runGitCommandSpy = spyOn(gitCli, "runGitCommand");
+	});
+
+	afterEach(() => {
+		runGitCommandSpy.mockRestore();
+	});
+
+	test("returns DIRTY_WORKTREE when checkout stderr contains dirty worktree message", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout") {
+				return failedResult(
+					1,
+					"error: Your local changes to the following files would be overwritten by checkout:\n  file.ts\nPlease commit your changes or stash them before you switch branches.",
+				);
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.mergeAgentBranch({
+			source: "feature",
+			target: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("DIRTY_WORKTREE");
+		}
+	});
+
+	test("returns BRANCH_LOCKED when checkout stderr contains 'already used by worktree'", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout") {
+				return failedResult(
+					1,
+					"fatal: 'main' is already used by worktree at '/tmp/other-worktree'",
+				);
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.mergeAgentBranch({
+			source: "feature",
+			target: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
+		}
+	});
+
+	test("returns BRANCH_LOCKED when checkout stderr contains 'already checked out at'", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout") {
+				return failedResult(
+					1,
+					"fatal: 'main' is already checked out at '/tmp/other-worktree'",
+				);
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.mergeAgentBranch({
+			source: "feature",
+			target: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_LOCKED");
+		}
+	});
+
+	test("returns BRANCH_NOT_FOUND as fallback for unrecognized checkout errors", async () => {
+		runGitCommandSpy.mockImplementation(async (args: string[]) => {
+			if (args[0] === "checkout") {
+				return failedResult(
+					1,
+					"error: pathspec 'nonexistent' did not match any file(s) known to git",
+				);
+			}
+			return successResult();
+		});
+
+		const result = await mergeService.mergeAgentBranch({
+			source: "feature",
+			target: "main",
+			workDir: "/tmp/test-repo",
+		});
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.code).toBe("BRANCH_NOT_FOUND");
+		}
+	});
+});

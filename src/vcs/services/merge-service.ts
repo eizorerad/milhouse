@@ -19,6 +19,7 @@ import type {
 	IMergeService,
 	MergeBranchOptions,
 	MergeResult,
+	VcsError,
 	VcsResult,
 } from "../types.ts";
 import { createVcsError, err, ok } from "../types.ts";
@@ -53,9 +54,7 @@ export class MergeService implements IMergeService {
 
 		if (checkoutResult.value.exitCode !== 0) {
 			return err(
-				createVcsError("BRANCH_NOT_FOUND", `Failed to checkout ${target}`, {
-					context: { stderr: checkoutResult.value.stderr },
-				}),
+				this.classifyCheckoutError(checkoutResult.value.stderr, target),
 			);
 		}
 
@@ -368,40 +367,8 @@ export class MergeService implements IMergeService {
 		}
 
 		if (checkoutResult.value.exitCode !== 0) {
-			const stderr = checkoutResult.value.stderr;
-
-			// Detect specific error conditions from stderr
-			if (stderr.includes("local changes") && stderr.includes("would be overwritten")) {
-				return err(
-					createVcsError(
-						"DIRTY_WORKTREE",
-						`Cannot checkout ${sourceBranch}: uncommitted changes in workDir would be overwritten`,
-						{
-							context: { stderr },
-						},
-					),
-				);
-			}
-
-			if (
-				stderr.includes("already used by worktree") ||
-				stderr.includes("already checked out at")
-			) {
-				return err(
-					createVcsError(
-						"BRANCH_LOCKED",
-						`Cannot checkout ${sourceBranch}: branch is checked out in another worktree`,
-						{
-							context: { stderr },
-						},
-					),
-				);
-			}
-
 			return err(
-				createVcsError("BRANCH_NOT_FOUND", `Failed to checkout ${sourceBranch}`, {
-					context: { stderr },
-				}),
+				this.classifyCheckoutError(checkoutResult.value.stderr, sourceBranch),
 			);
 		}
 
@@ -1152,6 +1119,39 @@ export class MergeService implements IMergeService {
 				);
 			}
 		}
+	}
+
+	/**
+	 * Classify a checkout failure based on stderr content.
+	 *
+	 * Parses git checkout stderr to distinguish:
+	 * - DIRTY_WORKTREE: uncommitted changes would be overwritten
+	 * - BRANCH_LOCKED: branch is checked out in another worktree
+	 * - BRANCH_NOT_FOUND: fallback for unrecognized errors
+	 */
+	private classifyCheckoutError(stderr: string, branchName: string): VcsError {
+		if (stderr.includes("local changes") && stderr.includes("would be overwritten")) {
+			return createVcsError(
+				"DIRTY_WORKTREE",
+				`Cannot checkout ${branchName}: uncommitted changes would be overwritten`,
+				{ context: { stderr } },
+			);
+		}
+
+		if (
+			stderr.includes("already used by worktree") ||
+			stderr.includes("already checked out at")
+		) {
+			return createVcsError(
+				"BRANCH_LOCKED",
+				`Cannot checkout ${branchName}: branch is checked out in another worktree`,
+				{ context: { stderr } },
+			);
+		}
+
+		return createVcsError("BRANCH_NOT_FOUND", `Failed to checkout ${branchName}`, {
+			context: { stderr },
+		});
 	}
 }
 

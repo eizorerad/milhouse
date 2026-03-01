@@ -212,6 +212,12 @@ export async function mergeCompletedBranches(
 					break;
 				}
 
+				if (!mergeResultVcs.ok && mergeResultVcs.error.code === "BRANCH_LOCKED") {
+					logError("  ✗ Cannot merge: branch is checked out in another worktree");
+					lastError = `Branch ${branch} is locked by another worktree`;
+					break;
+				}
+
 				lastError = !mergeResultVcs.ok
 					? mergeResultVcs.error.message
 					: "Merge failed after successful rebase";
@@ -324,6 +330,12 @@ export async function mergeCompletedBranches(
 					logSuccess("  ✓ Direct merge succeeded (bypassed rebase)");
 					await deleteLocalBranch(branch, workDir, true);
 					success = true;
+					break;
+				}
+
+				if (!directMergeResultVcs.ok && directMergeResultVcs.error.code === "BRANCH_LOCKED") {
+					logError("  ✗ Cannot merge: branch is checked out in another worktree");
+					lastError = `Branch ${branch} is locked by another worktree`;
 					break;
 				}
 
