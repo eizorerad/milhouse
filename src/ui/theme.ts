@@ -122,11 +122,14 @@ export const box = {
 	// Create a simple box around text
 	wrap: (text: string, width = 50): string => {
 		const lines = text.split("\n");
-		const maxLen = Math.max(...lines.map((l) => l.length), width);
+		const maxLen = Math.max(...lines.map((l) => visibleLength(l)), width);
 		const top = `${box.topLeft}${box.horizontal.repeat(maxLen + 2)}${box.topRight}`;
 		const bottom = `${box.bottomLeft}${box.horizontal.repeat(maxLen + 2)}${box.bottomRight}`;
 		const middle = lines
-			.map((l) => `${box.vertical} ${l.padEnd(maxLen)} ${box.vertical}`)
+			.map((l) => {
+				const pad = " ".repeat(Math.max(0, maxLen - visibleLength(l)));
+				return `${box.vertical} ${l}${pad} ${box.vertical}`;
+			})
 			.join("\n");
 		return `${top}\n${middle}\n${bottom}`;
 	},
