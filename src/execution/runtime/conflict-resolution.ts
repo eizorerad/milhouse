@@ -355,7 +355,7 @@ export async function resolveConflictsWithEngine(
 			}
 
 			// For merge: stage and commit
-			const completedResult = await completeMerge(workDir, conflictedFiles);
+			const completedResult = await completeMerge(workDir);
 			const completed = completedResult.ok && completedResult.value;
 
 			if (completed) {
