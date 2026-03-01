@@ -80,7 +80,15 @@ ${preCheckIssues.map((i) => `- **[${i.severity}]** ${i.gate}: ${i.message}${i.fi
 2. Check that all acceptance criteria are met
 3. Verify no regressions were introduced
 4. Confirm all tests pass
-5. Ensure no placeholder code remains`);
+5. Ensure no placeholder code remains
+
+### Efficiency Guidelines
+
+- **Do NOT run the full test suite more than once.** Run tests once, record results, then analyze.
+- **Use \`git diff\` or \`git log --oneline\` to review changes** rather than reading every modified file individually.
+- **Spot-check** representative files rather than reading all of them.
+- **Keep it fast**: you have a limited turn budget. Focus on evidence-based verification, not exhaustive auditing.
+- If the test suite takes more than 2 minutes, stop it and note it as a concern rather than retrying.`);
 
 	// Output format
 	parts.push(`## Output Format
