@@ -714,7 +714,7 @@ export class MergeService implements IMergeService {
 	 * 3. Cleans up the worktree (branch remains with merged commits)
 	 */
 	async safeMergeInWorktree(options: SafeMergeOptions): Promise<VcsResult<SafeMergeResult>> {
-		const { sourceBranch, targetBranch, workDir, runId, message } = options;
+		const { sourceBranch, targetBranch, workDir, runId, message, onConflict } = options;
 
 		// Generate unique ID for merge worktree
 		const mergeId = `merge-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -780,6 +780,37 @@ export class MergeService implements IMergeService {
 			// Check for conflicts
 			const conflictedFilesResult = await this.getConflictedFiles(mergeWorktreePath);
 			if (conflictedFilesResult.ok && conflictedFilesResult.value.length > 0) {
+				// Try conflict resolution callback before aborting — the worktree
+				// is still alive so the callback can actually resolve the files.
+				if (onConflict) {
+					let resolved = false;
+					try {
+						resolved = await onConflict(conflictedFilesResult.value, mergeWorktreePath);
+					} catch (e) {
+						logWarn(
+							`onConflict callback threw: ${e instanceof Error ? e.message : String(e)}`,
+						);
+					}
+
+					if (resolved) {
+						// Callback resolved conflicts — complete the merge
+						const headResult = await runGitCommand(["rev-parse", "HEAD"], mergeWorktreePath);
+						const mergeCommit =
+							headResult.ok && headResult.value.exitCode === 0
+								? headResult.value.stdout.trim()
+								: undefined;
+
+						bus.emit("git:merge:complete", { source: sourceBranch, target: targetBranch });
+
+						return ok({
+							success: true,
+							hasConflicts: false,
+							conflictedFiles: [],
+							mergeCommit,
+						});
+					}
+				}
+
 				// Abort merge in worktree
 				const abortResult = await runGitCommand(["merge", "--abort"], mergeWorktreePath);
 				if (!abortResult.ok || abortResult.value.exitCode !== 0) {
@@ -1209,6 +1240,10 @@ export interface SafeMergeOptions {
 	runId: string;
 	/** Custom commit message for the merge (human-readable, no technical metadata) */
 	message?: string;
+	/** Optional callback for conflict resolution inside the worktree (before cleanup).
+	 *  Receives the conflicted file list and the worktree path where conflicts exist.
+	 *  Return true if conflicts were resolved, false otherwise. */
+	onConflict?: (files: string[], worktreePath: string) => Promise<boolean>;
 }
 
 /**
