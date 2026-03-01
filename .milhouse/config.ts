@@ -17,7 +17,7 @@ const config: Config = {
     plan:        { workers: 5, retries: 3 },
     consolidate: { workers: 1, retries: 2 },
     exec:        { workers: 3, retries: 3 },
-    verify:      { workers: 1, retries: 1 },
+    verify:      { workers: 5, retries: 1 },
   },
 
   // ── Cost & Budget ──────────────────────────────────────────
