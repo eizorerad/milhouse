@@ -951,7 +951,7 @@ describe("MergeService.safeMergeInWorktree — onConflict callback", () => {
 	});
 });
 
-describe("MergeService.batchMergeWithRetry — onConflict receives workDir", () => {
+describe("MergeService.batchMergeWithRetry — onConflict forwarding", () => {
 	let mergeService: MergeService;
 	let safeMergeSpy: ReturnType<typeof spyOn>;
 
@@ -964,26 +964,37 @@ describe("MergeService.batchMergeWithRetry — onConflict receives workDir", () 
 		safeMergeSpy.mockRestore();
 	});
 
-	test("onConflict receives workDir (main repo path), not the worktree path where conflicts existed", async () => {
+	test("onConflict receives worktreePath (not main workDir) via safeMergeInWorktree forwarding", async () => {
 		const mainWorkDir = "/tmp/main-repo";
+		const fakeWorktreePath = "/tmp/main-repo/.milhouse/runs/run-1/merge-worktrees/merge-fake";
 		const conflictedFiles = ["file-a.ts", "file-b.ts"];
 
-		// Mock safeMergeInWorktree to return conflicts.
-		// The real implementation creates a temporary worktree, detects conflicts
-		// there, aborts the merge, cleans up the worktree, and returns the conflict
-		// list. By the time batchMergeWithRetry sees this result, the worktree is gone.
-		safeMergeSpy.mockResolvedValue(
-			ok({
+		// Mock safeMergeInWorktree: invoke the onConflict callback with the
+		// worktree path, simulating the real behavior where resolution happens
+		// inside the worktree before cleanup.
+		safeMergeSpy.mockImplementation(async (options: any) => {
+			if (options.onConflict) {
+				const resolved = await options.onConflict(conflictedFiles, fakeWorktreePath);
+				if (resolved) {
+					return ok({
+						success: true,
+						hasConflicts: false,
+						conflictedFiles: [],
+						mergeCommit: "resolved-commit-sha",
+					});
+				}
+			}
+			return ok({
 				success: false,
 				hasConflicts: true,
 				conflictedFiles,
-			}),
-		);
+			});
+		});
 
-		// Capture arguments passed to onConflict
+		// Capture arguments passed to the outer onConflict
 		let capturedFiles: string[] | undefined;
 		let capturedBranch: string | undefined;
-		let capturedWorkDir: string | undefined;
+		let capturedPath: string | undefined;
 
 		const result = await mergeService.batchMergeWithRetry({
 			branches: ["feature-branch"],
@@ -991,25 +1002,119 @@ describe("MergeService.batchMergeWithRetry — onConflict receives workDir", () 
 			workDir: mainWorkDir,
 			runId: "run-1",
 			maxRetries: 1,
-			onConflict: async (files, branch, workDir) => {
+			onConflict: async (files, branch, worktreePath) => {
 				capturedFiles = files;
 				capturedBranch = branch;
-				capturedWorkDir = workDir;
-				return false; // Cannot resolve — conflicts are in a destroyed worktree
+				capturedPath = worktreePath;
+				return false;
 			},
 		});
 
 		expect(result.ok).toBe(true);
 
-		// Verify onConflict was called
+		// Verify onConflict was called with the worktree path (not main workDir)
 		expect(capturedFiles).toEqual(conflictedFiles);
 		expect(capturedBranch).toBe("feature-branch");
+		expect(capturedPath).toBe(fakeWorktreePath);
+		expect(capturedPath).not.toBe(mainWorkDir);
+	});
 
-		// BUG: onConflict receives workDir (the main repo directory), but the
-		// conflicts existed in a temporary worktree that safeMergeInWorktree
-		// already destroyed. The callback cannot meaningfully resolve conflicts
-		// in a path where they no longer exist.
-		expect(capturedWorkDir).toBe(mainWorkDir);
+	test("when onConflict resolved conflicts, branch is recorded as succeeded", async () => {
+		const mainWorkDir = "/tmp/main-repo";
+		const conflictedFiles = ["conflict.ts"];
+		const fakeWorktreePath = "/tmp/main-repo/.milhouse/runs/run-1/merge-worktrees/merge-fake";
+
+		safeMergeSpy.mockImplementation(async (options: any) => {
+			if (options.onConflict) {
+				const resolved = await options.onConflict(conflictedFiles, fakeWorktreePath);
+				if (resolved) {
+					return ok({
+						success: true,
+						hasConflicts: false,
+						conflictedFiles: [],
+						mergeCommit: "resolved-commit-sha",
+					});
+				}
+			}
+			return ok({
+				success: false,
+				hasConflicts: true,
+				conflictedFiles,
+			});
+		});
+
+		const result = await mergeService.batchMergeWithRetry({
+			branches: ["feature-branch"],
+			targetBranch: "main",
+			workDir: mainWorkDir,
+			runId: "run-1",
+			maxRetries: 1,
+			onConflict: async () => true, // Resolve successfully
+		});
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.succeeded).toEqual([
+				{ branch: "feature-branch", commit: "resolved-commit-sha" },
+			]);
+			expect(result.value.conflicted).toEqual([]);
+			expect(result.value.failed).toEqual([]);
+		}
+	});
+
+	test("batchMergeWithRetry without onConflict still records conflicts correctly", async () => {
+		safeMergeSpy.mockImplementation(async (options: any) => {
+			// No onConflict provided — should not invoke any callback
+			expect(options.onConflict).toBeUndefined();
+			return ok({
+				success: false,
+				hasConflicts: true,
+				conflictedFiles: ["a.ts"],
+			});
+		});
+
+		const result = await mergeService.batchMergeWithRetry({
+			branches: ["feature-branch"],
+			targetBranch: "main",
+			workDir: "/tmp/main-repo",
+			runId: "run-1",
+			maxRetries: 1,
+			// No onConflict
+		});
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value.conflicted).toEqual([
+				{ branch: "feature-branch", files: ["a.ts"] },
+			]);
+			expect(result.value.succeeded).toEqual([]);
+		}
+	});
+
+	test("batchMergeWithRetry forwards onConflict through safeMergeInWorktree options", async () => {
+		const conflictedFiles = ["file.ts"];
+
+		safeMergeSpy.mockImplementation(async (options: any) => {
+			// Verify the onConflict callback was forwarded
+			expect(typeof options.onConflict).toBe("function");
+			return ok({
+				success: false,
+				hasConflicts: true,
+				conflictedFiles,
+			});
+		});
+
+		await mergeService.batchMergeWithRetry({
+			branches: ["feature-branch"],
+			targetBranch: "main",
+			workDir: "/tmp/main-repo",
+			runId: "run-1",
+			maxRetries: 1,
+			onConflict: async () => false,
+		});
+
+		// Verify safeMergeInWorktree was called with onConflict in options
+		expect(safeMergeSpy).toHaveBeenCalledTimes(1);
 	});
 });
 
