@@ -1,5 +1,16 @@
 import chalk from "chalk";
 
+/** Strip ANSI escape codes to get the visible text */
+export function stripAnsi(str: string): string {
+	// biome-ignore lint: regex is correct for ANSI stripping
+	return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/** Return the visible length of a string (excluding ANSI escape codes) */
+export function visibleLength(str: string): number {
+	return stripAnsi(str).length;
+}
+
 // Milhouse brand colors - distinct from any other CLI tool
 export const theme = {
 	// Primary colors

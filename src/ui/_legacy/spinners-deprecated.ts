@@ -14,6 +14,7 @@ import type { DetailedStep } from "../../engines/base.ts";
 import { formatStepForDisplay } from "../../engines/base.ts";
 import type { SpinnerInstance } from "../spinners.ts";
 import { truncateToWidth } from "../../utils/ansi-string.ts";
+import { stripAnsi } from "../theme.ts";
 
 // ============================================================================
 // Terminal width utilities
