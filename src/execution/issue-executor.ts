@@ -1107,42 +1107,56 @@ export async function runParallelByIssue(
 						continue;
 					}
 
-					// Worktree left in place or error - escalate with force
-					// Wait for Windows file locks to be released before retrying
+					// Worktree left in place or error - escalate with retries
+					// Windows file locks (antivirus, indexing, child processes) need
+					// time to release. Use exponential backoff: 3s, 5s, 8s.
 					const reason = result.ok ? result.value.reason : result.error.message;
 					logDebug(
-						`Worktree cleanup left in place (${reason}), waiting 2s then retrying with force: ${worktreeDir}`,
+						`Worktree cleanup left in place (${reason}), retrying with backoff: ${worktreeDir}`,
 					);
-					await new Promise((resolve) => setTimeout(resolve, 2000));
-
-					const forceResult = await cleanupWorktree({
-						path: worktreeDir,
-						originalDir: workDir,
-						force: true,
-					});
-
-					if (forceResult.ok && !forceResult.value.leftInPlace) {
-						logDebug(
-							`Force cleanup succeeded: ${worktreeDir} (branch ${branchName} preserved)`,
-						);
-						continue;
-					}
-
-					// Force cleanup also failed - wait again, then try manual rmSync + git worktree prune
-					logDebug(`Force cleanup failed, waiting 3s then attempting manual removal: ${worktreeDir}`);
-					await new Promise((resolve) => setTimeout(resolve, 3000));
-					try {
-						if (existsSync(worktreeDir)) {
-							rmSync(worktreeDir, { recursive: true, force: true });
+	
+					const retryDelays = [3000, 5000, 8000];
+					let cleanedUp = false;
+	
+					for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+						await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+	
+						// Try force cleanup via git worktree remove --force
+						const forceResult = await cleanupWorktree({
+							path: worktreeDir,
+							originalDir: workDir,
+							force: true,
+						});
+	
+						if (forceResult.ok && !forceResult.value.leftInPlace) {
+							logDebug(
+								`Force cleanup succeeded on attempt ${attempt + 1}: ${worktreeDir}`,
+							);
+							cleanedUp = true;
+							break;
 						}
-						await runGitCommand(["worktree", "prune"], workDir);
-						logDebug(
-							`Manual cleanup succeeded: ${worktreeDir} (branch ${branchName} preserved)`,
-						);
-						continue;
-					} catch (manualError) {
-						logWarn(`Manual cleanup also failed for ${worktreeDir}: ${manualError}`);
+	
+						// Try manual rmSync + git worktree prune as fallback
+						try {
+							if (existsSync(worktreeDir)) {
+								rmSync(worktreeDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 1000 });
+							}
+							await runGitCommand(["worktree", "prune"], workDir);
+							logDebug(
+								`Manual cleanup succeeded on attempt ${attempt + 1}: ${worktreeDir}`,
+							);
+							cleanedUp = true;
+							break;
+						} catch (manualError) {
+							logDebug(
+								`Cleanup attempt ${attempt + 1}/${retryDelays.length} failed for ${worktreeDir}: ${manualError}`,
+							);
+						}
 					}
+	
+					if (cleanedUp) continue;
+	
+					logWarn(`All cleanup attempts failed for ${worktreeDir} after ${retryDelays.length} retries`);
 
 					// All cleanup attempts failed - track for merge exclusion
 					failedCleanupBranches.add(branchName);
