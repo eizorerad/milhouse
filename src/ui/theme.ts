@@ -1,4 +1,20 @@
-import chalk from "chalk";
+import pc from "picocolors";
+
+/**
+ * Convert a hex color string to an ANSI true-color formatter.
+ * Uses the same \x1b[38;2;R;G;Bm escape sequence as chalk.hex(),
+ * producing byte-identical output. Respects NO_COLOR / terminal capability.
+ */
+function hex(color: string): (text: string) => string {
+	if (!pc.isColorSupported) {
+		return (text: string) => text;
+	}
+	const h = color.replace("#", "");
+	const r = Number.parseInt(h.substring(0, 2), 16);
+	const g = Number.parseInt(h.substring(2, 4), 16);
+	const b = Number.parseInt(h.substring(4, 6), 16);
+	return (text: string) => `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+}
 
 /** Strip ANSI escape codes to get the visible text */
 export function stripAnsi(str: string): string {
@@ -14,53 +30,53 @@ export function visibleLength(str: string): number {
 // Milhouse brand colors - distinct from any other CLI tool
 export const theme = {
 	// Primary colors
-	primary: chalk.hex("#7C3AED"), // Purple - main brand color
-	secondary: chalk.hex("#06B6D4"), // Cyan - accent color
+	primary: hex("#7C3AED"), // Purple - main brand color
+	secondary: hex("#06B6D4"), // Cyan - accent color
 
 	// Status colors
-	success: chalk.hex("#10B981"), // Green
-	warning: chalk.hex("#F59E0B"), // Amber
-	error: chalk.hex("#EF4444"), // Red
-	info: chalk.hex("#3B82F6"), // Blue
+	success: hex("#10B981"), // Green
+	warning: hex("#F59E0B"), // Amber
+	error: hex("#EF4444"), // Red
+	info: hex("#3B82F6"), // Blue
 
 	// Text colors
-	muted: chalk.gray,
-	dim: chalk.dim,
-	bold: chalk.bold,
+	muted: pc.gray,
+	dim: pc.dim,
+	bold: pc.bold,
 
 	// Pipeline phase colors
 	phase: {
-		scan: chalk.hex("#8B5CF6"), // Violet
-		validate: chalk.hex("#06B6D4"), // Cyan
-		plan: chalk.hex("#3B82F6"), // Blue
-		consolidate: chalk.hex("#10B981"), // Green
-		exec: chalk.hex("#F59E0B"), // Amber
-		verify: chalk.hex("#EC4899"), // Pink
+		scan: hex("#8B5CF6"), // Violet
+		validate: hex("#06B6D4"), // Cyan
+		plan: hex("#3B82F6"), // Blue
+		consolidate: hex("#10B981"), // Green
+		exec: hex("#F59E0B"), // Amber
+		verify: hex("#EC4899"), // Pink
 	},
 
 	// Engine colors
 	engine: {
-		aider: chalk.hex("#14B8A6"), // Teal (Aider brand color)
-		claude: chalk.hex("#D97706"), // Orange
-		gemini: chalk.hex("#4285F4"), // Google Blue
-		opencode: chalk.hex("#059669"), // Emerald
-		cursor: chalk.hex("#7C3AED"), // Purple
-		codex: chalk.hex("#2563EB"), // Blue
-		qwen: chalk.hex("#DC2626"), // Red
-		droid: chalk.hex("#65A30D"), // Lime
+		aider: hex("#14B8A6"), // Teal (Aider brand color)
+		claude: hex("#D97706"), // Orange
+		gemini: hex("#4285F4"), // Google Blue
+		opencode: hex("#059669"), // Emerald
+		cursor: hex("#7C3AED"), // Purple
+		codex: hex("#2563EB"), // Blue
+		qwen: hex("#DC2626"), // Red
+		droid: hex("#65A30D"), // Lime
 	},
 
 	// Formatting helpers
-	highlight: (text: string) => chalk.bold.hex("#7C3AED")(text),
-	code: (text: string) => chalk.cyan(`\`${text}\``),
-	path: (text: string) => chalk.underline.blue(text),
-	number: (text: string | number) => chalk.yellow(String(text)),
+	highlight: (text: string) => pc.bold(hex("#7C3AED")(text)),
+	code: (text: string) => pc.cyan(`\`${text}\``),
+	path: (text: string) => pc.underline(pc.blue(text)),
+	number: (text: string | number) => pc.yellow(String(text)),
 };
 
 // ASCII art banner for Milhouse
 export const banner = `
 ${theme.primary("╔═══════════════════════════════════════════╗")}
-${theme.primary("║")}  ${chalk.bold.hex("#7C3AED")("MILHOUSE")} ${theme.muted("- Pipeline Orchestrator")}     ${theme.primary("║")}
+${theme.primary("║")}  ${pc.bold(hex("#7C3AED")("MILHOUSE"))} ${theme.muted("- Pipeline Orchestrator")}     ${theme.primary("║")}
 ${theme.primary("╚═══════════════════════════════════════════╝")}
 `;
 
