@@ -6,8 +6,13 @@
  * @module tests/unit/runner/phases/consolidate.test.ts
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { consolidatePhaseConfig } from "../../../../src/runner/phases/consolidate.ts";
+import { createRun } from "../../../../src/state/runs.ts";
+import { createTaskForRun, loadTasksForRun } from "../../../../src/state/tasks.ts";
+import type { Task } from "../../../../src/state/types.ts";
 import { createMockPhaseContext } from "../helpers.ts";
 
 // ============================================================================
@@ -110,6 +115,92 @@ describe("consolidatePhaseConfig", () => {
 		it("returns 'exec' even with empty results", () => {
 			const ctx = createMockPhaseContext();
 			expect(consolidatePhaseConfig.nextPhase!([], ctx)).toBe("exec");
+		});
+	});
+
+	// ============================================================================
+	// saveResults — dangling dependency stripping
+	// ============================================================================
+
+	describe("saveResults - dangling dependency stripping", () => {
+		const testDir = join(process.cwd(), ".test-consolidate-dangling");
+
+		beforeEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+			mkdirSync(join(testDir, ".milhouse"), { recursive: true });
+		});
+
+		afterEach(() => {
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+		});
+
+		function createTestTaskData(
+			issueId: string,
+			overrides: Partial<Omit<Task, "id" | "created_at" | "updated_at">> = {},
+		): Omit<Task, "id" | "created_at" | "updated_at"> {
+			return {
+				title: `Task for ${issueId}`,
+				issue_id: issueId,
+				status: "pending",
+				parallel_group: 0,
+				depends_on: [],
+				files: [],
+				checks: [],
+				acceptance: [],
+				...overrides,
+			};
+		}
+
+		it("strips dangling dependency IDs from cross_dependencies before saving", async () => {
+			const run = await createRun({ scope: "consolidate dangling", workDir: testDir });
+			const t1 = createTaskForRun(run.id, createTestTaskData("ISS-1"), testDir);
+			const t2 = createTaskForRun(run.id, createTestTaskData("ISS-1"), testDir);
+
+			const ctx = createMockPhaseContext({
+				runId: run.id,
+				workDir: testDir,
+				store: {
+					allTasks: loadTasksForRun(run.id, testDir),
+					allIssues: [],
+				},
+			});
+
+			// Simulate a consolidation result with a dangling dep
+			const results = [
+				{
+					item: { tasks: [], issues: [] },
+					result: {
+						duplicates: [],
+						cross_dependencies: [
+							{
+								task_id: t2.id,
+								depends_on: [t1.id, "NON-EXISTENT-TASK-ID"],
+								reason: "test",
+							},
+						],
+						parallel_groups: [],
+						execution_order: [t1.id, t2.id],
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			await consolidatePhaseConfig.saveResults!(results, ctx);
+
+			// Reload and check that dangling dep was stripped
+			const savedTasks = loadTasksForRun(run.id, testDir);
+			const savedT2 = savedTasks.find((t) => t.id === t2.id);
+			expect(savedT2).toBeDefined();
+			// The dangling "NON-EXISTENT-TASK-ID" should have been stripped
+			expect(savedT2!.depends_on).not.toContain("NON-EXISTENT-TASK-ID");
+			// The valid dep should remain
+			expect(savedT2!.depends_on).toContain(t1.id);
 		});
 	});
 

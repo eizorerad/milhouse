@@ -13,14 +13,18 @@ import { join } from "node:path";
 import { StateWriteError } from "../../../src/state/errors.ts";
 import { createRun } from "../../../src/state/runs.ts";
 import {
+	areDependenciesSatisfied,
 	createTaskForRun,
 	deleteTask,
+	getReadyTasks,
 	loadTasksForRun,
 	readTaskForRun,
 	saveTasksForRun,
+	saveTasks,
 	updateTaskForRun,
 	updateTaskForRunSafe,
 } from "../../../src/state/tasks.ts";
+import { isTaskReady } from "../../../src/execution/agent/state.ts";
 import type { Task } from "../../../src/state/types.ts";
 
 describe("Run-aware task functions", () => {
@@ -380,6 +384,119 @@ describe("Run-aware task functions", () => {
 
 			const loaded = loadTasksForRun(run.id, testDir);
 			expect(loaded).toEqual([]);
+		});
+	});
+
+	// ============================================================================
+	// Dangling dependency handling
+	// ============================================================================
+
+	describe("areDependenciesSatisfied - dangling dependencies", () => {
+		it("should return true when task depends on a non-existent task ID", async () => {
+			const run = await createRun({ scope: "dangling dep satisfied", workDir: testDir });
+			createTaskForRun(
+				run.id,
+				createTestTaskData("ISS-1", {
+					depends_on: ["NON-EXISTENT-TASK-ID"],
+				}),
+				testDir,
+			);
+
+			// areDependenciesSatisfied uses the deprecated loadTasks() path,
+			// so we need to ensure tasks are accessible via that path too
+			const tasks = loadTasksForRun(run.id, testDir);
+			const task = tasks[0];
+
+			// Use saveTasks to write to the default path for areDependenciesSatisfied
+			saveTasks(tasks, testDir);
+
+			const result = areDependenciesSatisfied(task.id, testDir);
+			// Dangling dep should be treated as satisfied, not blocking
+			expect(result).toBe(true);
+		});
+	});
+
+	describe("getReadyTasks - dangling dependencies", () => {
+		it("should return task as ready when depends_on references non-existent task", async () => {
+			const run = await createRun({ scope: "dangling ready tasks", workDir: testDir });
+			createTaskForRun(
+				run.id,
+				createTestTaskData("ISS-1", {
+					status: "pending",
+					depends_on: ["NON-EXISTENT-TASK-ID"],
+				}),
+				testDir,
+			);
+
+			const tasks = loadTasksForRun(run.id, testDir);
+			// Write to default path for getReadyTasks
+			saveTasks(tasks, testDir);
+
+			const ready = getReadyTasks(testDir);
+			// Task with dangling dep should be treated as ready
+			expect(ready.length).toBe(1);
+		});
+	});
+
+	describe("isTaskReady - dangling dependencies", () => {
+		it("should return true when task depends on ID not in completedTaskIds and not in allTasks", () => {
+			const task: Task = {
+				id: "TEST-T1",
+				title: "Test task",
+				issue_id: "ISS-1",
+				status: "pending",
+				parallel_group: 0,
+				depends_on: ["NON-EXISTENT-TASK-ID"],
+				files: [],
+				checks: [],
+				acceptance: [],
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			};
+
+			const allTasks = [task]; // Only the task itself, dep doesn't exist
+			const completedTaskIds: string[] = [];
+
+			const result = isTaskReady(task, allTasks, completedTaskIds);
+			// Dangling dep (not in allTasks) should be treated as satisfied
+			expect(result).toBe(true);
+		});
+
+		it("should return false when task depends on an existing but incomplete task", () => {
+			const depTask: Task = {
+				id: "DEP-T1",
+				title: "Dependency task",
+				issue_id: "ISS-1",
+				status: "pending",
+				parallel_group: 0,
+				depends_on: [],
+				files: [],
+				checks: [],
+				acceptance: [],
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			};
+
+			const task: Task = {
+				id: "TEST-T1",
+				title: "Test task",
+				issue_id: "ISS-1",
+				status: "pending",
+				parallel_group: 0,
+				depends_on: ["DEP-T1"],
+				files: [],
+				checks: [],
+				acceptance: [],
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+			};
+
+			const allTasks = [depTask, task];
+			const completedTaskIds: string[] = []; // DEP-T1 not completed
+
+			const result = isTaskReady(task, allTasks, completedTaskIds);
+			// Existing but not completed dep should block the task
+			expect(result).toBe(false);
 		});
 	});
 
