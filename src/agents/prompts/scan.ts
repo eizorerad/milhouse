@@ -77,6 +77,7 @@ If no significant work items are found, return an empty array: \`[]\``);
 	// Guidelines
 	parts.push(`## Guidelines
 
+- **DO NOT run any commands (npm test, npm run, etc.).** This is a scanning phase — only read source files to identify issues.
 - Focus on real, actionable work items (bugs, features, refactoring, improvements, tasks)
 - Do NOT report style preferences or minor nitpicks
 - Each work item should be independently actionable

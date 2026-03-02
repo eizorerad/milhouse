@@ -106,6 +106,7 @@ Respond with JSON in this exact format:
 	// Guidelines
 	parts.push(`## Guidelines
 
+- **DO NOT run any commands (npm test, npm run, etc.).** This is a validation phase — only read source files to find evidence.
 - Provide at least ONE piece of evidence for any non-FALSE status
 - For FALSE status, explain why the issue doesn't exist
 - Be specific about file paths and line numbers

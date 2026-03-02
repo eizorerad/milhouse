@@ -168,19 +168,48 @@ export class EngineExecutor implements IEngineExecutor {
 		// This ensures timed-out processes don't become zombies.
 		let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
 		const abortSignal = request.abortSignal as AbortSignal | undefined;
+		const isWindows = process.platform === "win32";
 
-		const onAbort = () => {
-			try {
-				proc.kill("SIGTERM");
-			} catch {
-				// Process already exited
-			}
-			// Force kill after 5 seconds if SIGTERM doesn't work
-			forceKillTimer = setTimeout(() => {
+		/**
+		 * Kill the process tree. On Windows, SIGTERM/SIGKILL are no-ops —
+		 * we must use `taskkill /PID <pid> /T /F` to kill the entire
+		 * process tree (Claude CLI + any child processes it spawned).
+		 */
+		const killProcessTree = () => {
+			const pid = proc.pid;
+			if (!pid) return;
+
+			if (isWindows) {
 				try {
-					proc.kill("SIGKILL");
+					// /T = kill child processes, /F = force
+					Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"], {
+						stdout: "ignore",
+						stderr: "ignore",
+					});
+				} catch {
+					// taskkill may fail if process already exited
+				}
+			} else {
+				try {
+					proc.kill("SIGTERM");
 				} catch {
 					// Process already exited
+				}
+			}
+		};
+
+		const onAbort = () => {
+			killProcessTree();
+			// Force kill after 5 seconds if first attempt doesn't work
+			forceKillTimer = setTimeout(() => {
+				if (isWindows) {
+					killProcessTree(); // Retry taskkill on Windows
+				} else {
+					try {
+						proc.kill("SIGKILL");
+					} catch {
+						// Process already exited
+					}
 				}
 			}, 5000);
 		};

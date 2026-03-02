@@ -118,6 +118,7 @@ Respond with JSON in this exact format:
 	// Guidelines
 	parts.push(`## Guidelines
 
+- **DO NOT run any commands.** This is a planning phase — only read files to understand the code structure.
 - **Task Granularity**: Each task should be a single logical unit of work
 - **Dependencies**: Use depends_on to reference other task indices (0-based within this WBS)
 - **Parallel Groups**: Tasks with the same parallel_group can run concurrently
