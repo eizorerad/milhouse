@@ -48,7 +48,7 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 	// Limit turns to prevent Claude from asking clarifying questions
 	// and hanging indefinitely. Plan agents need 2-3 turns at most
 	// (read files + generate JSON response).
-	engineMetadata: { maxTurns: 15 },
+	engineMetadata: { maxTurns: 15, timeout: 600000 },  // 10 min per-item timeout
 
 	// Retry: if an item fails (e.g. CLI hang timeout), retry it
 	isRetryable: true,

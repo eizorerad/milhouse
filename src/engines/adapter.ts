@@ -300,6 +300,10 @@ export class PluginAdapter implements AIEngine {
 			pipelinePhase: options?.pipelinePhase,
 			// Forward engine metadata (maxTokens, maxTurns, etc.)
 			metadata: options?.metadata,
+			// Forward per-phase timeout if specified in metadata (overrides engine default)
+			...(options?.metadata?.timeout && typeof options.metadata.timeout === "number"
+				? { timeout: options.metadata.timeout }
+				: {}),
 		};
 
 		// Execute using the plugin system
@@ -362,6 +366,10 @@ export class PluginAdapter implements AIEngine {
 			pipelinePhase: options?.pipelinePhase,
 			// Forward engine metadata (maxTokens, maxTurns, etc.)
 			metadata: options?.metadata,
+			// Forward per-phase timeout if specified in metadata (overrides engine default)
+			...(options?.metadata?.timeout && typeof options.metadata.timeout === "number"
+				? { timeout: options.metadata.timeout }
+				: {}),
 		};
 
 		// Create step callback that translates ExecutionStep to DetailedStep

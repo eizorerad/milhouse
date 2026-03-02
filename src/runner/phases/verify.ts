@@ -38,7 +38,7 @@ export const verifyPhaseConfig: PhaseConfig<Task, VerifyResult> = {
 	name: "verify",
 	role: "TV",
 	jsonSchema: VERIFY_SCHEMA as Record<string, unknown>,
-	engineMetadata: { maxTurns: 15 },
+	engineMetadata: { maxTurns: 15, timeout: 600000 },  // 10 min per-item timeout
 	mode: "per-item",
 	defaultParallel: 5,
 
