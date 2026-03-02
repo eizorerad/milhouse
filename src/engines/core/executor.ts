@@ -168,7 +168,6 @@ export class EngineExecutor implements IEngineExecutor {
 		// This ensures timed-out processes don't become zombies.
 		let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
 		const abortSignal = request.abortSignal as AbortSignal | undefined;
-		const isWindows = process.platform === "win32";
 
 		/**
 		 * Kill the process tree. On Windows, SIGTERM/SIGKILL are no-ops —
