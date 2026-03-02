@@ -387,9 +387,9 @@ export function createConfiguredExecutor(config: ExecutorConfig): EngineExecutor
 		executor.use(createLoggingMiddleware());
 	}
 
-	if (config.timeout) {
-		executor.use(createTimeoutMiddleware({ defaultTimeout: config.timeout }));
-	}
+	// Always add timeout middleware — without it, hung processes run forever.
+	// Use config.timeout if specified, otherwise use the default (66 min).
+	executor.use(createTimeoutMiddleware(config.timeout ? { defaultTimeout: config.timeout } : {}));
 
 	if (config.retry) {
 		executor.use(createRetryMiddleware(config.retry));
