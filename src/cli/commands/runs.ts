@@ -113,7 +113,7 @@ export async function infoRunCommand(
  * Switch to a different run
  */
 export async function switchRunCommand(runId: string, options: RunsOptions): Promise<void> {
-	const success = setCurrentRun(runId, options.workDir);
+	const success = await setCurrentRun(runId, options.workDir);
 
 	if (success) {
 		const meta = loadRunMeta(runId, options.workDir);

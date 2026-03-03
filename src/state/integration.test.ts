@@ -20,6 +20,7 @@ import {
 	getRunStateDir,
 	listRuns,
 	loadRunMeta,
+	loadRunsIndex,
 	setCurrentRun,
 	updateRunPhaseInMetaWithLock,
 	updateRunStatsWithLock,
@@ -496,10 +497,10 @@ describe("Integration Tests", () => {
 			expect(runs.length).toBe(3);
 
 			// Switch between runs
-			setCurrentRun(run1.id, testDir);
+			await setCurrentRun(run1.id, testDir);
 			expect(getCurrentRun(testDir)?.id).toBe(run1.id);
 
-			setCurrentRun(run2.id, testDir);
+			await setCurrentRun(run2.id, testDir);
 			expect(getCurrentRun(testDir)?.id).toBe(run2.id);
 
 			// Delete a run
@@ -515,7 +516,7 @@ describe("Integration Tests", () => {
 			const run2 = await createRun({ scope: "isolated run 2", workDir: testDir });
 
 			// Add issues to run1
-			setCurrentRun(run1.id, testDir);
+			await setCurrentRun(run1.id, testDir);
 			const now = new Date().toISOString();
 			const run1Issues: Issue[] = [
 				{
@@ -533,7 +534,7 @@ describe("Integration Tests", () => {
 			saveIssues(run1Issues, testDir);
 
 			// Switch to run2 and add different issues
-			setCurrentRun(run2.id, testDir);
+			await setCurrentRun(run2.id, testDir);
 			const run2Issues: Issue[] = [
 				{
 					id: "RUN2-ISSUE-1",
@@ -566,10 +567,45 @@ describe("Integration Tests", () => {
 			expect(run2LoadedIssues[0].id).toBe("RUN2-ISSUE-1");
 
 			// Switch back to run1 and verify its issues are intact
-			setCurrentRun(run1.id, testDir);
+			await setCurrentRun(run1.id, testDir);
 			const run1LoadedIssues = loadIssues(testDir);
 			expect(run1LoadedIssues.length).toBe(1);
 			expect(run1LoadedIssues[0].id).toBe("RUN1-ISSUE-1");
+		});
+
+		test("concurrent setCurrentRun + deleteRun should not lose index changes", async () => {
+			const run1 = await createRun({ scope: "concurrent run 1", workDir: testDir });
+			const run2 = await createRun({ scope: "concurrent run 2", workDir: testDir });
+			const run3 = await createRun({ scope: "concurrent run 3", workDir: testDir });
+
+			// Fire concurrent operations: setCurrentRun(run1) + deleteRun(run3)
+			await Promise.all([setCurrentRun(run1.id, testDir), deleteRun(run3.id, testDir)]);
+
+			const index = loadRunsIndex(testDir);
+			// Should have exactly 2 runs — run3 deleted, run1 and run2 remain
+			expect(index.runs.length).toBe(2);
+			expect(index.runs.some((r) => r.id === run3.id)).toBe(false);
+			expect(index.runs.some((r) => r.id === run1.id)).toBe(true);
+			expect(index.runs.some((r) => r.id === run2.id)).toBe(true);
+			// run1 should be at the end (current)
+			expect(index.runs[index.runs.length - 1].id).toBe(run1.id);
+		});
+
+		test("concurrent setCurrentRun + createRun should not lose index changes", async () => {
+			const run1 = await createRun({ scope: "concurrent create 1", workDir: testDir });
+			const _run2 = await createRun({ scope: "concurrent create 2", workDir: testDir });
+
+			// Fire concurrent operations: setCurrentRun(run1) + createRun
+			const [, newRun] = await Promise.all([
+				setCurrentRun(run1.id, testDir),
+				createRun({ scope: "concurrent new run", workDir: testDir }),
+			]);
+
+			const index = loadRunsIndex(testDir);
+			// Should have 3 runs — original 2 plus the newly created one
+			expect(index.runs.length).toBe(3);
+			expect(index.runs.some((r) => r.id === run1.id)).toBe(true);
+			expect(index.runs.some((r) => r.id === newRun.id)).toBe(true);
 		});
 	});
 

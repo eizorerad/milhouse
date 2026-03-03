@@ -173,20 +173,22 @@ export function getCurrentRun(workDir = process.cwd()): RunMeta | null {
  * Set the "current" run by moving it to the end of the runs list.
  * This replaces the old current_run pointer approach.
  */
-export function setCurrentRun(runId: string, workDir = process.cwd()): boolean {
-	const index = loadRunsIndex(workDir);
+export async function setCurrentRun(runId: string, workDir = process.cwd()): Promise<boolean> {
+	let found = false;
+	await saveRunsIndexWithLock((index) => {
+		// Verify run exists
+		const runEntry = index.runs.find((r) => r.id === runId);
+		if (!runEntry) {
+			return index;
+		}
 
-	// Verify run exists
-	const runEntry = index.runs.find((r) => r.id === runId);
-	if (!runEntry) {
-		return false;
-	}
-
-	// Move the target run to the end of the list (making it "current")
-	const filtered = index.runs.filter((r) => r.id !== runId);
-	filtered.push(runEntry);
-	saveRunsIndex({ ...index, runs: filtered }, workDir);
-	return true;
+		found = true;
+		// Move the target run to the end of the list (making it "current")
+		const filtered = index.runs.filter((r) => r.id !== runId);
+		filtered.push(runEntry);
+		return { ...index, runs: filtered };
+	}, workDir);
+	return found;
 }
 
 // ============================================================================
