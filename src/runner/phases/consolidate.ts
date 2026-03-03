@@ -233,8 +233,9 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 		console.log("");
 	},
 
-	nextPhase(): RunPhase {
-		return "exec";
+	nextPhase(results): RunPhase {
+		const anySucceeded = results.length === 0 || results.some((r) => r.success);
+		return anySucceeded ? "exec" : "failed";
 	},
 };
 
