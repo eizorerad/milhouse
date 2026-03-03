@@ -10,6 +10,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
 import type { Config } from "./define.ts";
+import { logDebug, logWarn } from "../ui/logger.ts";
+
+const EXPECTED_IMPORT_ERROR_CODES = new Set([
+	"ERR_UNKNOWN_FILE_EXTENSION",
+	"ERR_MODULE_NOT_FOUND",
+	"MODULE_NOT_FOUND",
+]);
 
 let cached: Config | null = null;
 
@@ -32,8 +39,14 @@ export async function loadUserConfig(workDir: string): Promise<Config> {
 			const mod = await import(pathToFileURL(tsPath).href);
 			cached = (mod.default ?? mod) as Config;
 			return cached;
-		} catch {
-			// If .ts import fails (e.g. compiled binary), fall through to YAML
+		} catch (error: unknown) {
+			const code = (error as { code?: string }).code;
+			if (code && EXPECTED_IMPORT_ERROR_CODES.has(code)) {
+				logDebug(`Could not import .milhouse/config.ts (${code}) — falling back to YAML or defaults`);
+			} else {
+				const msg = error instanceof Error ? error.message : String(error);
+				logWarn(`Failed to load .milhouse/config.ts: ${msg} — falling back to YAML or defaults`);
+			}
 		}
 	}
 
@@ -47,8 +60,9 @@ export async function loadUserConfig(workDir: string): Promise<Config> {
 					cached = parsed as Config;
 					return cached;
 				}
-			} catch {
-				// Skip invalid YAML
+			} catch (error: unknown) {
+				const msg = error instanceof Error ? error.message : String(error);
+				logWarn(`Failed to parse ${yamlPath}: ${msg} — skipping`);
 			}
 		}
 	}
