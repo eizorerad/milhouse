@@ -321,6 +321,101 @@ describe("validatePhaseConfig", () => {
 			];
 			expect(validatePhaseConfig.nextPhase!(results, ctx)).toBe("plan");
 		});
+
+		it("returns 'failed' when all results are UNVALIDATED", () => {
+			const results = [
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-1", status: "UNVALIDATED" as const },
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-2", status: "UNVALIDATED" as const },
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+			expect(validatePhaseConfig.nextPhase!(results, ctx)).toBe("failed");
+		});
+
+		it("returns 'failed' when all results have success=false", () => {
+			const results = [
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-1", status: "UNVALIDATED" as const },
+					success: false,
+					error: "Engine error",
+					inputTokens: 0,
+					outputTokens: 0,
+				},
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-2", status: "UNVALIDATED" as const },
+					success: false,
+					error: "Engine error",
+					inputTokens: 0,
+					outputTokens: 0,
+				},
+			];
+			expect(validatePhaseConfig.nextPhase!(results, ctx)).toBe("failed");
+		});
+
+		it("returns 'completed' when mix of FALSE and UNVALIDATED", () => {
+			const results = [
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-1", status: "FALSE" as const },
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-2", status: "UNVALIDATED" as const },
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+			expect(validatePhaseConfig.nextPhase!(results, ctx)).toBe("completed");
+		});
+
+		it("returns 'completed' when mix of MISDIAGNOSED and UNVALIDATED", () => {
+			const results = [
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-1", status: "MISDIAGNOSED" as const },
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-2", status: "UNVALIDATED" as const },
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+			expect(validatePhaseConfig.nextPhase!(results, ctx)).toBe("completed");
+		});
+
+		it("returns 'failed' for single UNVALIDATED result", () => {
+			const results = [
+				{
+					item: createMockIssue(),
+					result: { issue_id: "ISS-1", status: "UNVALIDATED" as const },
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+			expect(validatePhaseConfig.nextPhase!(results, ctx)).toBe("failed");
+		});
 	});
 
 	// ============================================================================
