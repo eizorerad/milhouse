@@ -42,14 +42,12 @@ describe("scanPhaseConfig", () => {
 			expect(result.issues[0].title).toBe("Feature 1");
 		});
 
-		it("returns empty issues for invalid JSON", () => {
-			const result = scanPhaseConfig.parseResponse("not valid json at all", item, ctx);
-			expect(result.issues).toEqual([]);
+		it("throws for invalid JSON", () => {
+			expect(() => scanPhaseConfig.parseResponse("not valid json at all", item, ctx)).toThrow("Scan: AI response contained no extractable JSON");
 		});
 
-		it("returns empty issues for empty response", () => {
-			const result = scanPhaseConfig.parseResponse("", item, ctx);
-			expect(result.issues).toEqual([]);
+		it("throws for empty response", () => {
+			expect(() => scanPhaseConfig.parseResponse("", item, ctx)).toThrow("Scan: AI response contained no extractable JSON");
 		});
 
 		it("filters out items missing both title and symptom", () => {
@@ -96,10 +94,9 @@ describe("scanPhaseConfig", () => {
 			expect(result.issues[0].severity).toBe("MEDIUM");
 		});
 
-		it("returns empty issues for non-array JSON object without items", () => {
+		it("throws for non-array JSON object without items (unrecognized structure)", () => {
 			const response = JSON.stringify({ foo: "bar" });
-			const result = scanPhaseConfig.parseResponse(response, item, ctx);
-			expect(result.issues).toEqual([]);
+			expect(() => scanPhaseConfig.parseResponse(response, item, ctx)).toThrow("Scan: AI response JSON has unrecognized structure");
 		});
 
 		it("handles JSON inside markdown code block", () => {
