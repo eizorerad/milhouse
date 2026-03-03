@@ -8,6 +8,7 @@
 import pc from "picocolors";
 import { type ConsolidateInput, buildConsolidatePrompt } from "../../agents/prompts/consolidate.ts";
 import { CONSOLIDATE_SCHEMA } from "../../agents/schemas/consolidate.ts";
+import { StateParseError } from "../../state/errors.ts";
 import { loadGraphForRun, saveGraphForRunSafe } from "../../state/graph.ts";
 import { filterIssues, loadIssuesForRun } from "../../state/issues.ts";
 import { logWarn } from "../../ui/logger.ts";
@@ -38,7 +39,17 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 	loadItems(ctx) {
 		// Idempotency guard: if graph already exists, consolidation already ran.
 		// Re-running would apply dedup again and potentially delete legitimate tasks.
-		const existingGraph = loadGraphForRun(ctx.runId, ctx.workDir);
+		let existingGraph: ReturnType<typeof loadGraphForRun>;
+		try {
+			existingGraph = loadGraphForRun(ctx.runId, ctx.workDir);
+		} catch (error) {
+			if (error instanceof StateParseError) {
+				logWarn(`Graph file is corrupted for run ${ctx.runId}, re-running consolidation`);
+				existingGraph = [];
+			} else {
+				throw error;
+			}
+		}
 		if (existingGraph.length > 0) return [];
 
 		const allIssues = loadIssuesForRun(ctx.runId, ctx.workDir);
