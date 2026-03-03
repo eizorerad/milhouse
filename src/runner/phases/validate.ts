@@ -262,11 +262,16 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 
 		const hasConfirmed =
 			(byStatus.get("CONFIRMED")?.length ?? 0) > 0 || (byStatus.get("PARTIAL")?.length ?? 0) > 0;
+		const hasResolved = results.some(
+			(r) => r.success && r.result.status !== "UNVALIDATED",
+		);
 		console.log("");
 		if (hasConfirmed) {
 			console.log(`  ${pc.dim("->")} Next: ${pc.cyan("milhouse --plan")}`);
+		} else if (hasResolved) {
+			console.log(`  ${pc.dim("All items were disproven. No planning needed.")}`);
 		} else {
-			console.log(`  ${pc.dim("All items were invalid. No planning needed.")}`);
+			console.log(`  ${pc.red("All validations failed to produce a result.")}`);
 		}
 		console.log(pc.dim("═".repeat(47)));
 		console.log("");
@@ -276,6 +281,12 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 		const hasConfirmed = results.some(
 			(r) => r.success && (r.result.status === "CONFIRMED" || r.result.status === "PARTIAL"),
 		);
-		return hasConfirmed ? "plan" : "completed";
+		if (hasConfirmed) return "plan";
+
+		// Check if any result resolved to a definitive status (not UNVALIDATED)
+		const hasResolved = results.some(
+			(r) => r.success && r.result.status !== "UNVALIDATED",
+		);
+		return hasResolved ? "completed" : "failed";
 	},
 };
