@@ -886,6 +886,14 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		const finalTasks = loadTasksForRun(ctx.runId, ctx.workDir);
 		const allDone = finalTasks.every((t: Task) => t.status === "done" || t.status === "skipped");
 		const anyFailed = finalTasks.some((t: Task) => t.status === "failed");
-		return allDone ? "verify" : anyFailed ? "failed" : "exec";
+		const allTerminal = finalTasks.every(
+			(t: Task) => t.status === "done" || t.status === "skipped" || t.status === "failed",
+		);
+		const anyDone = finalTasks.some((t: Task) => t.status === "done");
+
+		if (allDone) return "verify";
+		if (allTerminal && anyDone) return "verify";
+		if (anyFailed) return "failed";
+		return "exec";
 	},
 };
