@@ -14,6 +14,7 @@ import { writeIssueWbsJsonForRun, writeIssueWbsPlanForRun } from "../../state/pl
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import { createTaskForRunSafe, loadTasksForRun } from "../../state/tasks.ts";
 import type { DoDCriteria, Issue, RunPhase } from "../../state/types.ts";
+import { logWarn } from "../../ui/logger.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
 import { displayPhaseSummaryHeader } from "../phase-runner.ts";
 import type { PhaseConfig } from "../types.ts";
@@ -78,14 +79,16 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 	parseResponse(response, item) {
 		const jsonStr = extractJsonFromResponse(response);
 		if (!jsonStr) {
-			return { issue_id: item.id, summary: "Failed to parse WBS", tasks: [] };
+			logWarn(`Plan [${item.id}]: AI response contained no extractable JSON. Response start: ${response.slice(0, 200)}`);
+			throw new Error(`Plan [${item.id}]: AI response contained no extractable JSON`);
 		}
 
 		try {
 			const parsed = JSON.parse(jsonStr);
 
 			if (typeof parsed.summary !== "string" || !Array.isArray(parsed.tasks)) {
-				return { issue_id: item.id, summary: "Invalid WBS structure", tasks: [] };
+				logWarn(`Plan [${item.id}]: AI response has invalid WBS structure (missing summary or tasks array)`);
+				throw new Error(`Plan [${item.id}]: AI response has invalid WBS structure (missing summary or tasks array)`);
 			}
 
 			const tasks: ParsedWBSTask[] = parsed.tasks
@@ -122,8 +125,10 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 				summary: parsed.summary,
 				tasks,
 			};
-		} catch {
-			return { issue_id: item.id, summary: "Failed to parse WBS JSON", tasks: [] };
+		} catch (err) {
+			if (err instanceof Error && err.message.startsWith(`Plan [`)) throw err;
+			logWarn(`Plan [${item.id}]: failed to parse WBS JSON: ${err instanceof Error ? err.message : String(err)}. JSON start: ${jsonStr.slice(0, 200)}`);
+			throw new Error(`Plan [${item.id}]: failed to parse WBS JSON`);
 		}
 	},
 

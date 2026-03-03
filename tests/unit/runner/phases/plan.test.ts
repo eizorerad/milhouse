@@ -51,18 +51,14 @@ describe("planPhaseConfig", () => {
 			expect(result.tasks[0].parallel_group).toBe(0);
 		});
 
-		it("returns 'Invalid WBS structure' when summary missing", () => {
+		it("throws when summary missing (invalid WBS structure)", () => {
 			const response = JSON.stringify({ tasks: [{ title: "T1" }] });
-			const result = planPhaseConfig.parseResponse(response, item, ctx);
-			expect(result.summary).toBe("Invalid WBS structure");
-			expect(result.tasks).toEqual([]);
+			expect(() => planPhaseConfig.parseResponse(response, item, ctx)).toThrow("Plan [PLAN-001]: AI response has invalid WBS structure (missing summary or tasks array)");
 		});
 
-		it("returns 'Invalid WBS structure' when tasks array missing", () => {
+		it("throws when tasks array missing (invalid WBS structure)", () => {
 			const response = JSON.stringify({ summary: "Has summary" });
-			const result = planPhaseConfig.parseResponse(response, item, ctx);
-			expect(result.summary).toBe("Invalid WBS structure");
-			expect(result.tasks).toEqual([]);
+			expect(() => planPhaseConfig.parseResponse(response, item, ctx)).toThrow("Plan [PLAN-001]: AI response has invalid WBS structure (missing summary or tasks array)");
 		});
 
 		it("filters out tasks without title", () => {
@@ -144,15 +140,12 @@ describe("planPhaseConfig", () => {
 			expect(result.tasks[0].parallel_group).toBe(3);
 		});
 
-		it("returns empty tasks for no JSON extractable", () => {
-			const result = planPhaseConfig.parseResponse("Just plain text", item, ctx);
-			expect(result.summary).toBe("Failed to parse WBS");
-			expect(result.tasks).toEqual([]);
+		it("throws for no JSON extractable", () => {
+			expect(() => planPhaseConfig.parseResponse("Just plain text", item, ctx)).toThrow("Plan [PLAN-001]: AI response contained no extractable JSON");
 		});
 
-		it("returns empty tasks for malformed JSON", () => {
-			const result = planPhaseConfig.parseResponse("{bad json", item, ctx);
-			expect(result.tasks).toEqual([]);
+		it("throws for malformed JSON", () => {
+			expect(() => planPhaseConfig.parseResponse("{bad json", item, ctx)).toThrow("Plan [PLAN-001]:");
 		});
 
 		it("defaults missing files/checks/acceptance/depends_on to empty arrays", () => {

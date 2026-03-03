@@ -12,6 +12,7 @@ import { saveIssuesForRunSafe } from "../../state/issues.ts";
 import { writeProblemBriefForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
 import type { Issue, RunPhase } from "../../state/types.ts";
+import { logWarn } from "../../ui/logger.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
 import { displayPhaseSummaryHeader } from "../phase-runner.ts";
 import type { PhaseConfig } from "../types.ts";
@@ -59,7 +60,10 @@ export const scanPhaseConfig: PhaseConfig<ScanInput, ScanResult> = {
 
 	parseResponse(response) {
 		const jsonStr = extractJsonFromResponse(response);
-		if (!jsonStr) return { issues: [] };
+		if (!jsonStr) {
+			logWarn(`Scan: AI response contained no extractable JSON. Response start: ${response.slice(0, 200)}`);
+			throw new Error("Scan: AI response contained no extractable JSON");
+		}
 
 		try {
 			const parsed = JSON.parse(jsonStr);
@@ -75,9 +79,12 @@ export const scanPhaseConfig: PhaseConfig<ScanInput, ScanResult> = {
 			if (Array.isArray(parsed)) {
 				return { issues: parsed.filter(isValidIssue) };
 			}
-			return { issues: [] };
-		} catch {
-			return { issues: [] };
+			logWarn(`Scan: AI response JSON has unrecognized structure. Response start: ${jsonStr.slice(0, 200)}`);
+			throw new Error("Scan: AI response JSON has unrecognized structure");
+		} catch (err) {
+			if (err instanceof Error && err.message.startsWith("Scan:")) throw err;
+			logWarn(`Scan: failed to parse extracted JSON: ${err instanceof Error ? err.message : String(err)}. JSON start: ${jsonStr.slice(0, 200)}`);
+			throw new Error("Scan: failed to parse extracted JSON");
 		}
 	},
 
