@@ -787,6 +787,8 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		runCost.inputTokens += totalInputTokens;
 		runCost.outputTokens += totalOutputTokens;
 		runCost.totalTokens += totalInputTokens + totalOutputTokens;
+		runCost.inputCost += (totalInputTokens / 1_000_000) * config.cost.inputPerMillion;
+		runCost.outputCost += (totalOutputTokens / 1_000_000) * config.cost.outputPerMillion;
 
 		updateProgress(`Execution: ${tasksCompleted} completed, ${tasksFailed} failed`, workDir);
 
