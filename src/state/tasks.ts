@@ -479,6 +479,19 @@ export function deleteTask(id: string, workDir = process.cwd()): boolean {
 	}
 
 	const newTasks = [...tasks.slice(0, index), ...tasks.slice(index + 1)];
+
+	// Guard against data loss when deletion would empty the array but raw file
+	// has more entries than validated (partial schema failure scenario)
+	if (newTasks.length === 0) {
+		const rawTasks = loadRawTasks(workDir);
+		if (rawTasks.length > 1) {
+			throw new StateWriteError(
+				`deleteTask: Refusing to write empty array — raw file has ${rawTasks.length} entries but only 1 passed validation. ${rawTasks.length - 1} unvalidated entries would be lost.`,
+				{ filePath: getTasksPath(workDir) },
+			);
+		}
+	}
+
 	saveTasks(newTasks, workDir, { force: true });
 	return true;
 }
