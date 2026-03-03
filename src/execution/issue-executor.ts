@@ -1108,9 +1108,12 @@ export async function runParallelByIssue(
 			}
 
 			// Fail-fast: cancel remaining queued issues on first failure
+			// Note: We only set the cancelled flag here, not limit.clearQueue(),
+			// because clearQueue() causes orphaned promises that never resolve,
+			// making Promise.all hang. Instead, queued items check the cancelled
+			// flag and immediately return the skipped result (no I/O).
 			if (options.failFast && !issueResult.success) {
 				cancelled = true;
-				limit.clearQueue();
 				logWarn(
 					`Fail-fast triggered by issue ${issueGroup.issueId} — skipping remaining queued issues`,
 				);
