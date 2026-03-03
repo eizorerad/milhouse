@@ -330,15 +330,15 @@ describe("Run-aware task functions", () => {
 	});
 
 	describe("StateWriteError guard", () => {
-		it("saveTasksForRun throws StateWriteError when saving empty array over non-empty file", () => {
-			const run = createRun({ scope: "empty write guard", workDir: testDir });
+		it("saveTasksForRun throws StateWriteError when saving empty array over non-empty file", async () => {
+			const run = await createRun({ scope: "empty write guard", workDir: testDir });
 			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			expect(() => saveTasksForRun(run.id, [], testDir)).toThrow(StateWriteError);
 		});
 
-		it("saveTasksForRun allows empty write with force: true", () => {
-			const run = createRun({ scope: "force empty write", workDir: testDir });
+		it("saveTasksForRun allows empty write with force: true", async () => {
+			const run = await createRun({ scope: "force empty write", workDir: testDir });
 			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			expect(() => saveTasksForRun(run.id, [], testDir, { force: true })).not.toThrow();
@@ -347,14 +347,14 @@ describe("Run-aware task functions", () => {
 			expect(loaded).toEqual([]);
 		});
 
-		it("saveTasksForRun allows empty write to non-existent file", () => {
-			const run = createRun({ scope: "new run empty write", workDir: testDir });
+		it("saveTasksForRun allows empty write to non-existent file", async () => {
+			const run = await createRun({ scope: "new run empty write", workDir: testDir });
 
 			expect(() => saveTasksForRun(run.id, [], testDir)).not.toThrow();
 		});
 
-		it("saveTasksForRun allows non-empty write without force", () => {
-			const run = createRun({ scope: "non-empty write", workDir: testDir });
+		it("saveTasksForRun allows non-empty write without force", async () => {
+			const run = await createRun({ scope: "non-empty write", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			const tasks: Task[] = [
@@ -372,9 +372,9 @@ describe("Run-aware task functions", () => {
 			expect(loaded[0].status).toBe("done");
 		});
 
-		it("deleteTask succeeds when deleting last task", () => {
+		it("deleteTask succeeds when deleting last task", async () => {
 			// Create a run so the deprecated saveTasks path resolves correctly
-			const run = createRun({ scope: "delete last task", workDir: testDir });
+			const run = await createRun({ scope: "delete last task", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			// deleteTask uses the deprecated saveTasks path with force: true
