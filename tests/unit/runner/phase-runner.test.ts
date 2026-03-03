@@ -204,6 +204,11 @@ describe("runPhase", () => {
 			phase: "scan",
 			created_at: new Date().toISOString(),
 			updated_at: new Date().toISOString(),
+			issues_found: 0,
+			issues_validated: 0,
+			tasks_total: 0,
+			tasks_completed: 0,
+			tasks_failed: 0,
 		});
 		const updatePhaseSpy = spyOn(runsModule, "updateRunPhaseInMetaWithLock").mockResolvedValue(undefined as never);
 
@@ -307,6 +312,11 @@ describe("runPhase", () => {
 			phase: "scan",
 			created_at: new Date().toISOString(),
 			updated_at: new Date().toISOString(),
+			issues_found: 0,
+			issues_validated: 0,
+			tasks_total: 0,
+			tasks_completed: 0,
+			tasks_failed: 0,
 		});
 		const updatePhaseSpy = spyOn(runsModule, "updateRunPhaseInMetaWithLock").mockResolvedValue(undefined as never);
 
@@ -356,6 +366,11 @@ describe("runPhase", () => {
 			phase: "scan",
 			created_at: new Date().toISOString(),
 			updated_at: new Date().toISOString(),
+			issues_found: 0,
+			issues_validated: 0,
+			tasks_total: 0,
+			tasks_completed: 0,
+			tasks_failed: 0,
 		});
 		const updatePhaseSpy = spyOn(runsModule, "updateRunPhaseInMetaWithLock").mockResolvedValue(undefined as never);
 
