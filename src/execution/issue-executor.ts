@@ -771,6 +771,9 @@ export async function runParallelByIssue(
 	// Track ALL branches for detailed status reporting (complete, partial, failed)
 	const allBranchStatuses: BranchStatus[] = [];
 
+	// Fail-fast: shared cancellation flag checked by queued issues
+	let cancelled = false;
+
 	// Queue worktrees for cleanup BEFORE merge phase
 	// Worktrees must be removed before merge so branches are not locked
 	// Format: { worktreeDir, branchName }
@@ -798,6 +801,42 @@ export async function runParallelByIssue(
 	// NOTE: We do NOT merge inside this loop to prevent race conditions
 	const promises = issueGroups.map((issueGroup, _idx) => {
 		return limit(async () => {
+			// Fail-fast: skip execution if a previous issue already failed
+			if (cancelled) {
+				const skippedResult: IssueExecutionResult = {
+					issueId: issueGroup.issueId,
+					completedTasks: [],
+					failedTasks: issueGroup.tasks.map((t) => t.id),
+					inputTokens: 0,
+					outputTokens: 0,
+					success: false,
+					error: "Skipped due to fail-fast",
+				};
+
+				try {
+					await options.onIssueComplete?.(issueGroup.issueId, skippedResult);
+				} catch (callbackError) {
+					const errorMsg = callbackError instanceof Error ? callbackError.message : String(callbackError);
+					logError(
+						`onIssueComplete callback threw an error for skipped issue ${issueGroup.issueId}: ${errorMsg}`,
+					);
+					skippedResult.callbackError = errorMsg;
+				}
+
+				allBranchStatuses.push({
+					branch: "",
+					issueId: issueGroup.issueId,
+					status: "failed",
+					completedTasks: 0,
+					failedTasks: issueGroup.tasks.length,
+					totalTasks: issueGroup.tasks.length,
+					merged: false,
+					error: "Skipped due to fail-fast",
+				});
+
+				return skippedResult;
+			}
+
 			let worktreeDir = "";
 			let branchName = "";
 			const completedTasks: string[] = [];
@@ -1066,6 +1105,15 @@ export async function runParallelByIssue(
 				if (issueResult.success) {
 					branchesToMerge.push(branchName);
 				}
+			}
+
+			// Fail-fast: cancel remaining queued issues on first failure
+			if (options.failFast && !issueResult.success) {
+				cancelled = true;
+				limit.clearQueue();
+				logWarn(
+					`Fail-fast triggered by issue ${issueGroup.issueId} — skipping remaining queued issues`,
+				);
 			}
 
 			return issueResult;
