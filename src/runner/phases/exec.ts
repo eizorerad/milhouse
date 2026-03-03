@@ -884,8 +884,12 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 
 	nextPhase(_results, ctx): RunPhase {
 		const finalTasks = loadTasksForRun(ctx.runId, ctx.workDir);
+		const completedCount = finalTasks.filter((t: Task) => t.status === "done").length;
 		const allDone = finalTasks.every((t: Task) => t.status === "done" || t.status === "skipped");
-		const anyFailed = finalTasks.some((t: Task) => t.status === "failed");
-		return allDone ? "verify" : anyFailed ? "failed" : "exec";
+
+		// Always verify if ANY tasks completed — verify checks what was actually done.
+		// Only signal 'failed' if zero tasks completed (nothing to verify).
+		if (completedCount > 0 || allDone) return "verify";
+		return "failed";
 	},
 };
