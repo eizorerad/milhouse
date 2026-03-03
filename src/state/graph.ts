@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loggers } from "../observability/logger.ts";
+import { StateParseError } from "./errors.ts";
 import { withFileLock } from "./file-lock.ts";
 import { saveJsonFile } from "./json-io.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
@@ -41,8 +42,12 @@ export function loadGraphForRun(runId: string, workDir = process.cwd()): GraphNo
 			if (result.success) validNodes.push(result.data);
 		}
 		return validNodes;
-	} catch {
-		return [];
+	} catch (error) {
+		loggers.state.error({ path, error }, `Failed to parse graph file for run ${runId}`);
+		throw new StateParseError(`Failed to parse graph file for run ${runId}`, {
+			filePath: path,
+			cause: error instanceof Error ? error : new Error(String(error)),
+		});
 	}
 }
 
@@ -71,8 +76,12 @@ export function loadRawGraph(workDir = process.cwd()): unknown[] {
 		const content = readFileSync(path, "utf-8");
 		const parsed = JSON.parse(content);
 		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
+	} catch (error) {
+		loggers.state.error({ path, error }, `Failed to parse raw graph file`);
+		throw new StateParseError(`Failed to parse raw graph file`, {
+			filePath: path,
+			cause: error instanceof Error ? error : new Error(String(error)),
+		});
 	}
 }
 
@@ -103,16 +112,19 @@ export function loadGraph(workDir = process.cwd()): GraphNode[] {
 				validNodes.push(result.data);
 			} else {
 				// Log but don't fail - preserve other nodes
-				console.error(
-					`[WARN] Skipping invalid graph node ${item?.id || "unknown"}:`,
-					result.error.message,
+				loggers.state.warn(
+					{ nodeId: item?.id || "unknown", error: result.error.message },
+					"Skipping invalid graph node",
 				);
 			}
 		}
 		return validNodes;
 	} catch (error) {
-		console.error(`[ERROR] Failed to load graph from ${path}:`, error);
-		return [];
+		loggers.state.error({ path, error }, `Failed to load graph from ${path}`);
+		throw new StateParseError(`Failed to load graph from ${path}`, {
+			filePath: path,
+			cause: error instanceof Error ? error : new Error(String(error)),
+		});
 	}
 }
 

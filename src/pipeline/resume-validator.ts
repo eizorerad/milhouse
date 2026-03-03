@@ -67,9 +67,14 @@ export const PHASE_OUTPUT_REQUIREMENTS: Record<string, PhaseOutputCheck[]> = {
 			return null;
 		},
 		(runId, workDir) => {
-			const graph = loadGraphForRun(runId, workDir);
-			if (graph.length === 0) return "graph.json is missing or empty after consolidate phase";
-			return null;
+			try {
+				const graph = loadGraphForRun(runId, workDir);
+				if (graph.length === 0) return "graph.json is missing or empty after consolidate phase";
+				return null;
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				return `graph.json is corrupted or unreadable after consolidate phase: ${msg}`;
+			}
 		},
 	],
 	exec: [
