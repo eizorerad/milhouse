@@ -30,7 +30,7 @@ import {
 	loadTasks,
 	saveTasks,
 	updateTask,
-	updateTaskStatus,
+	updateTaskStatusWithLock,
 } from "./tasks.ts";
 import type { Issue, Task } from "./types.ts";
 import {
@@ -180,21 +180,21 @@ describe("Integration Tests", () => {
 			await updateRunPhaseInMetaWithLock(run.id, "exec", testDir);
 
 			// Execute first task
-			updateTaskStatus("ISSUE-1-T1", "running", undefined, testDir);
-			updateTaskStatus("ISSUE-1-T1", "done", undefined, testDir);
+			await updateTaskStatusWithLock("ISSUE-1-T1", "running", undefined, testDir);
+			await updateTaskStatusWithLock("ISSUE-1-T1", "done", undefined, testDir);
 			await updateRunStatsWithLock(run.id, { tasks_completed: 1 }, testDir);
 
 			// Execute second task
-			updateTaskStatus("ISSUE-2-T1", "running", undefined, testDir);
-			updateTaskStatus("ISSUE-2-T1", "done", undefined, testDir);
+			await updateTaskStatusWithLock("ISSUE-2-T1", "running", undefined, testDir);
+			await updateTaskStatusWithLock("ISSUE-2-T1", "done", undefined, testDir);
 			await updateRunStatsWithLock(run.id, { tasks_completed: 2 }, testDir);
 
 			// Execute third task (was blocked, now ready)
 			const readyTasks = getReadyTasks(testDir);
 			expect(readyTasks.some((t) => t.id === "ISSUE-2-T2")).toBe(true);
 
-			updateTaskStatus("ISSUE-2-T2", "running", undefined, testDir);
-			updateTaskStatus("ISSUE-2-T2", "done", undefined, testDir);
+			await updateTaskStatusWithLock("ISSUE-2-T2", "running", undefined, testDir);
+			await updateTaskStatusWithLock("ISSUE-2-T2", "done", undefined, testDir);
 			await updateRunStatsWithLock(run.id, { tasks_completed: 3 }, testDir);
 
 			// Step 6: Update phase to verify
@@ -254,7 +254,7 @@ describe("Integration Tests", () => {
 			saveTasks(tasks, testDir);
 
 			// Fail the first task
-			updateTaskStatus("TASK-1", "failed", "Test failure", testDir);
+			await updateTaskStatusWithLock("TASK-1", "failed", "Test failure", testDir);
 			await updateRunStatsWithLock(run.id, { tasks_failed: 1 }, testDir);
 
 			// Verify dependent task is blocked
