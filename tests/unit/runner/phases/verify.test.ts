@@ -207,8 +207,8 @@ describe("verifyPhaseConfig", () => {
 			expect(verifyPhaseConfig.nextPhase!(results, ctx)).toBe("failed");
 		});
 
-		it("returns 'completed' for empty results (vacuously true)", () => {
-			expect(verifyPhaseConfig.nextPhase!([], ctx)).toBe("completed");
+		it("returns 'failed' for empty results (no tasks verified)", () => {
+			expect(verifyPhaseConfig.nextPhase!([], ctx)).toBe("failed");
 		});
 	});
 
