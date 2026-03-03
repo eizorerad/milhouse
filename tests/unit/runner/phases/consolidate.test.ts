@@ -90,7 +90,7 @@ describe("consolidatePhaseConfig", () => {
 	// ============================================================================
 
 	describe("nextPhase", () => {
-		it("always returns 'exec'", () => {
+		it("returns exec when result succeeded", () => {
 			const ctx = createMockPhaseContext();
 			const results = [
 				{
@@ -107,6 +107,48 @@ describe("consolidatePhaseConfig", () => {
 		it("returns 'exec' even with empty results", () => {
 			const ctx = createMockPhaseContext();
 			expect(consolidatePhaseConfig.nextPhase!([], ctx)).toBe("exec");
+		});
+
+		it("returns failed when all results failed", () => {
+			const ctx = createMockPhaseContext();
+			const results = [
+				{
+					item: { tasks: [], issues: [] },
+					result: { duplicates: [], cross_dependencies: [], parallel_groups: [], execution_order: [] },
+					success: false,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+				{
+					item: { tasks: [], issues: [] },
+					result: { duplicates: [], cross_dependencies: [], parallel_groups: [], execution_order: [] },
+					success: false,
+					inputTokens: 80,
+					outputTokens: 40,
+				},
+			];
+			expect(consolidatePhaseConfig.nextPhase!(results, ctx)).toBe("failed");
+		});
+
+		it("returns exec when at least one result succeeded in mixed results", () => {
+			const ctx = createMockPhaseContext();
+			const results = [
+				{
+					item: { tasks: [], issues: [] },
+					result: { duplicates: [], cross_dependencies: [], parallel_groups: [], execution_order: [] },
+					success: false,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+				{
+					item: { tasks: [], issues: [] },
+					result: { duplicates: [], cross_dependencies: [], parallel_groups: [], execution_order: [] },
+					success: true,
+					inputTokens: 80,
+					outputTokens: 40,
+				},
+			];
+			expect(consolidatePhaseConfig.nextPhase!(results, ctx)).toBe("exec");
 		});
 	});
 
