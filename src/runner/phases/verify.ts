@@ -307,6 +307,7 @@ export const verifyPhaseConfig: PhaseConfig<Task, VerifyResult> = {
 	},
 
 	nextPhase(results): RunPhase {
+		if (results.length === 0) return "failed";
 		const passed = results.every((r) => r.success && r.result.overall_pass);
 		return passed ? "completed" : "failed";
 	},
