@@ -12,7 +12,7 @@ import { PLAN_SCHEMA } from "../../agents/schemas/plan.ts";
 import { filterIssues, loadIssuesForRun, updateIssueForRun } from "../../state/issues.ts";
 import { writeIssueWbsJsonForRun, writeIssueWbsPlanForRun } from "../../state/plan-store.ts";
 import { updateRunStatsWithLock } from "../../state/runs.ts";
-import { createTaskForRun, loadTasksForRun } from "../../state/tasks.ts";
+import { createTaskForRunSafe, loadTasksForRun } from "../../state/tasks.ts";
 import type { DoDCriteria, Issue, RunPhase } from "../../state/types.ts";
 import { extractJsonFromResponse } from "../../utils/json-extractor.ts";
 import { displayPhaseSummaryHeader } from "../phase-runner.ts";
@@ -170,7 +170,7 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 					})
 					.filter((id): id is string => id !== null);
 
-				const task = createTaskForRun(
+				const task = await createTaskForRunSafe(
 					ctx.runId,
 					{
 						issue_id: issue.id,

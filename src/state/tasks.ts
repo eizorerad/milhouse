@@ -308,6 +308,34 @@ export function createTaskForRun(
 }
 
 /**
+ * Create a new task in a specific run with cross-process file locking for concurrent safety.
+ *
+ * This function uses proper-lockfile to ensure the read-modify-write cycle
+ * (loadTasksForRun -> generateTaskId -> saveTasksForRun) is atomic,
+ * preventing duplicate IDs and lost tasks when multiple callers create tasks concurrently.
+ *
+ * @param runId - The run ID to create the task in
+ * @param taskData - Task data without id and timestamps
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The created task with generated id and timestamps
+ */
+export async function createTaskForRunSafe(
+	runId: string,
+	taskData: Omit<Task, "id" | "created_at" | "updated_at">,
+	workDir = process.cwd(),
+): Promise<Task> {
+	const tasksPath = getTasksPathForRun(runId, workDir);
+
+	return withFileLock(
+		tasksPath,
+		() => {
+			return createTaskForRun(runId, taskData, workDir);
+		},
+		{ retries: 10 },
+	);
+}
+
+/**
  * Read a single task by ID
  */
 export function readTask(id: string, workDir = process.cwd()): Task | null {

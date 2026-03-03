@@ -21,6 +21,7 @@ import {
 import {
 	createTask,
 	createTaskForRun,
+	createTaskForRunSafe,
 	loadTasks,
 	loadTasksForRun,
 	readTaskForRun,
@@ -718,6 +719,52 @@ describe("Concurrency Tests", () => {
 
 			expect(result).toBeNull();
 		});
+	});
+
+	describe("Run-Aware Task Creation (createTaskForRunSafe)", () => {
+		test(
+			"should prevent duplicate IDs when creating tasks concurrently",
+			async () => {
+				const run = await createRun({ scope: "concurrent task creation", workDir: testDir });
+				const issueId = "ISSUE-1";
+
+				// Fire 5 concurrent createTaskForRunSafe calls for the same runId and issue_id
+				const results = await Promise.all(
+					Array.from({ length: 5 }, (_, i) =>
+						createTaskForRunSafe(
+							run.id,
+							{
+								title: `Concurrent Task ${i}`,
+								description: `Task created concurrently ${i}`,
+								issue_id: issueId,
+								status: "pending",
+								parallel_group: 0,
+								depends_on: [],
+								files: [],
+								checks: [],
+								acceptance: [],
+							},
+							testDir,
+						),
+					),
+				);
+
+				// All returned tasks should have unique IDs
+				const ids = results.map((t) => t.id);
+				const uniqueIds = new Set(ids);
+				expect(uniqueIds.size).toBe(5);
+
+				// loadTasksForRun should return exactly 5 tasks (no lost writes)
+				const allTasks = loadTasksForRun(run.id, testDir);
+				expect(allTasks.length).toBe(5);
+
+				// All task IDs should follow the expected sequential pattern
+				const sortedIds = [...ids].sort();
+				const expectedIds = Array.from({ length: 5 }, (_, i) => `${issueId}-T${i + 1}`);
+				expect(sortedIds).toEqual(expectedIds);
+			},
+			30000,
+		);
 	});
 
 	describe("Concurrent phase updates via updateRunPhaseInMetaWithLock", () => {

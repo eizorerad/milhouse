@@ -17,7 +17,7 @@
 
 import { bus } from "../../events/index.ts";
 import {
-	createTaskForRun,
+	createTaskForRunSafe,
 	loadTasksForRun,
 	readTaskForRun,
 	updateTaskForRunSafe,
@@ -309,13 +309,13 @@ export interface FollowUpTaskConfig {
  * @param titlePrefix - Prefix for the follow-up task title
  * @returns Created follow-up task or null
  */
-export function createFollowUpTask(
+export async function createFollowUpTask(
 	runId: string,
 	originalTaskId: string,
 	errorMessage: string,
 	workDir = process.cwd(),
 	titlePrefix = "Milhouse Retry",
-): Task | null {
+): Promise<Task | null> {
 	const originalTask = readTaskForRun(runId, originalTaskId, workDir);
 
 	if (!originalTask) {
@@ -333,7 +333,7 @@ export function createFollowUpTask(
 	const truncatedError =
 		errorMessage.length > 500 ? `${errorMessage.slice(0, 497)}...` : errorMessage;
 
-	const followUpTask = createTaskForRun(
+	const followUpTask = await createTaskForRunSafe(
 		runId,
 		{
 			issue_id: originalTask.issue_id,
@@ -395,7 +395,7 @@ export async function failTaskWithFollowUp(
 	let followUpTask: Task | null = null;
 
 	if (createFollowUp && failedTask) {
-		followUpTask = createFollowUpTask(runId, taskId, errorMessage, workDir);
+		followUpTask = await createFollowUpTask(runId, taskId, errorMessage, workDir);
 	}
 
 	return { failedTask, followUpTask };
