@@ -158,11 +158,13 @@ export interface ProgressiveTimeoutOptions {
  */
 class ProgressiveTimeoutState {
 	private currentTimeout: number;
+	private readonly initialTimeout: number;
 	private readonly maxTimeout: number;
 	private readonly multiplier: number;
 
 	constructor(options: ProgressiveTimeoutOptions) {
 		this.currentTimeout = options.initialTimeout;
+		this.initialTimeout = options.initialTimeout;
 		this.maxTimeout = options.maxTimeout;
 		this.multiplier = options.multiplier || 1.5;
 	}
@@ -176,7 +178,7 @@ class ProgressiveTimeoutState {
 	}
 
 	reset(): void {
-		this.currentTimeout = this.maxTimeout / this.multiplier ** 3;
+		this.currentTimeout = this.initialTimeout;
 	}
 }
 
