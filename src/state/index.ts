@@ -98,6 +98,7 @@ export {
 	topologicalSort,
 	getExecutionOrder,
 	updateTaskWithLock,
+	addDependencyWithLock,
 	updateTaskStatusWithLock,
 	saveTasksForRunSafe,
 } from "./tasks.ts";

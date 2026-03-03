@@ -976,6 +976,18 @@ export async function updateTaskWithLock(
 }
 
 /**
+ * Add a dependency to a task with mutex locking.
+ * Ensures atomic read-modify-write even when called concurrently.
+ */
+export async function addDependencyWithLock(
+	taskId: string,
+	dependencyId: string,
+	workDir = process.cwd(),
+): Promise<Task | null> {
+	return taskMutex.run(() => addDependency(taskId, dependencyId, workDir));
+}
+
+/**
  * Update task status with locking and handle dependent task blocking.
  *
  * Optimized to perform a single loadTasks/saveTasks cycle within the mutex,
