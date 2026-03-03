@@ -16,7 +16,7 @@ import { loadTasksForRun } from "../state/tasks.ts";
 import { STATE_FILES } from "../state/types.ts";
 
 /** Default phase order (must match orchestrator) */
-const PHASE_ORDER: string[] = ["scan", "validate", "plan", "consolidate", "exec", "verify"];
+export const PHASE_ORDER: string[] = ["scan", "validate", "plan", "consolidate", "exec", "verify"];
 
 /** Validation result returned by validateResumeOutputs */
 export interface ResumeValidationResult {
@@ -32,7 +32,7 @@ export interface ResumeValidationResult {
 type PhaseOutputCheck = (runId: string, workDir: string) => string | null;
 
 /** Map of phase names to the checks that must pass after that phase completes */
-const PHASE_OUTPUT_REQUIREMENTS: Record<string, PhaseOutputCheck[]> = {
+export const PHASE_OUTPUT_REQUIREMENTS: Record<string, PhaseOutputCheck[]> = {
 	scan: [
 		(runId, workDir) => {
 			const issues = loadIssuesForRun(runId, workDir);
