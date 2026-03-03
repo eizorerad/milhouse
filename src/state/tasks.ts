@@ -857,6 +857,10 @@ export function topologicalSort(workDir = process.cwd()): Task[] {
 
 /**
  * Update task status and handle dependent task blocking
+ *
+ * @deprecated Use updateTaskStatusWithLock() instead for concurrent-safe status updates
+ * with proper mutex serialization. This unlocked version can lose updates when called
+ * concurrently with overlapping dependents.
  */
 export function updateTaskStatus(
 	taskId: string,
@@ -945,6 +949,9 @@ export async function updateTaskWithLock(
 
 /**
  * Update task status with locking and handle dependent task blocking.
+ *
+ * Optimized to perform a single loadTasks/saveTasks cycle within the mutex,
+ * avoiding redundant I/O from multiple updateTask calls.
  */
 export async function updateTaskStatusWithLock(
 	taskId: string,
@@ -953,27 +960,78 @@ export async function updateTaskStatusWithLock(
 	workDir = process.cwd(),
 ): Promise<Task | null> {
 	return taskMutex.run(() => {
-		const update: Partial<Task> = { status };
+		// Single load at the top
+		const tasks = loadTasks(workDir);
+
+		// Data-loss safeguard: check for empty loadTasks with non-empty raw file
+		if (tasks.length === 0) {
+			const rawTasks = loadRawTasks(workDir);
+			if (rawTasks.length > 0) {
+				console.error(
+					`[ERROR] updateTaskStatusWithLock: loadTasks returned empty but file has ${rawTasks.length} raw entries`,
+				);
+				console.error(
+					"[ERROR] This indicates schema validation failures. Aborting to prevent data loss.",
+				);
+				return null;
+			}
+		}
+
+		// Find the primary task
+		const taskIndex = tasks.findIndex((t) => t.id === taskId);
+		if (taskIndex === -1) {
+			return null;
+		}
+
+		const previousStatus = tasks[taskIndex].status;
+		const now = new Date().toISOString();
+
+		// Apply status update to the primary task in memory
+		const updated: Task = {
+			...tasks[taskIndex],
+			status,
+			updated_at: now,
+		};
 
 		if (status === "done") {
-			update.completed_at = new Date().toISOString();
+			updated.completed_at = now;
 		}
 
 		if (status === "failed" && error) {
-			update.error = error;
+			updated.error = error;
 		}
 
-		const updated = updateTask(taskId, update, workDir);
-		if (!updated) return null;
+		tasks[taskIndex] = updated;
 
-		// If task failed, mark dependent tasks as blocked
+		// Track blocked dependents for event emission
+		const blockedDependents: Array<{ id: string; previousStatus: TaskStatus; issueId?: string }> = [];
+
+		// If task failed, find and block dependent tasks in the same array
 		if (status === "failed") {
-			const dependents = getDependentTasks(taskId, workDir);
-			for (const dependent of dependents) {
-				if (dependent.status === "pending") {
-					updateTask(dependent.id, { status: "blocked" }, workDir);
+			for (let i = 0; i < tasks.length; i++) {
+				if (tasks[i].depends_on.includes(taskId) && tasks[i].status === "pending") {
+					blockedDependents.push({
+						id: tasks[i].id,
+						previousStatus: tasks[i].status,
+						issueId: tasks[i].issue_id,
+					});
+					tasks[i] = {
+						...tasks[i],
+						status: "blocked" as TaskStatus,
+						updated_at: now,
+					};
 				}
 			}
+		}
+
+		// Single save at the end
+		saveTasks(tasks, workDir);
+
+		// Emit events after save
+		stateEvents.emitTaskStatusChanged(taskId, status, previousStatus, updated.issue_id);
+
+		for (const dep of blockedDependents) {
+			stateEvents.emitTaskStatusChanged(dep.id, "blocked", dep.previousStatus, dep.issueId);
 		}
 
 		return updated;

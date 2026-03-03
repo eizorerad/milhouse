@@ -96,7 +96,6 @@ export {
 	addDependency,
 	removeDependency,
 	topologicalSort,
-	updateTaskStatus,
 	getExecutionOrder,
 	updateTaskWithLock,
 	updateTaskStatusWithLock,
