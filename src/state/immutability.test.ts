@@ -111,7 +111,7 @@ describe("Immutability Tests", () => {
 			const originalLastRunId = originalIndex.runs[originalIndex.runs.length - 1]?.id;
 
 			// Set current run to run1 (moves run1 to end of list)
-			setCurrentRun(run1.id, testDir);
+			await setCurrentRun(run1.id, testDir);
 
 			// Verify the original index object was not mutated
 			expect(originalIndex.runs.length).toBe(originalRunsLength);

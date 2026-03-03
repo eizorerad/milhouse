@@ -496,10 +496,10 @@ describe("Integration Tests", () => {
 			expect(runs.length).toBe(3);
 
 			// Switch between runs
-			setCurrentRun(run1.id, testDir);
+			await setCurrentRun(run1.id, testDir);
 			expect(getCurrentRun(testDir)?.id).toBe(run1.id);
 
-			setCurrentRun(run2.id, testDir);
+			await setCurrentRun(run2.id, testDir);
 			expect(getCurrentRun(testDir)?.id).toBe(run2.id);
 
 			// Delete a run
@@ -515,7 +515,7 @@ describe("Integration Tests", () => {
 			const run2 = await createRun({ scope: "isolated run 2", workDir: testDir });
 
 			// Add issues to run1
-			setCurrentRun(run1.id, testDir);
+			await setCurrentRun(run1.id, testDir);
 			const now = new Date().toISOString();
 			const run1Issues: Issue[] = [
 				{
@@ -533,7 +533,7 @@ describe("Integration Tests", () => {
 			saveIssues(run1Issues, testDir);
 
 			// Switch to run2 and add different issues
-			setCurrentRun(run2.id, testDir);
+			await setCurrentRun(run2.id, testDir);
 			const run2Issues: Issue[] = [
 				{
 					id: "RUN2-ISSUE-1",
@@ -566,7 +566,7 @@ describe("Integration Tests", () => {
 			expect(run2LoadedIssues[0].id).toBe("RUN2-ISSUE-1");
 
 			// Switch back to run1 and verify its issues are intact
-			setCurrentRun(run1.id, testDir);
+			await setCurrentRun(run1.id, testDir);
 			const run1LoadedIssues = loadIssues(testDir);
 			expect(run1LoadedIssues.length).toBe(1);
 			expect(run1LoadedIssues[0].id).toBe("RUN1-ISSUE-1");

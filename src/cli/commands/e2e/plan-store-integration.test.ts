@@ -317,7 +317,7 @@ describe("Plan Store Integration", () => {
 			expect(content).toBe("# Problem Brief from Run 2");
 
 			// Switch back to run 1
-			setCurrentRun(run1.id, tempDir);
+			await setCurrentRun(run1.id, tempDir);
 			syncLegacyPlansView(tempDir);
 
 			// Verify legacy view now shows run 1 content
@@ -631,7 +631,7 @@ describe("Plan Store Integration", () => {
 			expect(wbs2).toBe("# WBS for Run 2");
 
 			// Switch to run 1
-			setCurrentRun(run1.id, tempDir);
+			await setCurrentRun(run1.id, tempDir);
 
 			// Now should get run 1 content
 			const brief1 = readProblemBrief(tempDir);
