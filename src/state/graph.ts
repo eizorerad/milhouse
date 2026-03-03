@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { loggers } from "../observability/logger.ts";
 import { withFileLock } from "./file-lock.ts";
+import { saveJsonFile } from "./json-io.ts";
 import { getRunStateDir, getStatePathForCurrentRun } from "./paths.ts";
 import { type GraphNode, GraphNodeSchema, STATE_FILES, type Task } from "./types.ts";
 
@@ -50,9 +51,7 @@ export function loadGraphForRun(runId: string, workDir = process.cwd()): GraphNo
  */
 export function saveGraphForRun(runId: string, nodes: GraphNode[], workDir = process.cwd()): void {
 	const path = getGraphPathForRun(runId, workDir);
-	const dir = join(path, "..");
-	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	writeFileSync(path, JSON.stringify(nodes, null, 2));
+	saveJsonFile(path, nodes);
 }
 
 // ============================================
@@ -122,13 +121,7 @@ export function loadGraph(workDir = process.cwd()): GraphNode[] {
  */
 export function saveGraph(nodes: GraphNode[], workDir = process.cwd()): void {
 	const path = getGraphPath(workDir);
-	const dir = join(path, "..");
-
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-
-	writeFileSync(path, JSON.stringify(nodes, null, 2));
+	saveJsonFile(path, nodes);
 }
 
 /**
