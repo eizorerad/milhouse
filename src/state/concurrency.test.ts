@@ -19,11 +19,14 @@ import {
 	updateRunStatsWithLock,
 } from "./runs.ts";
 import {
+	addDependency,
+	addDependencyWithLock,
 	createTask,
 	createTaskForRun,
 	createTaskForRunSafe,
 	loadTasks,
 	loadTasksForRun,
+	readTask,
 	readTaskForRun,
 	saveTasksForRunSafe,
 	updateTaskForRunSafe,
@@ -1005,6 +1008,187 @@ describe("Concurrency Tests", () => {
 			const finalIssues = loadIssuesForRun(run.id, testDir);
 			expect(finalIssues.length).toBe(2);
 			expect(finalIssues[0].hypothesis).toMatch(/^Updated by save \d$/);
+		});
+	});
+
+	describe("addDependencyWithLock", () => {
+		test("should preserve all dependency edges under concurrent adds", async () => {
+			await createRun({ scope: "concurrent addDep", workDir: testDir });
+
+			// Create N+1 tasks: one target task and N dependency tasks
+			const N = 10;
+			const target = createTask(
+				{
+					title: "Target Task",
+					description: "Task that receives dependencies",
+					issue_id: "DEP-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			const depTasks = Array.from({ length: N }, (_, i) =>
+				createTask(
+					{
+						title: `Dep Task ${i}`,
+						description: `Dependency ${i}`,
+						issue_id: "DEP-ISSUE",
+						status: "done",
+						parallel_group: 0,
+						depends_on: [],
+						files: [],
+						checks: [],
+						acceptance: [],
+					},
+					testDir,
+				),
+			);
+
+			// Fire N concurrent addDependencyWithLock calls
+			const results = await Promise.all(
+				depTasks.map((dep) => addDependencyWithLock(target.id, dep.id, testDir)),
+			);
+
+			// All should succeed (non-null)
+			expect(results.every((r) => r !== null)).toBe(true);
+
+			// Verify all N edges are present on disk
+			const finalTask = readTask(target.id, testDir);
+			expect(finalTask).not.toBeNull();
+			expect(finalTask!.depends_on.length).toBe(N);
+			for (const dep of depTasks) {
+				expect(finalTask!.depends_on).toContain(dep.id);
+			}
+		});
+
+		test("should reject circular dependency and preserve valid edges", async () => {
+			await createRun({ scope: "circular addDep", workDir: testDir });
+
+			// Create two tasks: A depends on B, then try to add B depends on A (cycle)
+			const taskA = createTask(
+				{
+					title: "Task A",
+					description: "Task A",
+					issue_id: "CYCLE-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			const taskB = createTask(
+				{
+					title: "Task B",
+					description: "Task B",
+					issue_id: "CYCLE-ISSUE",
+					status: "done",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			const taskC = createTask(
+				{
+					title: "Task C",
+					description: "Task C",
+					issue_id: "CYCLE-ISSUE",
+					status: "done",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			// Add valid edge A -> B
+			const validResult = await addDependencyWithLock(taskA.id, taskB.id, testDir);
+			expect(validResult).not.toBeNull();
+
+			// Concurrently: add valid edge A -> C and circular edge B -> A
+			const [validResult2, circularResult] = await Promise.all([
+				addDependencyWithLock(taskA.id, taskC.id, testDir),
+				addDependencyWithLock(taskB.id, taskA.id, testDir),
+			]);
+
+			// Valid edge should succeed
+			expect(validResult2).not.toBeNull();
+			// Circular edge should be rejected (null)
+			expect(circularResult).toBeNull();
+
+			// Verify A has both B and C as dependencies
+			const finalA = readTask(taskA.id, testDir);
+			expect(finalA).not.toBeNull();
+			expect(finalA!.depends_on).toContain(taskB.id);
+			expect(finalA!.depends_on).toContain(taskC.id);
+
+			// Verify B does NOT have A as dependency (cycle rejected)
+			const finalB = readTask(taskB.id, testDir);
+			expect(finalB).not.toBeNull();
+			expect(finalB!.depends_on).not.toContain(taskA.id);
+		});
+
+		test("should handle idempotent concurrent calls for the same edge", async () => {
+			await createRun({ scope: "idempotent addDep", workDir: testDir });
+
+			const taskA = createTask(
+				{
+					title: "Task A",
+					description: "Task A",
+					issue_id: "IDEM-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			const taskB = createTask(
+				{
+					title: "Task B",
+					description: "Task B",
+					issue_id: "IDEM-ISSUE",
+					status: "done",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			// Fire 5 concurrent calls adding the same edge
+			const results = await Promise.all(
+				Array.from({ length: 5 }, () =>
+					addDependencyWithLock(taskA.id, taskB.id, testDir),
+				),
+			);
+
+			// All should succeed (non-null)
+			expect(results.every((r) => r !== null)).toBe(true);
+
+			// Verify the edge appears exactly once
+			const finalTask = readTask(taskA.id, testDir);
+			expect(finalTask).not.toBeNull();
+			expect(finalTask!.depends_on.filter((id) => id === taskB.id).length).toBe(1);
 		});
 	});
 });
