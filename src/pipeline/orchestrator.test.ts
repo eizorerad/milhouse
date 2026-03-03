@@ -177,3 +177,87 @@ describe("orchestrator nextPhase early-exit", () => {
 		expect(result.success).toBe(true);
 	});
 });
+
+describe("orchestrator phase failure (zero-items scenario)", () => {
+	beforeEach(() => {
+		runPhaseCalls.length = 0;
+		runPhaseResults = new Map();
+		runPhaseMock.mockClear();
+	});
+
+	test("phase returning success=false is not added to phasesCompleted", async () => {
+		// Simulate verify phase returning success=false (e.g., zero items)
+		runPhaseResults.set("verify", { success: false });
+
+		const result = await runPipeline({
+			workDir: "/tmp/test",
+			config: makeConfig(),
+			runId: "test-run-001",
+			pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+		});
+
+		// All phases should have been called
+		expect(runPhaseCalls).toHaveLength(6);
+
+		// verify returned success=false, so pipeline should report failure
+		expect(result.success).toBe(false);
+
+		// phasesCompleted should include all phases except verify
+		expect(result.phasesCompleted).toContain("scan");
+		expect(result.phasesCompleted).toContain("validate");
+		expect(result.phasesCompleted).toContain("plan");
+		expect(result.phasesCompleted).toContain("consolidate");
+		expect(result.phasesCompleted).toContain("exec");
+		expect(result.phasesCompleted).not.toContain("verify");
+	});
+
+	test("with failFast=true, pipeline stops at failed phase", async () => {
+		// Simulate plan phase returning success=false
+		runPhaseResults.set("plan", { success: false });
+
+		const config = makeConfig();
+		config.failFast = true;
+
+		const result = await runPipeline({
+			workDir: "/tmp/test",
+			config,
+			runId: "test-run-001",
+			pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+		});
+
+		// scan, validate, and plan should have run
+		expect(runPhaseCalls).toContain("scan");
+		expect(runPhaseCalls).toContain("validate");
+		expect(runPhaseCalls).toContain("plan");
+
+		// consolidate, exec, verify should NOT have run (failFast stopped the pipeline)
+		expect(runPhaseCalls).not.toContain("consolidate");
+		expect(runPhaseCalls).not.toContain("exec");
+		expect(runPhaseCalls).not.toContain("verify");
+
+		expect(result.success).toBe(false);
+		expect(result.phasesCompleted).not.toContain("plan");
+	});
+
+	test("with failFast=false, pipeline continues past failed phase", async () => {
+		// Simulate plan phase returning success=false
+		runPhaseResults.set("plan", { success: false });
+
+		const config = makeConfig();
+		config.failFast = false;
+
+		const result = await runPipeline({
+			workDir: "/tmp/test",
+			config,
+			runId: "test-run-001",
+			pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+		});
+
+		// All phases should have run despite plan failing
+		expect(runPhaseCalls).toHaveLength(6);
+
+		expect(result.success).toBe(false);
+		expect(result.phasesCompleted).not.toContain("plan");
+		expect(result.phasesCompleted).toContain("consolidate");
+	});
+});
