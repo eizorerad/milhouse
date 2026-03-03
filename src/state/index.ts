@@ -62,6 +62,8 @@ export {
 	updateIssuesConcurrently,
 	updateIssueFromValidation,
 	saveIssuesForRunSafe,
+	createIssueForRunSafe,
+	createIssueSafe,
 } from "./issues.ts";
 
 // Tasks module - Task CRUD with dependency resolution
@@ -98,8 +100,6 @@ export {
 	topologicalSort,
 	getExecutionOrder,
 	updateTaskWithLock,
-	addDependencyWithLock,
-	removeDependencyWithLock,
 	updateTaskStatusWithLock,
 	saveTasksForRunSafe,
 } from "./tasks.ts";

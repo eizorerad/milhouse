@@ -207,11 +207,11 @@ describe("ClaudePlugin", () => {
 			expect(args).toContain("5");
 		});
 
-		it("includes --max-tokens when set", () => {
+		it("ignores maxTokens (Claude CLI does not support --max-tokens)", () => {
 			const plugin = new ClaudePlugin();
 			const args = plugin.buildArgs(makeRequest({ metadata: { maxTokens: 4096 } }));
-			expect(args).toContain("--max-tokens");
-			expect(args).toContain("4096");
+			expect(args).not.toContain("--max-tokens");
+			expect(args).not.toContain("4096");
 		});
 	});
 

@@ -524,3 +524,63 @@ export async function saveIssuesForRunSafe(
 		return saveIssuesForRun(runId, issues, workDir);
 	});
 }
+
+/**
+ * Create an issue for a specific run with cross-process file locking for concurrent safety.
+ *
+ * This function uses proper-lockfile to ensure atomic read-modify-write
+ * operations even when multiple milhouse processes create issues concurrently.
+ * Prevents the race condition where two concurrent createIssueAtPath calls
+ * could lose one issue due to overlapping load-append-save sequences.
+ *
+ * @param runId - The run ID to create the issue in
+ * @param issue - The issue data (without id or timestamps)
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The newly created issue with generated id and timestamps
+ *
+ * @example
+ * ```typescript
+ * const issue = await createIssueForRunSafe(runId, {
+ *   symptom: 'Memory leak detected',
+ *   hypothesis: 'Unclosed connections',
+ *   evidence: [],
+ *   status: 'UNVALIDATED',
+ *   severity: 'HIGH',
+ *   related_task_ids: [],
+ * });
+ * ```
+ */
+export async function createIssueForRunSafe(
+	runId: string,
+	issue: Omit<Issue, "id" | "created_at" | "updated_at">,
+	workDir = process.cwd(),
+): Promise<Issue> {
+	const issuesPath = getIssuesPathForRun(runId, workDir);
+
+	return withFileLock(issuesPath, () => {
+		return createIssueAtPath(issuesPath, issue);
+	});
+}
+
+/**
+ * Create an issue with cross-process file locking for concurrent safety.
+ *
+ * @deprecated Use createIssueForRunSafe() with explicit runId.
+ *
+ * This function uses proper-lockfile to ensure atomic read-modify-write
+ * operations even when multiple milhouse processes create issues concurrently.
+ *
+ * @param issue - The issue data (without id or timestamps)
+ * @param workDir - Working directory (defaults to process.cwd())
+ * @returns The newly created issue with generated id and timestamps
+ */
+export async function createIssueSafe(
+	issue: Omit<Issue, "id" | "created_at" | "updated_at">,
+	workDir = process.cwd(),
+): Promise<Issue> {
+	const issuesPath = getIssuesPath(workDir);
+
+	return withFileLock(issuesPath, () => {
+		return createIssueAtPath(issuesPath, issue);
+	});
+}
