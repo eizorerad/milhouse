@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { StateWriteError } from "../../../src/state/errors.ts";
 import { createRun } from "../../../src/state/runs.ts";
@@ -17,6 +17,7 @@ import {
 	createTaskForRun,
 	deleteTask,
 	getReadyTasks,
+	loadRawTasks,
 	loadTasksForRun,
 	readTaskForRun,
 	saveTasksForRun,
@@ -330,15 +331,15 @@ describe("Run-aware task functions", () => {
 	});
 
 	describe("StateWriteError guard", () => {
-		it("saveTasksForRun throws StateWriteError when saving empty array over non-empty file", () => {
-			const run = createRun({ scope: "empty write guard", workDir: testDir });
+		it("saveTasksForRun throws StateWriteError when saving empty array over non-empty file", async () => {
+			const run = await createRun({ scope: "empty write guard", workDir: testDir });
 			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			expect(() => saveTasksForRun(run.id, [], testDir)).toThrow(StateWriteError);
 		});
 
-		it("saveTasksForRun allows empty write with force: true", () => {
-			const run = createRun({ scope: "force empty write", workDir: testDir });
+		it("saveTasksForRun allows empty write with force: true", async () => {
+			const run = await createRun({ scope: "force empty write", workDir: testDir });
 			createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			expect(() => saveTasksForRun(run.id, [], testDir, { force: true })).not.toThrow();
@@ -347,14 +348,14 @@ describe("Run-aware task functions", () => {
 			expect(loaded).toEqual([]);
 		});
 
-		it("saveTasksForRun allows empty write to non-existent file", () => {
-			const run = createRun({ scope: "new run empty write", workDir: testDir });
+		it("saveTasksForRun allows empty write to non-existent file", async () => {
+			const run = await createRun({ scope: "new run empty write", workDir: testDir });
 
 			expect(() => saveTasksForRun(run.id, [], testDir)).not.toThrow();
 		});
 
-		it("saveTasksForRun allows non-empty write without force", () => {
-			const run = createRun({ scope: "non-empty write", workDir: testDir });
+		it("saveTasksForRun allows non-empty write without force", async () => {
+			const run = await createRun({ scope: "non-empty write", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			const tasks: Task[] = [
@@ -372,9 +373,9 @@ describe("Run-aware task functions", () => {
 			expect(loaded[0].status).toBe("done");
 		});
 
-		it("deleteTask succeeds when deleting last task", () => {
+		it("deleteTask succeeds when deleting last task", async () => {
 			// Create a run so the deprecated saveTasks path resolves correctly
-			const run = createRun({ scope: "delete last task", workDir: testDir });
+			const run = await createRun({ scope: "delete last task", workDir: testDir });
 			const task = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
 
 			// deleteTask uses the deprecated saveTasks path with force: true
@@ -384,6 +385,52 @@ describe("Run-aware task functions", () => {
 
 			const loaded = loadTasksForRun(run.id, testDir);
 			expect(loaded).toEqual([]);
+		});
+
+		it("deleteTask throws when raw tasks exceed validated tasks and deletion would empty the array", async () => {
+			// Create a run so path resolution works
+			const run = await createRun({ scope: "partial schema delete", workDir: testDir });
+
+			// Create one valid task via the normal API
+			const validTask = createTaskForRun(run.id, createTestTaskData("ISSUE-1"), testDir);
+
+			// Now manually write the tasks.json with both the valid task and an invalid entry
+			// The invalid entry is missing required fields (id, title, created_at, updated_at)
+			// so it will fail schema validation in loadTasks/loadTasksFromPath
+			const tasksPath = join(
+				testDir,
+				".milhouse",
+				"runs",
+				run.id,
+				"state",
+				"tasks.json",
+			);
+			const rawEntries = [
+				// The valid task (will pass schema validation)
+				JSON.parse(readFileSync(tasksPath, "utf-8"))[0],
+				// Invalid entry: missing required 'title', 'created_at', 'updated_at'
+				{ id: "INVALID-ORPHAN", status: "pending" },
+				// Another invalid entry
+				{ broken: true },
+			];
+			writeFileSync(tasksPath, JSON.stringify(rawEntries, null, 2));
+
+			// Verify preconditions: loadTasks returns 1 valid task, raw has 3 entries
+			const loaded = loadTasksForRun(run.id, testDir);
+			expect(loaded.length).toBe(1);
+			expect(loaded[0].id).toBe(validTask.id);
+
+			const raw = loadRawTasks(testDir);
+			expect(raw.length).toBe(3);
+
+			// Deleting the last valid task should throw StateWriteError
+			// because raw entries on disk (3) exceed the single task being removed,
+			// and the resulting array would be empty — wiping the 2 invalid entries
+			expect(() => deleteTask(validTask.id, testDir)).toThrow(StateWriteError);
+
+			// Verify the file on disk still has all 3 original raw entries
+			const rawAfter = JSON.parse(readFileSync(tasksPath, "utf-8"));
+			expect(rawAfter.length).toBe(3);
 		});
 	});
 
