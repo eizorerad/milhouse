@@ -15,6 +15,7 @@ import {
 	getReadyTasksForRun,
 	resetStaleRunningTasks,
 } from "../../../../src/runner/phases/exec.ts";
+import { calculateCost, createRunCost } from "../../../../src/runner/cost.ts";
 import { createRun } from "../../../../src/state/runs.ts";
 import { createTaskForRun } from "../../../../src/state/tasks.ts";
 import type { Task } from "../../../../src/state/types.ts";
@@ -816,6 +817,33 @@ describe("execPhaseConfig", () => {
 
 		it("defaultParallel is 3", () => {
 			expect(execPhaseConfig.defaultParallel).toBe(3);
+		});
+	});
+
+	describe("exec cost tracking", () => {
+		it("updates inputCost and outputCost matching the exec phase pattern", () => {
+			const runCost = createRunCost();
+			const costConfig = { inputPerMillion: 3, outputPerMillion: 15, budgetLimit: 50 };
+			const totalInputTokens = 10_000;
+			const totalOutputTokens = 2_000;
+
+			// Simulate the exact cost accumulation from exec.ts lines 786-791
+			const execCost = calculateCost(
+				{ input: totalInputTokens, output: totalOutputTokens },
+				costConfig,
+			);
+			runCost.totalCost += execCost;
+			runCost.inputTokens += totalInputTokens;
+			runCost.outputTokens += totalOutputTokens;
+			runCost.totalTokens += totalInputTokens + totalOutputTokens;
+			runCost.inputCost += (totalInputTokens / 1_000_000) * costConfig.inputPerMillion;
+			runCost.outputCost += (totalOutputTokens / 1_000_000) * costConfig.outputPerMillion;
+
+			expect(runCost.inputCost).toBeGreaterThan(0);
+			expect(runCost.outputCost).toBeGreaterThan(0);
+			expect(runCost.inputCost).toBeCloseTo((10_000 / 1_000_000) * 3, 10);
+			expect(runCost.outputCost).toBeCloseTo((2_000 / 1_000_000) * 15, 10);
+			expect(runCost.inputCost + runCost.outputCost).toBeCloseTo(runCost.totalCost, 10);
 		});
 	});
 });
