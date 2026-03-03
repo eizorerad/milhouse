@@ -961,6 +961,272 @@ describe("filterBranchesForMerge", () => {
 	});
 });
 
+// ============================================================================
+// Unit Tests: Fail-fast behavior
+// ============================================================================
+
+describe("Fail-fast behavior", () => {
+	let testDir: string;
+
+	beforeEach(() => {
+		testDir = join(process.cwd(), `.test-failfast-${Date.now()}`);
+		mkdirSync(testDir, { recursive: true });
+		execSync("git init -b main", { cwd: testDir, stdio: "pipe" });
+		execSync('git config user.email "test@test.com"', { cwd: testDir, stdio: "pipe" });
+		execSync('git config user.name "Test"', { cwd: testDir, stdio: "pipe" });
+		writeFileSync(join(testDir, "README.md"), "# Test");
+		execSync("git add .", { cwd: testDir, stdio: "pipe" });
+		execSync('git commit -m "Initial commit"', { cwd: testDir, stdio: "pipe" });
+	});
+
+	afterEach(() => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true, force: true });
+		}
+	});
+
+	it(
+		"failFast=true skips remaining issues after first failure",
+		async () => {
+			const issue1 = createMockIssue({ id: "P-ff1", severity: "CRITICAL" });
+			const issue2 = createMockIssue({ id: "P-ff2", severity: "HIGH" });
+			const issue3 = createMockIssue({ id: "P-ff3", severity: "MEDIUM" });
+
+			const tasks = [
+				createMockTask({ id: "P-ff1-T1", issue_id: "P-ff1" }),
+				createMockTask({ id: "P-ff2-T1", issue_id: "P-ff2" }),
+				createMockTask({ id: "P-ff3-T1", issue_id: "P-ff3" }),
+			];
+
+			const failEngine = createMockEngine({
+				execute: async () => {
+					throw new Error("Engine failure");
+				},
+			});
+
+			const issueResults: { issueId: string; error?: string }[] = [];
+
+			const options: IssueBasedExecutionOptions = {
+				engine: failEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 1, // Serial execution — ensures ordering
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+				failFast: true,
+				onIssueComplete: async (issueId, result) => {
+					issueResults.push({ issueId, error: result.error });
+				},
+			};
+
+			const result = await runParallelByIssue(tasks, [issue1, issue2, issue3], options);
+
+			// All 3 issues should have reported via callback
+			expect(issueResults.length).toBe(3);
+
+			// First issue failed normally (not "Skipped due to fail-fast")
+			expect(issueResults[0].error).toBeDefined();
+			expect(issueResults[0].error).not.toContain("fail-fast");
+
+			// Remaining issues should be skipped due to fail-fast
+			const skippedResults = issueResults.filter((r) =>
+				r.error?.includes("Skipped due to fail-fast"),
+			);
+			expect(skippedResults.length).toBe(2);
+
+			// All tasks should be marked as failed
+			expect(result.tasksFailed).toBe(3);
+			expect(result.tasksCompleted).toBe(0);
+		},
+		30000,
+	);
+
+	it(
+		"failFast=false (default) runs all issues regardless of failures",
+		async () => {
+			const issue1 = createMockIssue({ id: "P-noff1", severity: "CRITICAL" });
+			const issue2 = createMockIssue({ id: "P-noff2", severity: "HIGH" });
+			const issue3 = createMockIssue({ id: "P-noff3", severity: "MEDIUM" });
+
+			const tasks = [
+				createMockTask({ id: "P-noff1-T1", issue_id: "P-noff1" }),
+				createMockTask({ id: "P-noff2-T1", issue_id: "P-noff2" }),
+				createMockTask({ id: "P-noff3-T1", issue_id: "P-noff3" }),
+			];
+
+			const failEngine = createMockEngine({
+				execute: async () => {
+					throw new Error("Engine failure");
+				},
+			});
+
+			const issueResults: { issueId: string; error?: string }[] = [];
+
+			const options: IssueBasedExecutionOptions = {
+				engine: failEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 1,
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+				failFast: false, // Explicitly disabled
+				onIssueComplete: async (issueId, result) => {
+					issueResults.push({ issueId, error: result.error });
+				},
+			};
+
+			const result = await runParallelByIssue(tasks, [issue1, issue2, issue3], options);
+
+			// All 3 issues should have reported via callback
+			expect(issueResults.length).toBe(3);
+
+			// No issues should have "Skipped due to fail-fast" error
+			const skippedResults = issueResults.filter((r) =>
+				r.error?.includes("Skipped due to fail-fast"),
+			);
+			expect(skippedResults.length).toBe(0);
+
+			// All tasks failed (each issue attempted execution independently)
+			expect(result.tasksFailed).toBe(3);
+		},
+		30000,
+	);
+
+	it(
+		"failFast=true with concurrent execution — already-running issues complete",
+		async () => {
+			const issue1 = createMockIssue({ id: "P-ffc1", severity: "CRITICAL" });
+			const issue2 = createMockIssue({ id: "P-ffc2", severity: "HIGH" });
+			const issue3 = createMockIssue({ id: "P-ffc3", severity: "MEDIUM" });
+
+			const tasks = [
+				createMockTask({ id: "P-ffc1-T1", issue_id: "P-ffc1" }),
+				createMockTask({ id: "P-ffc2-T1", issue_id: "P-ffc2" }),
+				createMockTask({ id: "P-ffc3-T1", issue_id: "P-ffc3" }),
+			];
+
+			const failEngine = createMockEngine({
+				execute: async () => {
+					throw new Error("Engine failure");
+				},
+			});
+
+			const issueResults: { issueId: string; error?: string }[] = [];
+
+			const options: IssueBasedExecutionOptions = {
+				engine: failEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 2, // 2 concurrent — first 2 run together, third is queued
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+				failFast: true,
+				onIssueComplete: async (issueId, result) => {
+					issueResults.push({ issueId, error: result.error });
+				},
+			};
+
+			const result = await runParallelByIssue(tasks, [issue1, issue2, issue3], options);
+
+			// All 3 issues should have reported via callback
+			expect(issueResults.length).toBe(3);
+
+			// The first 2 issues ran concurrently (both started before fail-fast triggered)
+			// so neither should be "Skipped due to fail-fast"
+			// The third was queued and should be skipped
+			const skippedResults = issueResults.filter((r) =>
+				r.error?.includes("Skipped due to fail-fast"),
+			);
+			expect(skippedResults.length).toBeGreaterThanOrEqual(1);
+
+			// The non-skipped issues should have run (failed with a non-fail-fast error)
+			const executedResults = issueResults.filter((r) =>
+				!r.error?.includes("Skipped due to fail-fast"),
+			);
+			expect(executedResults.length).toBeGreaterThanOrEqual(2);
+
+			// All tasks should be failed
+			expect(result.tasksFailed).toBe(3);
+		},
+		30000,
+	);
+
+	it(
+		"failFast=true — onIssueComplete callback is called for skipped issues",
+		async () => {
+			const issue1 = createMockIssue({ id: "P-ffcb1", severity: "CRITICAL" });
+			const issue2 = createMockIssue({ id: "P-ffcb2", severity: "HIGH" });
+
+			const tasks = [
+				createMockTask({ id: "P-ffcb1-T1", issue_id: "P-ffcb1" }),
+				createMockTask({ id: "P-ffcb2-T1", issue_id: "P-ffcb2" }),
+				createMockTask({ id: "P-ffcb2-T2", issue_id: "P-ffcb2" }),
+			];
+
+			const failEngine = createMockEngine({
+				execute: async () => {
+					throw new Error("Engine failure");
+				},
+			});
+
+			const callbackIssueIds: string[] = [];
+			const callbackResults: Map<
+				string,
+				{ success: boolean; failedTasks: string[]; error?: string }
+			> = new Map();
+
+			const options: IssueBasedExecutionOptions = {
+				engine: failEngine,
+				workDir: testDir,
+				baseBranch: "main",
+				maxConcurrent: 1,
+				maxRetries: 1,
+				retryDelay: 100,
+				skipTests: true,
+				skipLint: true,
+				browserEnabled: "false",
+				skipMerge: true,
+				failFast: true,
+				onIssueComplete: async (issueId, result) => {
+					callbackIssueIds.push(issueId);
+					callbackResults.set(issueId, {
+						success: result.success,
+						failedTasks: result.failedTasks,
+						error: result.error,
+					});
+				},
+			};
+
+			await runParallelByIssue(tasks, [issue1, issue2], options);
+
+			// Callback should be called for both issues (including the skipped one)
+			expect(callbackIssueIds.length).toBe(2);
+			expect(callbackIssueIds).toContain("P-ffcb1");
+			expect(callbackIssueIds).toContain("P-ffcb2");
+
+			// The skipped issue should report all its tasks as failed
+			const skippedResult = callbackResults.get("P-ffcb2");
+			expect(skippedResult).toBeDefined();
+			expect(skippedResult!.success).toBe(false);
+			expect(skippedResult!.failedTasks.length).toBe(2);
+			expect(skippedResult!.error).toContain("Skipped due to fail-fast");
+		},
+		30000,
+	);
+});
+
 describe("Signal Handler Cleanup", () => {
 	it("should not leak signal handlers when an error occurs between registration and removal", () => {
 		const baselineSigInt = process.listenerCount("SIGINT");
