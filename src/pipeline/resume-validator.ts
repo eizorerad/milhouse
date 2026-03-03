@@ -7,12 +7,16 @@
  * the earliest phase with missing outputs so the pipeline can fall back.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadGraphForRun } from "../state/graph.ts";
 import { loadIssuesForRun } from "../state/issues.ts";
+import { getRunStateDir } from "../state/runs.ts";
 import { loadTasksForRun } from "../state/tasks.ts";
+import { STATE_FILES } from "../state/types.ts";
 
 /** Default phase order (must match orchestrator) */
-const PHASE_ORDER: string[] = ["scan", "validate", "plan", "consolidate", "exec", "verify"];
+export const PHASE_ORDER: string[] = ["scan", "validate", "plan", "consolidate", "exec", "verify"];
 
 /** Validation result returned by validateResumeOutputs */
 export interface ResumeValidationResult {
@@ -28,7 +32,7 @@ export interface ResumeValidationResult {
 type PhaseOutputCheck = (runId: string, workDir: string) => string | null;
 
 /** Map of phase names to the checks that must pass after that phase completes */
-const PHASE_OUTPUT_REQUIREMENTS: Record<string, PhaseOutputCheck[]> = {
+export const PHASE_OUTPUT_REQUIREMENTS: Record<string, PhaseOutputCheck[]> = {
 	scan: [
 		(runId, workDir) => {
 			const issues = loadIssuesForRun(runId, workDir);
@@ -73,6 +77,24 @@ const PHASE_OUTPUT_REQUIREMENTS: Record<string, PhaseOutputCheck[]> = {
 			const tasks = loadTasksForRun(runId, workDir);
 			const hasDone = tasks.some((t) => t.status === "done");
 			if (!hasDone) return "tasks.json contains no completed tasks after exec phase";
+			return null;
+		},
+	],
+	verify: [
+		(runId, workDir) => {
+			const stateDir = getRunStateDir(runId, workDir);
+			const filePath = join(stateDir, STATE_FILES.verification);
+			if (!existsSync(filePath)) {
+				return "verification.json is missing after verify phase";
+			}
+			try {
+				const data = JSON.parse(readFileSync(filePath, "utf-8"));
+				if (typeof data.overall_pass !== "boolean") {
+					return "verification.json is missing overall_pass boolean after verify phase";
+				}
+			} catch {
+				return "verification.json contains invalid JSON after verify phase";
+			}
 			return null;
 		},
 	],

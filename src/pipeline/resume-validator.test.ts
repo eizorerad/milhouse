@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { validateResumeOutputs } from "./resume-validator.ts";
+import {
+	PHASE_ORDER,
+	PHASE_OUTPUT_REQUIREMENTS,
+	validateResumeOutputs,
+} from "./resume-validator.ts";
 
 describe("resume-validator", () => {
 	const testDir = join(process.cwd(), ".test-resume-validator");
@@ -311,6 +315,85 @@ describe("resume-validator", () => {
 			for (const err of result.errors) {
 				expect(typeof err).toBe("string");
 				expect(err.length).toBeGreaterThan(10);
+			}
+		});
+	});
+
+	// ==========================================================================
+	// Phase output requirements completeness
+	// ==========================================================================
+
+	describe("phase output requirements completeness", () => {
+		test("every phase in PHASE_ORDER has a corresponding PHASE_OUTPUT_REQUIREMENTS entry", () => {
+			for (const phase of PHASE_ORDER) {
+				expect(PHASE_OUTPUT_REQUIREMENTS).toHaveProperty(phase);
+				expect(Array.isArray(PHASE_OUTPUT_REQUIREMENTS[phase])).toBe(true);
+				expect(PHASE_OUTPUT_REQUIREMENTS[phase].length).toBeGreaterThan(0);
+			}
+		});
+	});
+
+	// ==========================================================================
+	// Verify phase check (direct invocation)
+	// ==========================================================================
+
+	describe("verify phase check", () => {
+		test("passes with valid verification.json containing overall_pass", () => {
+			writeStateFile("verification.json", {
+				run_id: runId,
+				overall_pass: true,
+				tasks_verified: 1,
+				tasks_passed: 1,
+				tasks_failed: 0,
+			});
+
+			const checks = PHASE_OUTPUT_REQUIREMENTS["verify"];
+			for (const check of checks) {
+				expect(check(runId, testDir)).toBeNull();
+			}
+		});
+
+		test("fails when verification.json is missing", () => {
+			const checks = PHASE_OUTPUT_REQUIREMENTS["verify"];
+			const errors = checks.map((check) => check(runId, testDir)).filter(Boolean);
+			expect(errors.length).toBeGreaterThan(0);
+			expect(errors[0]).toContain("verification.json is missing");
+		});
+
+		test("fails when verification.json contains invalid JSON", () => {
+			const dir = stateDir();
+			writeFileSync(join(dir, "verification.json"), "not valid json{{{");
+
+			const checks = PHASE_OUTPUT_REQUIREMENTS["verify"];
+			const errors = checks.map((check) => check(runId, testDir)).filter(Boolean);
+			expect(errors.length).toBeGreaterThan(0);
+			expect(errors[0]).toContain("invalid JSON");
+		});
+
+		test("fails when verification.json is missing overall_pass boolean", () => {
+			writeStateFile("verification.json", {
+				run_id: runId,
+				tasks_verified: 1,
+			});
+
+			const checks = PHASE_OUTPUT_REQUIREMENTS["verify"];
+			const errors = checks.map((check) => check(runId, testDir)).filter(Boolean);
+			expect(errors.length).toBeGreaterThan(0);
+			expect(errors[0]).toContain("overall_pass");
+		});
+
+		test("passes with overall_pass: false (valid but failing verification)", () => {
+			writeStateFile("verification.json", {
+				run_id: runId,
+				overall_pass: false,
+				tasks_verified: 1,
+				tasks_passed: 0,
+				tasks_failed: 1,
+			});
+
+			const checks = PHASE_OUTPUT_REQUIREMENTS["verify"];
+			for (const check of checks) {
+				expect(check(runId, testDir)).toBeNull();
 			}
 		});
 	});
