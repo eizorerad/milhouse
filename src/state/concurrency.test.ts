@@ -28,6 +28,7 @@ import {
 	loadTasksForRun,
 	readTask,
 	readTaskForRun,
+	removeDependencyWithLock,
 	saveTasksForRunSafe,
 	updateTaskForRunSafe,
 	updateTaskStatusWithLock,
@@ -1189,6 +1190,148 @@ describe("Concurrency Tests", () => {
 			const finalTask = readTask(taskA.id, testDir);
 			expect(finalTask).not.toBeNull();
 			expect(finalTask!.depends_on.filter((id) => id === taskB.id).length).toBe(1);
+		});
+	});
+
+	describe("removeDependencyWithLock", () => {
+		test("should remove all targeted edges under concurrent removes", async () => {
+			await createRun({ scope: "concurrent removeDep", workDir: testDir });
+
+			const N = 10;
+
+			// Create N dependency tasks
+			const depTasks = Array.from({ length: N }, (_, i) =>
+				createTask(
+					{
+						title: `Dep Task ${i}`,
+						description: `Dependency ${i}`,
+						issue_id: "RMDEP-ISSUE",
+						status: "done",
+						parallel_group: 0,
+						depends_on: [],
+						files: [],
+						checks: [],
+						acceptance: [],
+					},
+					testDir,
+				),
+			);
+
+			// Create target task with all N dependencies
+			const target = createTask(
+				{
+					title: "Target Task",
+					description: "Task with many dependencies",
+					issue_id: "RMDEP-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: depTasks.map((t) => t.id),
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			// Verify initial state
+			const initialTask = readTask(target.id, testDir);
+			expect(initialTask!.depends_on.length).toBe(N);
+
+			// Fire N concurrent removeDependencyWithLock calls
+			const results = await Promise.all(
+				depTasks.map((dep) => removeDependencyWithLock(target.id, dep.id, testDir)),
+			);
+
+			// All should succeed (non-null)
+			expect(results.every((r) => r !== null)).toBe(true);
+
+			// Verify all N edges are removed on disk
+			const finalTask = readTask(target.id, testDir);
+			expect(finalTask).not.toBeNull();
+			expect(finalTask!.depends_on.length).toBe(0);
+		});
+
+		test("should return task unchanged for non-existent dependency", async () => {
+			await createRun({ scope: "nonexistent removeDep", workDir: testDir });
+
+			const task = createTask(
+				{
+					title: "Task With Deps",
+					description: "Task",
+					issue_id: "NONEX-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: ["REAL-DEP-1"],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			// Fire concurrent removes for non-existent dependency IDs
+			const results = await Promise.all(
+				Array.from({ length: 5 }, (_, i) =>
+					removeDependencyWithLock(task.id, `NON-EXISTENT-${i}`, testDir),
+				),
+			);
+
+			// All should return the task unchanged (non-null)
+			expect(results.every((r) => r !== null)).toBe(true);
+
+			// Original dependency should still be present
+			const finalTask = readTask(task.id, testDir);
+			expect(finalTask).not.toBeNull();
+			expect(finalTask!.depends_on).toContain("REAL-DEP-1");
+			expect(finalTask!.depends_on.length).toBe(1);
+		});
+
+		test("should use single loadTasks/saveTasks cycle (no double-read)", async () => {
+			await createRun({ scope: "single-read removeDep", workDir: testDir });
+
+			const depTask = createTask(
+				{
+					title: "Dep Task",
+					description: "Dependency",
+					issue_id: "SINGLEREAD-ISSUE",
+					status: "done",
+					parallel_group: 0,
+					depends_on: [],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			const target = createTask(
+				{
+					title: "Target Task",
+					description: "Task with dependency",
+					issue_id: "SINGLEREAD-ISSUE",
+					status: "pending",
+					parallel_group: 0,
+					depends_on: [depTask.id],
+					files: [],
+					checks: [],
+					acceptance: [],
+				},
+				testDir,
+			);
+
+			// Remove the dependency under lock
+			const result = await removeDependencyWithLock(target.id, depTask.id, testDir);
+
+			// Should succeed
+			expect(result).not.toBeNull();
+			expect(result!.depends_on).not.toContain(depTask.id);
+
+			// Verify on disk
+			const finalTask = readTask(target.id, testDir);
+			expect(finalTask).not.toBeNull();
+			expect(finalTask!.depends_on.length).toBe(0);
+			// Verify updated_at was set
+			expect(finalTask!.updated_at).not.toBe(target.updated_at);
 		});
 	});
 });
