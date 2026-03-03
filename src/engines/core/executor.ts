@@ -356,6 +356,11 @@ export function createDefaultExecutor(): EngineExecutor {
 /**
  * Create a minimal executor with only logging.
  * Useful for testing or when you want full control over middleware.
+ *
+ * @remarks This executor intentionally omits timeout middleware. Callers are
+ * responsible for ensuring execution does not hang indefinitely. For most
+ * use-cases prefer {@link createConfiguredExecutor} or {@link createDefaultExecutor}
+ * which include timeout protection by default.
  */
 export function createMinimalExecutor(): EngineExecutor {
 	return new EngineExecutor().use(createLoggingMiddleware());
@@ -409,12 +414,22 @@ export function createConfiguredExecutor(config: ExecutorConfig): EngineExecutor
 /**
  * Execute a single command with a plugin without creating an executor.
  * Convenience function for one-off executions.
+ *
+ * The executor includes logging and timeout middleware (with the system
+ * default of ~66 min if no timeout is specified). It does not include
+ * retry, rate-limit, or concurrency middleware.
+ *
+ * @param plugin - The engine plugin to use
+ * @param request - The execution request
+ * @param options - Optional configuration
+ * @param options.timeout - Timeout in ms. Overrides the default (~66 min).
  */
 export async function executeOnce(
 	plugin: IEnginePlugin,
 	request: ExecutionRequest,
+	options?: { timeout?: number },
 ): Promise<ExecutionResult> {
-	const executor = createMinimalExecutor();
+	const executor = createConfiguredExecutor({ timeout: options?.timeout });
 	return executor.execute(plugin, request);
 }
 

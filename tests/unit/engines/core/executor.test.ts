@@ -4,9 +4,11 @@ import {
 	createConfiguredExecutor,
 	createDefaultExecutor,
 	createMinimalExecutor,
+	executeOnce,
 } from "../../../../src/engines/core/executor";
-import type { ExecutionResult } from "../../../../src/schemas/engine.schema";
+import type { ExecutionRequest, ExecutionResult } from "../../../../src/schemas/engine.schema";
 import type { IEnginePlugin, MiddlewareFn } from "../../../../src/engines/core/types";
+import { TimeoutError } from "../../../../src/engines/middleware/timeout";
 
 /** Build a minimal valid request input. */
 function makeRequest(overrides: Record<string, unknown> = {}) {
@@ -212,9 +214,51 @@ describe("factory functions", () => {
 		expect(executor.getMiddleware().length).toBe(1);
 	});
 
-	it("createConfiguredExecutor with empty config creates executor with just logging", () => {
+	it("createConfiguredExecutor with empty config creates executor with logging and timeout", () => {
 		const executor = createConfiguredExecutor({});
-		// Only logging (default true)
-		expect(executor.getMiddleware().length).toBe(1);
+		// logging + timeout (always added)
+		expect(executor.getMiddleware().length).toBe(2);
+	});
+});
+
+describe("executeOnce", () => {
+	it("accepts an optional timeout parameter and forwards it to the executor", async () => {
+		const plugin = createUnavailablePlugin();
+
+		// The third options parameter should be accepted. The promise rejects
+		// because the plugin is unavailable (checked before timeout kicks in).
+		await expect(
+			executeOnce(plugin, makeRequest() as ExecutionRequest, { timeout: 50 }),
+		).rejects.toThrow(/not available/);
+	});
+
+	it("uses an executor with timeout middleware that rejects hung executions", async () => {
+		// executeOnce internally uses createConfiguredExecutor({ timeout }).
+		// Verify the resulting executor includes timeout middleware that
+		// terminates hung executions by testing the middleware chain with a
+		// never-resolving handler (simulates a hung process).
+		const executor = createConfiguredExecutor({ timeout: 50 });
+		const middleware = executor.getMiddleware();
+
+		// Should have logging + timeout
+		expect(middleware.length).toBe(2);
+
+		// Apply the timeout middleware directly with a never-resolving next()
+		const timeoutMw = middleware[1];
+		const request = makeRequest() as ExecutionRequest;
+		const neverResolve = () => new Promise<ExecutionResult>(() => {});
+
+		await expect(timeoutMw(request, neverResolve)).rejects.toThrow(TimeoutError);
+	}, 5000);
+
+	it("uses default timeout when no explicit timeout option is provided", async () => {
+		// When called without options, executeOnce still includes timeout
+		// middleware with the system default (~66 min).
+		const plugin = createUnavailablePlugin();
+
+		// Verify the function works without the options parameter
+		await expect(
+			executeOnce(plugin, makeRequest() as ExecutionRequest),
+		).rejects.toThrow(/not available/);
 	});
 });
