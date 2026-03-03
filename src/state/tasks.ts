@@ -857,6 +857,10 @@ export function topologicalSort(workDir = process.cwd()): Task[] {
 
 /**
  * Update task status and handle dependent task blocking
+ *
+ * @deprecated Use updateTaskStatusWithLock() instead for concurrent-safe status updates
+ * with proper mutex serialization. This unlocked version can lose updates when called
+ * concurrently with overlapping dependents.
  */
 export function updateTaskStatus(
 	taskId: string,
@@ -953,6 +957,10 @@ export async function updateTaskStatusWithLock(
 	workDir = process.cwd(),
 ): Promise<Task | null> {
 	return taskMutex.run(() => {
+		// Capture previous status before update for event emission
+		const existingTask = readTask(taskId, workDir);
+		const previousStatus = existingTask?.status;
+
 		const update: Partial<Task> = { status };
 
 		if (status === "done") {
@@ -966,12 +974,21 @@ export async function updateTaskStatusWithLock(
 		const updated = updateTask(taskId, update, workDir);
 		if (!updated) return null;
 
+		// Emit task:status:changed event for the primary task
+		stateEvents.emitTaskStatusChanged(taskId, status, previousStatus, updated.issue_id);
+
 		// If task failed, mark dependent tasks as blocked
 		if (status === "failed") {
 			const dependents = getDependentTasks(taskId, workDir);
 			for (const dependent of dependents) {
 				if (dependent.status === "pending") {
 					updateTask(dependent.id, { status: "blocked" }, workDir);
+					stateEvents.emitTaskStatusChanged(
+						dependent.id,
+						"blocked",
+						dependent.status,
+						dependent.issue_id,
+					);
 				}
 			}
 		}
