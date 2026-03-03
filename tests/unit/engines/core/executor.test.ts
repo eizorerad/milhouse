@@ -1,12 +1,15 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "bun:test";
 import {
 	EngineExecutor,
 	createConfiguredExecutor,
 	createDefaultExecutor,
 	createMinimalExecutor,
+	executeOnce,
 } from "../../../../src/engines/core/executor";
-import type { ExecutionResult } from "../../../../src/schemas/engine.schema";
+import type { ExecutionRequest, ExecutionResult } from "../../../../src/schemas/engine.schema";
 import type { IEnginePlugin, MiddlewareFn } from "../../../../src/engines/core/types";
+import { TimeoutError } from "../../../../src/engines/middleware/timeout";
 
 /** Build a minimal valid request input. */
 function makeRequest(overrides: Record<string, unknown> = {}) {
@@ -217,4 +220,50 @@ describe("factory functions", () => {
 		// Only logging (default true)
 		expect(executor.getMiddleware().length).toBe(1);
 	});
+});
+
+/** Create a mock plugin that is available but runs a command that hangs forever. */
+function createHangingPlugin(): IEnginePlugin {
+	return {
+		name: "hanging-engine",
+		config: {
+			name: "hanging-engine",
+			command: process.execPath,
+			args: [],
+			timeout: 60000,
+			maxConcurrent: 1,
+		},
+		isAvailable: async () => true,
+		buildArgs: () => ["-e", "await Bun.sleep(999999)"],
+		parseOutput: () => makeResult(),
+		getEnv: () => ({}),
+		usesStdinForPrompt: () => false,
+	};
+}
+
+describe("executeOnce", () => {
+	it("rejects with TimeoutError when a hung process exceeds the specified timeout", async () => {
+		const plugin = createHangingPlugin();
+
+		await expect(
+			executeOnce(
+				plugin,
+				makeRequest({ workDir: tmpdir() }) as ExecutionRequest,
+				{ timeout: 50 },
+			),
+		).rejects.toThrow(TimeoutError);
+	}, 15000);
+
+	it("includes timeout middleware that respects request.timeout even without explicit options", async () => {
+		const plugin = createHangingPlugin();
+
+		// Even without passing options.timeout, the executor should have timeout
+		// middleware that reads the request's timeout field.
+		await expect(
+			executeOnce(
+				plugin,
+				makeRequest({ workDir: tmpdir(), timeout: 50 }) as ExecutionRequest,
+			),
+		).rejects.toThrow(TimeoutError);
+	}, 15000);
 });
