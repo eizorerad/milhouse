@@ -988,6 +988,43 @@ export async function addDependencyWithLock(
 }
 
 /**
+ * Remove a dependency from a task with mutex locking.
+ * Performs a single loadTasks/saveTasks cycle to avoid the double-read
+ * that the unlocked removeDependency has (readTask + updateTask).
+ */
+export async function removeDependencyWithLock(
+	taskId: string,
+	dependencyId: string,
+	workDir = process.cwd(),
+): Promise<Task | null> {
+	return taskMutex.run(() => {
+		const tasks = loadTasks(workDir);
+		const index = tasks.findIndex((t) => t.id === taskId);
+
+		if (index === -1) {
+			return null;
+		}
+
+		const task = tasks[index];
+		const newDeps = task.depends_on.filter((id) => id !== dependencyId);
+
+		if (newDeps.length === task.depends_on.length) {
+			return task;
+		}
+
+		const updated: Task = {
+			...task,
+			depends_on: newDeps,
+			updated_at: new Date().toISOString(),
+		};
+
+		const newTasks = [...tasks.slice(0, index), updated, ...tasks.slice(index + 1)];
+		saveTasks(newTasks, workDir);
+		return updated;
+	});
+}
+
+/**
  * Update task status with locking and handle dependent task blocking.
  *
  * Optimized to perform a single loadTasks/saveTasks cycle within the mutex,

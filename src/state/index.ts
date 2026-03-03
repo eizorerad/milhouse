@@ -99,6 +99,7 @@ export {
 	getExecutionOrder,
 	updateTaskWithLock,
 	addDependencyWithLock,
+	removeDependencyWithLock,
 	updateTaskStatusWithLock,
 	saveTasksForRunSafe,
 } from "./tasks.ts";
