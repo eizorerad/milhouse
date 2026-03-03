@@ -3,6 +3,7 @@ import type { ExecutionResult } from "../../../../src/schemas/engine.schema";
 import {
 	TimeoutError,
 	createTimeoutMiddleware,
+	createProgressiveTimeoutMiddleware,
 	createTimeoutWithCleanup,
 } from "../../../../src/engines/middleware/timeout";
 
@@ -274,5 +275,67 @@ describe("createTimeoutWithCleanup", () => {
 		} catch (error) {
 			expect(error).toBeInstanceOf(TimeoutError);
 		}
+	});
+});
+
+describe("createProgressiveTimeoutMiddleware", () => {
+	describe("reset after success", () => {
+		it("resets timeout to initialTimeout after a successful execution", async () => {
+			const middleware = createProgressiveTimeoutMiddleware({
+				initialTimeout: 30,
+				maxTimeout: 1000,
+				multiplier: 2,
+			});
+
+			// First call succeeds immediately → triggers reset()
+			const request1 = makeRequest({ timeout: 0 }) as any;
+			await middleware(request1, async () => makeResult());
+
+			// Second call: next() takes 80ms.
+			// If timeout correctly reset to 30ms (initialTimeout), this should time out.
+			// If timeout is buggy at 1000/2^3=125ms, this would succeed.
+			const request2 = makeRequest({ timeout: 0 }) as any;
+			await expect(
+				middleware(request2, async () => {
+					await new Promise((resolve) => setTimeout(resolve, 80));
+					return makeResult();
+				}),
+			).rejects.toBeInstanceOf(TimeoutError);
+		});
+
+		it("resets to initialTimeout after multiple increases followed by success", async () => {
+			const middleware = createProgressiveTimeoutMiddleware({
+				initialTimeout: 30,
+				maxTimeout: 1000,
+				multiplier: 2,
+			});
+
+			// Fail twice to increase the timeout: 30 → 60 → 120
+			for (let i = 0; i < 2; i++) {
+				const req = makeRequest({ timeout: 0 }) as any;
+				try {
+					await middleware(req, async () => {
+						throw new Error("simulated failure");
+					});
+				} catch {
+					// expected
+				}
+			}
+
+			// Succeed → triggers reset()
+			const request3 = makeRequest({ timeout: 0 }) as any;
+			await middleware(request3, async () => makeResult());
+
+			// Next call should use initialTimeout (30ms), not the buggy back-calculated value.
+			// With buggy reset: 1000/2^3 = 125ms, so 80ms wait would succeed.
+			// With correct reset: 30ms, so 80ms wait should time out.
+			const request4 = makeRequest({ timeout: 0 }) as any;
+			await expect(
+				middleware(request4, async () => {
+					await new Promise((resolve) => setTimeout(resolve, 80));
+					return makeResult();
+				}),
+			).rejects.toBeInstanceOf(TimeoutError);
+		});
 	});
 });
