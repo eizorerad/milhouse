@@ -195,11 +195,25 @@ export async function runPhase<TItem, TResult>(
 			const items = await phaseConfig.loadItems(ctx);
 			if (items.length === 0 && phaseConfig.mode === "per-item") {
 				logWarn(`No items to process for phase "${phaseConfig.name}"`);
+
+				// Still honor lifecycle: saveResults and afterRun with empty results
+				await phaseConfig.saveResults([], ctx);
+				if (phaseConfig.afterRun) {
+					await phaseConfig.afterRun([], ctx);
+				}
+
+				// Set byPhase cost tracking with zeros
+				runCost.byPhase[phaseConfig.name] = {
+					inputTokens: 0,
+					outputTokens: 0,
+					cost: 0,
+				};
+
 				const earlyNextPhase = phaseConfig.nextPhase ? phaseConfig.nextPhase([], ctx) : undefined;
 				if (earlyNextPhase) {
 					await updateRunPhaseInMetaWithLock(runId, earlyNextPhase, workDir);
 				}
-				return makeResult(phaseConfig.name, runId, true, [], 0, 0, 0, startTime, { runId }, earlyNextPhase);
+				return makeResult(phaseConfig.name, runId, false, [], 0, 0, 0, startTime, { runId }, earlyNextPhase);
 			}
 
 			// 8b. Display phase header
