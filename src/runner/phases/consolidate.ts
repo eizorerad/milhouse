@@ -71,7 +71,8 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 	parseResponse(response) {
 		const jsonStr = extractJsonFromResponse(response);
 		if (!jsonStr) {
-			return { duplicates: [], cross_dependencies: [], parallel_groups: [], execution_order: [] };
+			logWarn(`Consolidate: AI response contained no extractable JSON. Response start: ${response.slice(0, 200)}`);
+			throw new Error("Consolidate: AI response contained no extractable JSON");
 		}
 
 		try {
@@ -84,8 +85,9 @@ export const consolidatePhaseConfig: PhaseConfig<ConsolidateInput, Consolidation
 				parallel_groups: Array.isArray(parsed.parallel_groups) ? parsed.parallel_groups : [],
 				execution_order: Array.isArray(parsed.execution_order) ? parsed.execution_order : [],
 			};
-		} catch {
-			return { duplicates: [], cross_dependencies: [], parallel_groups: [], execution_order: [] };
+		} catch (err) {
+			logWarn(`Consolidate: failed to parse extracted JSON: ${err instanceof Error ? err.message : String(err)}. JSON start: ${jsonStr.slice(0, 200)}`);
+			throw new Error("Consolidate: failed to parse extracted JSON");
 		}
 	},
 

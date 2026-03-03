@@ -62,20 +62,12 @@ describe("consolidatePhaseConfig", () => {
 			expect(result.execution_order).toEqual(["T1"]);
 		});
 
-		it("returns all empty arrays for malformed JSON", () => {
-			const result = consolidatePhaseConfig.parseResponse("{invalid json", item, ctx);
-			expect(result.duplicates).toEqual([]);
-			expect(result.cross_dependencies).toEqual([]);
-			expect(result.parallel_groups).toEqual([]);
-			expect(result.execution_order).toEqual([]);
+		it("throws for malformed JSON", () => {
+			expect(() => consolidatePhaseConfig.parseResponse("{invalid json", item, ctx)).toThrow("Consolidate:");
 		});
 
-		it("returns all empty arrays when no JSON extractable", () => {
-			const result = consolidatePhaseConfig.parseResponse("Just text, no JSON", item, ctx);
-			expect(result.duplicates).toEqual([]);
-			expect(result.cross_dependencies).toEqual([]);
-			expect(result.parallel_groups).toEqual([]);
-			expect(result.execution_order).toEqual([]);
+		it("throws when no JSON extractable", () => {
+			expect(() => consolidatePhaseConfig.parseResponse("Just text, no JSON", item, ctx)).toThrow("Consolidate: AI response contained no extractable JSON");
 		});
 
 		it("handles non-array values for expected array fields", () => {
