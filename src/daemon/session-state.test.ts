@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { saveState, loadState, markSessionCrashed, getDaemonStatePath } from "./session-state.ts";
+import { saveState, loadState, markSessionCrashed, getDaemonStatePath, recordRunStart, recordRunComplete } from "./session-state.ts";
 import type { DaemonState } from "./types.ts";
 
 function makeTempDir(): string {
@@ -157,6 +157,109 @@ describe("session-state", () => {
 			expect(loaded!.status).toBe("crashed");
 			expect(loaded!.totalCost).toBe(5.0);
 			expect(loaded!.scope).toBe("fallback-test");
+		});
+	});
+
+	describe("recordRunStart + recordRunComplete lifecycle", () => {
+		test("success path: recordRunStart creates pending entry, recordRunComplete with exitCode=0 sets result to success", () => {
+			const state = makeDaemonState();
+			const entry = recordRunStart(state);
+
+			expect(entry.result).toBe("pending");
+			expect(entry.finishedAt).toBeUndefined();
+
+			recordRunComplete(entry, {
+				exitCode: 0,
+				killedByWatchdog: false,
+				duration: 30000,
+				runId: "run-success-1",
+				cost: 1.25,
+			});
+
+			expect(entry.result).toBe("success");
+			expect(entry.finishedAt).toBeDefined();
+			expect(entry.duration).toBe(30000);
+			expect(entry.exitCode).toBe(0);
+			expect(entry.cost).toBe(1.25);
+			expect(entry.runId).toBe("run-success-1");
+		});
+
+		test("failure path: recordRunComplete with non-zero exitCode sets result to failed", () => {
+			const state = makeDaemonState();
+			const entry = recordRunStart(state);
+
+			recordRunComplete(entry, {
+				exitCode: 1,
+				killedByWatchdog: false,
+				duration: 15000,
+				runId: "run-fail-1",
+				cost: 0.50,
+			});
+
+			expect(entry.result).toBe("failed");
+			expect(entry.exitCode).toBe(1);
+			expect(entry.finishedAt).toBeDefined();
+		});
+
+		test("killed by watchdog: recordRunComplete with killedByWatchdog=true sets result to killed", () => {
+			const state = makeDaemonState();
+			const entry = recordRunStart(state);
+
+			recordRunComplete(entry, {
+				exitCode: 137,
+				killedByWatchdog: true,
+				duration: 600000,
+				runId: "run-killed-1",
+			});
+
+			expect(entry.result).toBe("killed");
+			expect(entry.killedByWatchdog).toBe(true);
+			expect(entry.exitCode).toBe(137);
+			expect(entry.finishedAt).toBeDefined();
+		});
+
+		test("partial success: recordRunComplete with non-zero exitCode but non-empty issuesFixed sets result to partial", () => {
+			const state = makeDaemonState();
+			const entry = recordRunStart(state);
+
+			recordRunComplete(entry, {
+				exitCode: 1,
+				killedByWatchdog: false,
+				duration: 45000,
+				runId: "run-partial-1",
+				cost: 2.00,
+				issuesFixed: ["issue-1", "issue-2"],
+				issuesFailed: ["issue-3"],
+			});
+
+			expect(entry.result).toBe("partial");
+			expect(entry.exitCode).toBe(1);
+			expect(entry.issuesFixed).toEqual(["issue-1", "issue-2"]);
+			expect(entry.issuesFailed).toEqual(["issue-3"]);
+		});
+
+		test("entry remains in state.runs[] with completed data after recordRunStart + recordRunComplete", () => {
+			const state = makeDaemonState();
+			const entry = recordRunStart(state);
+
+			expect(state.runs).toHaveLength(1);
+			expect(state.runs[0].result).toBe("pending");
+
+			recordRunComplete(entry, {
+				exitCode: 0,
+				killedByWatchdog: false,
+				duration: 20000,
+				runId: "run-verify-1",
+				cost: 0.75,
+			});
+
+			// The entry in state.runs[] is the same object (mutated in place)
+			expect(state.runs).toHaveLength(1);
+			expect(state.runs[0].result).toBe("success");
+			expect(state.runs[0].finishedAt).toBeDefined();
+			expect(state.runs[0].exitCode).toBe(0);
+			expect(state.runs[0].cost).toBe(0.75);
+			expect(state.runs[0]).toBe(entry); // same reference
 		});
 	});
 });
