@@ -84,7 +84,11 @@ export function acquireRunLock(
 				// Corrupted or unreadable lock file — remove and retry
 			}
 
-			rmSync(lockPath, { force: true });
+			try {
+				rmSync(lockPath, { force: true });
+			} catch {
+				// Removal failed (e.g., race with another process); retry will hit EEXIST again
+			}
 		}
 	}
 

@@ -5,7 +5,7 @@
  * that prevents concurrent execution of the same phase for the same run.
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { acquireRunLock, isRunLocked } from "../../../src/state/run-lock.ts";
@@ -187,6 +187,116 @@ describe("run-lock", () => {
 			const result = isRunLocked(testRunId, testPhase, testDir);
 
 			expect(result).toEqual({ locked: false });
+		});
+	});
+
+	// ========================================================================
+	// TOCTOU race-condition regression tests
+	// ========================================================================
+
+	describe("atomic lock regression", () => {
+		it("should recover from EEXIST with stale lock (dead PID) and write current PID", () => {
+			const lockPath = getLockFilePath(testRunId, testPhase);
+			const lockDir = join(lockPath, "..");
+			mkdirSync(lockDir, { recursive: true });
+
+			// Pre-create lock with a dead PID
+			writeFileSync(lockPath, JSON.stringify({
+				pid: 999999999,
+				startedAt: "2021-06-15T10:00:00.000Z",
+			}));
+
+			const lock = acquireRunLock(testRunId, testPhase, testDir);
+
+			// Verify the lock file now contains current process PID
+			const content = JSON.parse(readFileSync(lockPath, "utf-8"));
+			expect(content.pid).toBe(process.pid);
+
+			lock.release();
+		});
+
+		it("should recover from EEXIST with corrupted content", () => {
+			const lockPath = getLockFilePath(testRunId, testPhase);
+			const lockDir = join(lockPath, "..");
+			mkdirSync(lockDir, { recursive: true });
+
+			// Pre-create lock with garbage content
+			writeFileSync(lockPath, "garbage{{not-json!!");
+
+			const lock = acquireRunLock(testRunId, testPhase, testDir);
+			expect(lock).toBeDefined();
+
+			// Verify we now hold the lock
+			const content = JSON.parse(readFileSync(lockPath, "utf-8"));
+			expect(content.pid).toBe(process.pid);
+
+			lock.release();
+		});
+
+		it("should throw after retry limit exhaustion when lock cannot be removed", () => {
+			const lockPath = getLockFilePath(testRunId, testPhase);
+			const lockDir = join(lockPath, "..");
+			mkdirSync(lockDir, { recursive: true });
+
+			// Create a non-empty directory at the lock file path.
+			// writeFileSync with 'wx' sees it as EEXIST, readFileSync fails (it's a dir),
+			// and rmSync without { recursive: true } can't remove a non-empty directory.
+			// This causes every retry to fail, exercising the retry cap.
+			mkdirSync(lockPath);
+			writeFileSync(join(lockPath, "blocker"), "");
+
+			try {
+				expect(() => acquireRunLock(testRunId, testPhase, testDir)).toThrow(
+					/after 3 attempts/,
+				);
+			} finally {
+				// Clean up the directory
+				rmSync(lockPath, { recursive: true, force: true });
+			}
+		});
+
+		it("should throw on concurrent double-acquire in same process without releasing", () => {
+			// First acquire should succeed
+			const lock = acquireRunLock(testRunId, testPhase, testDir);
+
+			try {
+				// Second acquire without release should throw since current PID is alive
+				expect(() => acquireRunLock(testRunId, testPhase, testDir)).toThrow(
+					/is locked by PID/,
+				);
+			} finally {
+				lock.release();
+			}
+		});
+
+		it("should succeed on acquire after release", () => {
+			// First acquire
+			const lock1 = acquireRunLock(testRunId, testPhase, testDir);
+			lock1.release();
+
+			// Second acquire after release should succeed
+			const lock2 = acquireRunLock(testRunId, testPhase, testDir);
+			expect(lock2).toBeDefined();
+
+			const lockPath = getLockFilePath(testRunId, testPhase);
+			const content = JSON.parse(readFileSync(lockPath, "utf-8"));
+			expect(content.pid).toBe(process.pid);
+
+			lock2.release();
+		});
+
+		it("release is idempotent — calling twice does not throw", () => {
+			const lock = acquireRunLock(testRunId, testPhase, testDir);
+			const lockPath = getLockFilePath(testRunId, testPhase);
+
+			expect(existsSync(lockPath)).toBe(true);
+
+			// First release
+			lock.release();
+			expect(existsSync(lockPath)).toBe(false);
+
+			// Second release should not throw
+			expect(() => lock.release()).not.toThrow();
 		});
 	});
 });
