@@ -6,7 +6,7 @@
  * @module tests/unit/engines/opencode-port-manager
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { PortManager } from "../../../src/engines/opencode/port-manager";
 
 describe("PortManager", () => {
@@ -231,6 +231,72 @@ describe("PortManager", () => {
 			// Verify reset
 			expect(PortManager.getBasePort()).toBe(4096);
 			expect(PortManager.getUsedPortCount()).toBe(0);
+		});
+	});
+
+	describe("isPortAvailable timeout", () => {
+		afterEach(() => {
+			PortManager.reset();
+		});
+
+		it("should resolve within PORT_CHECK_TIMEOUT_MS even for valid ports", async () => {
+			const start = Date.now();
+			const result = await PortManager.isPortAvailable(49152);
+			const elapsed = Date.now() - start;
+
+			expect(typeof result).toBe("boolean");
+			expect(elapsed).toBeLessThan(4000);
+		});
+
+		it("should resolve(false) when server.close callback is delayed", async () => {
+			// Mock node:net to return a fake server whose close() never fires its callback
+			mock.module("node:net", () => ({
+				createServer: () => {
+					const eventHandlers: Record<string, Function> = {};
+					return {
+						once(event: string, cb: Function) {
+							eventHandlers[event] = cb;
+							return this;
+						},
+						listen(_port: number, _host: string) {
+							// Simulate successful listen by firing the "listening" event
+							queueMicrotask(() => {
+								eventHandlers["listening"]?.();
+							});
+							return this;
+						},
+						close(_cb?: Function) {
+							// Never invoke the callback - simulates the hung close scenario
+						},
+						removeAllListeners() {
+							for (const key of Object.keys(eventHandlers)) {
+								delete eventHandlers[key];
+							}
+							return this;
+						},
+					};
+				},
+			}));
+
+			// Re-import port-manager so it picks up the mocked node:net
+			const { PortManager: MockedPM } = await import(
+				"../../../src/engines/opencode/port-manager"
+			);
+
+			const start = Date.now();
+			const result = await MockedPM.isPortAvailable(49999);
+			const elapsed = Date.now() - start;
+
+			expect(result).toBe(false);
+			// Should have waited for the timeout (~3000ms) before resolving
+			expect(elapsed).toBeGreaterThanOrEqual(2500);
+			expect(elapsed).toBeLessThan(5000);
+		});
+
+		it("should not leak timers on normal resolution", async () => {
+			const result = await PortManager.isPortAvailable(49153);
+			expect(typeof result).toBe("boolean");
+			// If this test completes without hanging, timers are properly cleaned up
 		});
 	});
 });
