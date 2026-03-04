@@ -118,3 +118,53 @@ describe("mergePhases phase key validation", () => {
 		expect(VALID_PHASES.length).toBe(6);
 	});
 });
+
+describe("resolveConfig gates", () => {
+	test("default gates values are all true when no gates provided", () => {
+		const config = resolveConfig({});
+		expect(config.gates).toEqual({
+			evidence: true,
+			diffHygiene: true,
+			placeholder: true,
+			dod: true,
+		});
+	});
+
+	test("explicit false values override defaults", () => {
+		const config = resolveConfig({ gates: { evidence: false } });
+		expect(config.gates.evidence).toBe(false);
+		expect(config.gates.diffHygiene).toBe(true);
+		expect(config.gates.placeholder).toBe(true);
+		expect(config.gates.dod).toBe(true);
+	});
+
+	test("partial overrides only affect specified fields", () => {
+		const config = resolveConfig({ gates: { diffHygiene: false, dod: false } });
+		expect(config.gates.evidence).toBe(true);
+		expect(config.gates.diffHygiene).toBe(false);
+		expect(config.gates.placeholder).toBe(true);
+		expect(config.gates.dod).toBe(false);
+	});
+
+	test("all fields explicitly set to false works", () => {
+		const config = resolveConfig({
+			gates: { evidence: false, diffHygiene: false, placeholder: false, dod: false },
+		});
+		expect(config.gates).toEqual({
+			evidence: false,
+			diffHygiene: false,
+			placeholder: false,
+			dod: false,
+		});
+	});
+
+	test("empty gates object preserves all defaults", () => {
+		const config = resolveConfig({ gates: {} });
+		expect(config.gates).toEqual({
+			evidence: true,
+			diffHygiene: true,
+			placeholder: true,
+			dod: true,
+		});
+	});
+});
