@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { validatePhaseConfig } from "../../../../src/runner/phases/validate.ts";
 import * as issuesModule from "../../../../src/state/issues.ts";
+import * as runsModule from "../../../../src/state/runs.ts";
 import * as logger from "../../../../src/ui/logger.ts";
 import { createMockIssue, createMockPhaseContext } from "../helpers.ts";
 
@@ -512,6 +513,87 @@ describe("validatePhaseConfig", () => {
 			expect(severityLog).toBeUndefined();
 			expect(statusLog).toBeUndefined();
 			expect(activeLog).toBeUndefined();
+		});
+	});
+
+	// ============================================================================
+	// saveResults — updateIssueForRun null guard
+	// ============================================================================
+
+	describe("saveResults", () => {
+		let updateIssueSpy: ReturnType<typeof spyOn>;
+		let updateRunStatsSpy: ReturnType<typeof spyOn>;
+
+		afterEach(() => {
+			updateIssueSpy?.mockRestore();
+			updateRunStatsSpy?.mockRestore();
+		});
+
+		it("logs warning and does not increment validated count when updateIssueForRun returns null", async () => {
+			updateIssueSpy = spyOn(issuesModule, "updateIssueForRun").mockReturnValue(null);
+			updateRunStatsSpy = spyOn(runsModule, "updateRunStatsWithLock").mockResolvedValue(undefined as never);
+
+			const issue = createMockIssue({ id: "ISS-NULL-1", status: "CONFIRMED" });
+			const ctx = createMockPhaseContext({ runId: "run-null-test" });
+
+			const results = [
+				{
+					item: issue,
+					result: {
+						issue_id: "ISS-NULL-1",
+						status: "CONFIRMED" as const,
+						confidence: "HIGH",
+						summary: "Confirmed issue",
+						evidence: [] as Array<{ type: string }>,
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			await validatePhaseConfig.saveResults(results, ctx);
+
+			// updateIssueForRun was called
+			expect(updateIssueSpy).toHaveBeenCalledTimes(1);
+
+			// logWarn was called with the issue ID
+			const warnCalls = logWarnSpy.mock.calls.map((c: unknown[]) => c[0] as string);
+			const nullWarning = warnCalls.find((m: string) => m.includes("ISS-NULL-1") && m.includes("null"));
+			expect(nullWarning).toBeDefined();
+
+			// updateRunStatsWithLock should NOT have been called (validated === 0)
+			expect(updateRunStatsSpy).not.toHaveBeenCalled();
+		});
+
+		it("increments validated count when updateIssueForRun returns an issue", async () => {
+			const issue = createMockIssue({ id: "ISS-OK-1", status: "CONFIRMED" });
+			updateIssueSpy = spyOn(issuesModule, "updateIssueForRun").mockReturnValue(issue);
+			updateRunStatsSpy = spyOn(runsModule, "updateRunStatsWithLock").mockResolvedValue(undefined as never);
+
+			const ctx = createMockPhaseContext({ runId: "run-ok-test" });
+
+			const results = [
+				{
+					item: issue,
+					result: {
+						issue_id: "ISS-OK-1",
+						status: "CONFIRMED" as const,
+						confidence: "HIGH",
+						summary: "Confirmed issue",
+						evidence: [] as Array<{ type: string }>,
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			await validatePhaseConfig.saveResults(results, ctx);
+
+			// updateRunStatsWithLock should have been called with validated=1
+			expect(updateRunStatsSpy).toHaveBeenCalledTimes(1);
+			expect(updateRunStatsSpy).toHaveBeenCalledWith("run-ok-test", { issues_validated: 1 }, expect.any(String));
 		});
 	});
 
