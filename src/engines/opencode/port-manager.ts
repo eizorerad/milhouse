@@ -65,6 +65,12 @@ function getBasePort(): number {
  * Tests port availability by attempting to create a TCP server
  * on the port. If the server can be created, the port is available.
  *
+ * @remarks
+ * This check is subject to a TOCTOU (Time-Of-Check-To-Time-Of-Use) race condition.
+ * Between `server.close()` completing and the caller actually binding to the port,
+ * another process on the system can claim the same port. Callers should be prepared
+ * to handle port-conflict errors (e.g., EADDRINUSE) even after this method returns true.
+ *
  * @param port - The port to check
  * @returns true if the port is available, false otherwise
  *
@@ -103,6 +109,13 @@ async function isPortAvailable(port: number): Promise<boolean> {
 
 /**
  * Try to acquire a specific port.
+ *
+ * @remarks
+ * The internal `usedPorts` set only guards against intra-process races (i.e., two
+ * concurrent callers within the same milhouse process acquiring the same port).
+ * Cross-process races are not prevented: another OS process can bind the port
+ * between the `isPortAvailable()` check and the actual server bind. Callers should
+ * implement retry logic to handle EADDRINUSE errors at bind time.
  *
  * @param port - The port to try to acquire
  * @returns true if the port was acquired, false otherwise
@@ -253,6 +266,14 @@ function reset(): void {
  * concurrent milhouse executions. Uses a module-level set to track ports
  * used by the current process, and checks actual port availability
  * using TCP connection attempts.
+ *
+ * @remarks
+ * Port availability checks are inherently subject to TOCTOU (Time-Of-Check-To-Time-Of-Use)
+ * race conditions: a port verified as free can be claimed by another OS process before the
+ * caller binds to it. The internal tracking only prevents intra-process duplicates.
+ * Callers (e.g., `OpencodeServerExecutor.startServer()`) should implement retry logic
+ * to handle cross-process port conflicts (EADDRINUSE) by releasing the failed port and
+ * acquiring a new one.
  *
  * @example
  * ```typescript
