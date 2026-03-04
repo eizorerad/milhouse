@@ -344,6 +344,9 @@ export async function runParallelSteps(
 	// Track completed branches for merge phase
 	const completedBranches: string[] = [];
 
+	// Track branches whose worktree cleanup failed (leftInPlace or error)
+	const failedCleanupBranches = new Set<string>();
+
 	// Global agent counter to ensure unique numbering across batches
 	let globalAgentNum = 0;
 
@@ -494,6 +497,15 @@ export async function runParallelSteps(
 				});
 				if (cleanupResult.ok && cleanupResult.value.leftInPlace) {
 					logInfo(`Worktree left in place (uncommitted changes): ${worktreeDir}`);
+					if (branchName) {
+						failedCleanupBranches.add(branchName);
+						logWarn(`Branch ${branchName} will be excluded from merge due to failed worktree cleanup (leftInPlace)`);
+					}
+				} else if (!cleanupResult.ok) {
+					if (branchName) {
+						failedCleanupBranches.add(branchName);
+						logWarn(`Branch ${branchName} will be excluded from merge due to worktree cleanup error: ${cleanupResult.error.message}`);
+					}
 				}
 
 				// Emit worktree cleanup event
@@ -502,10 +514,22 @@ export async function runParallelSteps(
 		}
 	}
 
+	// Filter out branches with failed worktree cleanup before merge
+	const branchesToMerge = failedCleanupBranches.size > 0
+		? completedBranches.filter((b) => !failedCleanupBranches.has(b))
+		: completedBranches;
+
+	if (failedCleanupBranches.size > 0) {
+		const excluded = completedBranches.filter((b) => failedCleanupBranches.has(b));
+		if (excluded.length > 0) {
+			logWarn(`Excluding ${excluded.length} branch(es) from merge due to failed worktree cleanup: ${excluded.join(", ")}`);
+		}
+	}
+
 	// Merge phase: merge completed branches back to base branch
-	if (!skipMerge && !dryRun && completedBranches.length > 0) {
+	if (!skipMerge && !dryRun && branchesToMerge.length > 0) {
 		await mergeCompletedBranches(
-			completedBranches,
+			branchesToMerge,
 			originalBaseBranch,
 			engine,
 			workDir,
@@ -751,6 +775,9 @@ export async function runParallelGroup(
 	let outputTokens = 0;
 	const branches: string[] = [];
 
+	// Track branches whose worktree cleanup failed (leftInPlace or error)
+	const failedCleanupBranches = new Set<string>();
+
 	// Filter to only pending or merge_error tasks
 	// merge_error tasks need to be re-executed because their merge failed
 	const pendingTasks = group.tasks.filter(
@@ -861,10 +888,21 @@ export async function runParallelGroup(
 			} finally {
 				// Cleanup worktree
 				if (worktreeDir) {
-					await cleanupWorktree({
+					const cleanupResult = await cleanupWorktree({
 						path: worktreeDir,
 						originalDir: workDir,
 					});
+					if (cleanupResult.ok && cleanupResult.value.leftInPlace) {
+						if (branchName) {
+							failedCleanupBranches.add(branchName);
+							logWarn(`Branch ${branchName} will be excluded from merge due to failed worktree cleanup (leftInPlace)`);
+						}
+					} else if (!cleanupResult.ok) {
+						if (branchName) {
+							failedCleanupBranches.add(branchName);
+							logWarn(`Branch ${branchName} will be excluded from merge due to worktree cleanup error: ${cleanupResult.error.message}`);
+						}
+					}
 				}
 			}
 		});
@@ -874,9 +912,21 @@ export async function runParallelGroup(
 
 	spinner.success();
 
+	// Filter out branches with failed worktree cleanup before merge
+	const branchesToMerge = failedCleanupBranches.size > 0
+		? branches.filter((b) => !failedCleanupBranches.has(b))
+		: branches;
+
+	if (failedCleanupBranches.size > 0) {
+		const excluded = branches.filter((b) => failedCleanupBranches.has(b));
+		if (excluded.length > 0) {
+			logWarn(`Excluding ${excluded.length} branch(es) from merge due to failed worktree cleanup: ${excluded.join(", ")}`);
+		}
+	}
+
 	// Merge branches if not skipped
-	if (!options.skipMerge && branches.length > 0) {
-		await mergeCompletedBranches(branches, baseBranch, engine, workDir, modelOverride);
+	if (!options.skipMerge && branchesToMerge.length > 0) {
+		await mergeCompletedBranches(branchesToMerge, baseBranch, engine, workDir, modelOverride);
 	}
 
 	return {

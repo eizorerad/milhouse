@@ -38,7 +38,7 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 	name: "validate",
 	role: "IV",
 	jsonSchema: VALIDATE_SCHEMA as Record<string, unknown>,
-	engineMetadata: { maxTurns: 15, timeout: 600000 },  // 10 min per-item timeout
+	engineMetadata: { maxTurns: 15, timeout: 1200000 }, // 20 min per-item timeout
 	mode: "per-item",
 	defaultParallel: 5,
 

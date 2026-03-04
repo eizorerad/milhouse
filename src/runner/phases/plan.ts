@@ -49,7 +49,7 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 	// Limit turns to prevent Claude from asking clarifying questions
 	// and hanging indefinitely. Plan agents need 2-3 turns at most
 	// (read files + generate JSON response).
-	engineMetadata: { maxTurns: 15, timeout: 600000 },  // 10 min per-item timeout
+	engineMetadata: { maxTurns: 15, timeout: 1200000 }, // 20 min per-item timeout
 
 	// Retry: if an item fails (e.g. CLI hang timeout), retry it
 	isRetryable: true,
@@ -110,10 +110,10 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 						: [],
 					acceptance: Array.isArray(t.acceptance)
 						? (t.acceptance as Array<Record<string, unknown>>).map((a) => ({
-								description: typeof a.description === "string" ? a.description : "Unknown",
-								check_command: typeof a.check_command === "string" ? a.check_command : undefined,
-								verified: false,
-							}))
+							description: typeof a.description === "string" ? a.description : "Unknown",
+							check_command: typeof a.check_command === "string" ? a.check_command : undefined,
+							verified: false,
+						}))
 						: [],
 					risk: typeof t.risk === "string" ? t.risk : undefined,
 					rollback: typeof t.rollback === "string" ? t.rollback : undefined,

@@ -7,7 +7,7 @@ plans/
 .claude/
 
 # Milhouse — track config, ignore runtime data
-.milhouse/*
+.milhouse/
 !.milhouse/config.ts
 
 # Examples

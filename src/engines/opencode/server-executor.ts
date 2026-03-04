@@ -347,16 +347,57 @@ export class OpencodeServerExecutor {
 	private async cleanup(): Promise<void> {
 		// Kill the server process if it's still running
 		if (this.serverProcess) {
-			try {
-				this.serverProcess.kill();
-				// Wait for the process to exit
-				await Promise.race([
-					this.serverProcess.exited,
-					new Promise((resolve) => setTimeout(resolve, 5000)),
-				]);
-			} catch {
-				// Ignore errors during cleanup
+			const pid = this.serverProcess.pid;
+			const isWindows = process.platform === "win32";
+
+			if (pid) {
+				try {
+					// Initial kill attempt — platform-aware
+					if (isWindows) {
+						// On Windows, SIGTERM may not terminate the process.
+						// Use taskkill /T /F to kill the entire process tree.
+						Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"], {
+							stdout: "ignore",
+							stderr: "ignore",
+						});
+					} else {
+						this.serverProcess.kill();
+					}
+
+					// Wait for the process to exit
+					await Promise.race([
+						this.serverProcess.exited,
+						new Promise((resolve) => setTimeout(resolve, 5000)),
+					]);
+
+					// Force-kill retry if the process didn't actually exit
+					if (this.serverProcess.exitCode === null) {
+						if (isWindows) {
+							Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"], {
+								stdout: "ignore",
+								stderr: "ignore",
+							});
+						} else {
+							this.serverProcess.kill("SIGKILL");
+						}
+
+						// Brief wait for the force kill to take effect
+						await Promise.race([
+							this.serverProcess.exited,
+							new Promise((resolve) => setTimeout(resolve, 2000)),
+						]);
+
+						if (this.serverProcess.exitCode === null) {
+							logger.warn(
+								`[OpenCode] Server process (PID ${pid}) did not exit after force kill`,
+							);
+						}
+					}
+				} catch {
+					// Ignore errors during cleanup
+				}
 			}
+
 			this.serverProcess = null;
 		}
 

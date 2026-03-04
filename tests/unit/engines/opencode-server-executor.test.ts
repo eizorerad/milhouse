@@ -7,7 +7,7 @@
  * @module tests/unit/engines/opencode-server-executor
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { PortManager } from "../../../src/engines/opencode/port-manager";
 import {
 	type OpencodeServerConfig,
@@ -321,6 +321,195 @@ describe("OpencodeServerExecutor", () => {
 			await expect(executor.startServer("/tmp/test")).rejects.toThrow();
 			// Verify server is not running (no retry loop hung)
 			expect(executor.isServerRunning()).toBe(false);
+		});
+	});
+
+	describe("cleanup() platform-aware process killing", () => {
+		const originalPlatform = process.platform;
+
+		/**
+		 * Create a mock subprocess with controllable behavior.
+		 */
+		function createMockSubprocess(opts: { pid?: number | undefined; exitCode?: number | null } = {}) {
+			const { pid = 1234, exitCode = 0 } = opts;
+			const killFn = mock(() => {});
+			let resolveExited!: (value: number) => void;
+			const exitedPromise = new Promise<number>((resolve) => {
+				resolveExited = resolve;
+			});
+
+			const subprocess = {
+				pid,
+				kill: killFn,
+				exited: exitedPromise,
+				exitCode,
+			};
+
+			return { subprocess, killFn, resolveExited };
+		}
+
+		/**
+		 * Set up an executor that appears to be running with a mock subprocess.
+		 */
+		function setupRunningExecutor(subprocess: unknown): OpencodeServerExecutor {
+			const exec = new OpencodeServerExecutor();
+			const internal = exec as unknown as {
+				serverProcess: unknown;
+				port: number | null;
+				isRunning: boolean;
+				baseUrl: string | null;
+			};
+			internal.serverProcess = subprocess;
+			internal.port = 5000;
+			internal.isRunning = true;
+			internal.baseUrl = "http://127.0.0.1:5000";
+			// Prevent actual HTTP calls in disposeInstance()
+			spyOn(exec as any, "disposeInstance").mockResolvedValue(true);
+			return exec;
+		}
+
+		afterEach(() => {
+			Object.defineProperty(process, "platform", {
+				value: originalPlatform,
+				configurable: true,
+			});
+		});
+
+		it("should use taskkill on Windows when process has a PID", async () => {
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+
+			const { subprocess, killFn, resolveExited } = createMockSubprocess();
+			const exec = setupRunningExecutor(subprocess);
+
+			const spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+				exitCode: 0,
+				success: true,
+				stdout: Buffer.alloc(0),
+				stderr: Buffer.alloc(0),
+			} as any);
+
+			// Let the process "exit" immediately
+			resolveExited(0);
+
+			try {
+				await exec.stopServer();
+
+				// On Windows, should use taskkill instead of process.kill()
+				expect(spawnSyncSpy).toHaveBeenCalledWith(
+					["taskkill", "/PID", "1234", "/T", "/F"],
+					expect.objectContaining({ stdout: "ignore", stderr: "ignore" }),
+				);
+				expect(killFn).not.toHaveBeenCalled();
+			} finally {
+				spawnSyncSpy.mockRestore();
+			}
+		});
+
+		it("should use process.kill() on non-Windows", async () => {
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+			const { subprocess, killFn, resolveExited } = createMockSubprocess();
+			const exec = setupRunningExecutor(subprocess);
+
+			resolveExited(0);
+
+			await exec.stopServer();
+
+			expect(killFn).toHaveBeenCalled();
+		});
+
+		it("should force-kill with SIGKILL on non-Windows when process does not exit", async () => {
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+			// exitCode stays null to simulate process that didn't actually terminate
+			const { subprocess, killFn, resolveExited } = createMockSubprocess({ exitCode: null });
+			const exec = setupRunningExecutor(subprocess);
+
+			// Resolve exited promise immediately but keep exitCode null
+			resolveExited(0);
+
+			await exec.stopServer();
+
+			// After the race, should retry with SIGKILL since exitCode is still null
+			const sigkillCalls = killFn.mock.calls.filter(
+				(call: unknown[]) => call[0] === "SIGKILL",
+			);
+			expect(sigkillCalls.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("should retry taskkill on Windows when process does not exit", async () => {
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+
+			const { subprocess, resolveExited } = createMockSubprocess({ exitCode: null });
+			const exec = setupRunningExecutor(subprocess);
+
+			const spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+				exitCode: 0,
+				success: true,
+				stdout: Buffer.alloc(0),
+				stderr: Buffer.alloc(0),
+			} as any);
+
+			resolveExited(0);
+
+			try {
+				await exec.stopServer();
+
+				// Should have called taskkill at least twice (initial + force-kill retry)
+				const taskkillCalls = spawnSyncSpy.mock.calls.filter(
+					(call: unknown[]) =>
+						Array.isArray(call[0]) && (call[0] as string[])[0] === "taskkill",
+				);
+				expect(taskkillCalls.length).toBeGreaterThanOrEqual(2);
+			} finally {
+				spawnSyncSpy.mockRestore();
+			}
+		});
+
+		it("should not attempt kill when serverProcess.pid is undefined", async () => {
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+
+			const { subprocess, killFn, resolveExited } = createMockSubprocess({
+				pid: undefined as unknown as number,
+			});
+			const exec = setupRunningExecutor(subprocess);
+
+			const spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+				exitCode: 0,
+				success: true,
+				stdout: Buffer.alloc(0),
+				stderr: Buffer.alloc(0),
+			} as any);
+
+			resolveExited(0);
+
+			try {
+				await exec.stopServer();
+
+				// With no PID, should not attempt any kill
+				expect(spawnSyncSpy).not.toHaveBeenCalled();
+				expect(killFn).not.toHaveBeenCalled();
+			} finally {
+				spawnSyncSpy.mockRestore();
+			}
+		});
+
+		it("should release port via PortManager after cleanup", async () => {
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+			const { subprocess, resolveExited } = createMockSubprocess();
+			const exec = setupRunningExecutor(subprocess);
+
+			const releasePortSpy = spyOn(PortManager, "releasePort");
+
+			resolveExited(0);
+
+			try {
+				await exec.stopServer();
+				expect(releasePortSpy).toHaveBeenCalledWith(5000);
+			} finally {
+				releasePortSpy.mockRestore();
+			}
 		});
 	});
 });
