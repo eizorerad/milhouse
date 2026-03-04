@@ -199,7 +199,12 @@ export function deleteGraphNode(id: string, workDir = process.cwd()): boolean {
 		return false;
 	}
 
-	const newNodes = [...nodes.slice(0, index), ...nodes.slice(index + 1)];
+	const withoutDeleted = [...nodes.slice(0, index), ...nodes.slice(index + 1)];
+	const newNodes = withoutDeleted.map((node) =>
+		node.depends_on.includes(id)
+			? { ...node, depends_on: node.depends_on.filter((depId) => depId !== id) }
+			: node,
+	);
 	saveGraph(newNodes, workDir);
 	return true;
 }
