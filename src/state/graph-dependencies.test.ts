@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import * as lockfile from "proper-lockfile";
 import { loggers } from "../observability/logger.js";
-import { topologicalSortNodes, getNodeDependencies } from "./graph.js";
+import { topologicalSortNodes, getNodeDependencies, deleteGraphNode, deleteGraphNodeSafe, loadGraph, createGraphNode } from "./graph.js";
 import { topologicalSort, getTaskDependencies } from "./tasks.js";
 import type { GraphNode, Task } from "./types.js";
 
@@ -279,5 +280,121 @@ describe("tasks.ts getTaskDependencies missing dependency warnings", () => {
 		expect(result).toHaveLength(1);
 		expect(result[0].id).toBe("T1");
 		expect(warnSpy).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ============================================
+// graph.ts — deleteGraphNode dangling dependency cleanup
+// ============================================
+
+describe("deleteGraphNode dangling dependency cleanup", () => {
+	const testDir = join(process.cwd(), ".test-graph-delete-deps");
+	const stateDir = join(testDir, ".milhouse", "state");
+	const graphFile = join(stateDir, "graph.json");
+
+	beforeEach(() => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true, force: true });
+		}
+		mkdirSync(stateDir, { recursive: true });
+		writeFileSync(graphFile, "[]");
+	});
+
+	afterEach(() => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true, force: true });
+		}
+	});
+
+	test("removes deleted node ID from one other node's depends_on", () => {
+		const graph: GraphNode[] = [
+			{ id: "A", depends_on: [], parallel_group: 0 },
+			{ id: "B", depends_on: ["A"], parallel_group: 1 },
+		];
+		writeFileSync(graphFile, JSON.stringify(graph));
+
+		const result = deleteGraphNode("A", testDir);
+
+		expect(result).toBe(true);
+		const remaining = loadGraph(testDir);
+		expect(remaining).toHaveLength(1);
+		expect(remaining[0].id).toBe("B");
+		expect(remaining[0].depends_on).toEqual([]);
+	});
+
+	test("removes deleted node ID from multiple other nodes' depends_on", () => {
+		const graph: GraphNode[] = [
+			{ id: "A", depends_on: [], parallel_group: 0 },
+			{ id: "B", depends_on: ["A"], parallel_group: 1 },
+			{ id: "C", depends_on: ["A"], parallel_group: 1 },
+			{ id: "D", depends_on: ["A"], parallel_group: 1 },
+		];
+		writeFileSync(graphFile, JSON.stringify(graph));
+
+		const result = deleteGraphNode("A", testDir);
+
+		expect(result).toBe(true);
+		const remaining = loadGraph(testDir);
+		expect(remaining).toHaveLength(3);
+		for (const node of remaining) {
+			expect(node.depends_on).not.toContain("A");
+		}
+	});
+
+	test("graph is unchanged (except for removed node) when deleted node is not referenced", () => {
+		const graph: GraphNode[] = [
+			{ id: "A", depends_on: [], parallel_group: 0 },
+			{ id: "B", depends_on: [], parallel_group: 0 },
+			{ id: "C", depends_on: ["B"], parallel_group: 1 },
+		];
+		writeFileSync(graphFile, JSON.stringify(graph));
+
+		const result = deleteGraphNode("A", testDir);
+
+		expect(result).toBe(true);
+		const remaining = loadGraph(testDir);
+		expect(remaining).toHaveLength(2);
+		expect(remaining[0]).toEqual({ id: "B", depends_on: [], parallel_group: 0 });
+		expect(remaining[1]).toEqual({ id: "C", depends_on: ["B"], parallel_group: 1 });
+	});
+
+	test("removes only the deleted ID from depends_on, keeping other valid deps", () => {
+		const graph: GraphNode[] = [
+			{ id: "A", depends_on: [], parallel_group: 0 },
+			{ id: "B", depends_on: [], parallel_group: 0 },
+			{ id: "C", depends_on: ["A", "B"], parallel_group: 1 },
+		];
+		writeFileSync(graphFile, JSON.stringify(graph));
+
+		const result = deleteGraphNode("A", testDir);
+
+		expect(result).toBe(true);
+		const remaining = loadGraph(testDir);
+		expect(remaining).toHaveLength(2);
+		const nodeC = remaining.find((n) => n.id === "C");
+		expect(nodeC).toBeDefined();
+		expect(nodeC!.depends_on).toEqual(["B"]);
+	});
+
+	test("deleteGraphNodeSafe also cleans up dangling dependencies", async () => {
+		const graph: GraphNode[] = [
+			{ id: "A", depends_on: [], parallel_group: 0 },
+			{ id: "B", depends_on: ["A"], parallel_group: 1 },
+		];
+		writeFileSync(graphFile, JSON.stringify(graph));
+
+		const lockSpy = spyOn(lockfile, "lock");
+		const releaseFn = mock(() => Promise.resolve());
+		lockSpy.mockResolvedValueOnce(releaseFn);
+
+		const result = await deleteGraphNodeSafe("A", testDir);
+
+		expect(result).toBe(true);
+		const remaining = loadGraph(testDir);
+		expect(remaining).toHaveLength(1);
+		expect(remaining[0].id).toBe("B");
+		expect(remaining[0].depends_on).toEqual([]);
+
+		lockSpy.mockRestore();
 	});
 });
