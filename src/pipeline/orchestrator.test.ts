@@ -178,6 +178,100 @@ describe("orchestrator nextPhase early-exit", () => {
 	});
 });
 
+describe("resolvePhases startPhase/endPhase validation", () => {
+	beforeEach(() => {
+		runPhaseCalls.length = 0;
+		runPhaseResults = new Map();
+		runPhaseMock.mockClear();
+	});
+
+	test("invalid startPhase rejects with descriptive error", async () => {
+		await expect(
+			runPipeline({
+				workDir: "/tmp/test",
+				config: makeConfig(),
+				runId: "test-run-001",
+				pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+				startPhase: "nonexistent",
+			}),
+		).rejects.toThrow(/Invalid startPhase "nonexistent"/);
+
+		await expect(
+			runPipeline({
+				workDir: "/tmp/test",
+				config: makeConfig(),
+				runId: "test-run-001",
+				pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+				startPhase: "nonexistent",
+			}),
+		).rejects.toThrow(/Available phases:/);
+	});
+
+	test("invalid endPhase rejects with descriptive error", async () => {
+		await expect(
+			runPipeline({
+				workDir: "/tmp/test",
+				config: makeConfig(),
+				runId: "test-run-001",
+				pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+				endPhase: "nonexistent",
+			}),
+		).rejects.toThrow(/Invalid endPhase "nonexistent"/);
+
+		await expect(
+			runPipeline({
+				workDir: "/tmp/test",
+				config: makeConfig(),
+				runId: "test-run-001",
+				pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+				endPhase: "nonexistent",
+			}),
+		).rejects.toThrow(/Available phases:/);
+	});
+
+	test("valid startPhase slices phases from the given phase onward", async () => {
+		const result = await runPipeline({
+			workDir: "/tmp/test",
+			config: makeConfig(),
+			runId: "test-run-001",
+			pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+			startPhase: "plan",
+		});
+
+		expect(runPhaseCalls).toEqual(["plan", "consolidate", "exec", "verify"]);
+		expect(runPhaseCalls).not.toContain("scan");
+		expect(runPhaseCalls).not.toContain("validate");
+	});
+
+	test("valid endPhase slices phases up to and including the given phase", async () => {
+		const result = await runPipeline({
+			workDir: "/tmp/test",
+			config: makeConfig(),
+			runId: "test-run-001",
+			pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+			endPhase: "plan",
+		});
+
+		expect(runPhaseCalls).toEqual(["scan", "validate", "plan"]);
+		expect(runPhaseCalls).not.toContain("consolidate");
+		expect(runPhaseCalls).not.toContain("exec");
+		expect(runPhaseCalls).not.toContain("verify");
+	});
+
+	test("valid startPhase and endPhase together slices to the correct range", async () => {
+		const result = await runPipeline({
+			workDir: "/tmp/test",
+			config: makeConfig(),
+			runId: "test-run-001",
+			pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+			startPhase: "validate",
+			endPhase: "consolidate",
+		});
+
+		expect(runPhaseCalls).toEqual(["validate", "plan", "consolidate"]);
+	});
+});
+
 describe("orchestrator phase failure (zero-items scenario)", () => {
 	beforeEach(() => {
 		runPhaseCalls.length = 0;
