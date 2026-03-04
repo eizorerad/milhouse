@@ -86,11 +86,21 @@ function resolvePhases(opts: PipelineOptions): string[] {
 	let phases = [...(opts.pipeline ?? PHASE_ORDER)];
 	if (opts.startPhase) {
 		const idx = phases.indexOf(opts.startPhase);
-		if (idx >= 0) phases = phases.slice(idx);
+		if (idx < 0) {
+			throw new Error(
+				`Invalid startPhase "${opts.startPhase}". Available phases: ${phases.join(", ")}`,
+			);
+		}
+		phases = phases.slice(idx);
 	}
 	if (opts.endPhase) {
 		const idx = phases.indexOf(opts.endPhase);
-		if (idx >= 0) phases = phases.slice(0, idx + 1);
+		if (idx < 0) {
+			throw new Error(
+				`Invalid endPhase "${opts.endPhase}". Available phases: ${phases.join(", ")}`,
+			);
+		}
+		phases = phases.slice(0, idx + 1);
 	}
 	return phases;
 }
