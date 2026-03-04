@@ -33,7 +33,7 @@ import type {
 	DaemonStartOptions,
 	RunDirective,
 } from "./types.ts";
-import { spawnWithWatchdog } from "./watchdog.ts";
+import { resolveWatchdogAction, spawnWithWatchdog } from "./watchdog.ts";
 
 /**
  * Run the main daemon loop.
@@ -255,6 +255,20 @@ export async function runDaemonLoop(
 						cost: costData?.cost,
 					});
 				}
+			}
+
+			// Handle onTimeout policy for watchdog kills
+			if (result.killedByWatchdog) {
+				const watchdogAction = resolveWatchdogAction(watchdogConfig.onTimeout);
+				if (watchdogAction === "stop") {
+					appendLog(workDir, "stop:condition", {
+						reason: `Watchdog timeout with kill-and-stop policy (${result.killReason})`,
+					});
+					logWarn("Stopping daemon: watchdog kill-and-stop policy");
+					break;
+				}
+				// 'skip' and 'continue' both proceed to next iteration;
+				// the orchestrator sees the killed run in session history
 			}
 
 			// ── Step 8: Sleep ──
