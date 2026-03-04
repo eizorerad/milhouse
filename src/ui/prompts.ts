@@ -2,9 +2,9 @@ import prompts from "prompts";
 import { theme } from "./theme";
 
 // Configure prompts styling
-const onCancel = () => {
+export const onCancel = () => {
 	console.log(theme.warning("\nOperation cancelled"));
-	process.exit(0);
+	process.exit(130);
 };
 
 export const prompt = {
