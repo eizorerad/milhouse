@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 import { z } from "zod";
 import { bus } from "../../events";
@@ -288,8 +289,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 			return this.applyLoadOptions(this.cachedCollection, options);
 		}
 
-		const file = Bun.file(this.filePath);
-		const content = await file.text();
+		const content = readFileSync(this.filePath, "utf-8");
 		const parsed = YAML.parse(content);
 
 		// Validate with Zod
@@ -539,8 +539,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 	 * @param status - New status
 	 */
 	async updateStatus(taskId: string, status: TaskStatus): Promise<void> {
-		const file = Bun.file(this.filePath);
-		const content = await file.text();
+		const content = readFileSync(this.filePath, "utf-8");
 		const parsed = YAML.parse(content) as YamlTaskFile;
 
 		// Find task by matching the ID pattern
@@ -560,7 +559,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 			yamlTask.completed = status === "completed";
 
 			// Write back to file with preserved formatting
-			await Bun.write(this.filePath, YAML.stringify(parsed));
+			writeFileSync(this.filePath, YAML.stringify(parsed));
 
 			// Emit event
 			bus.emit("task:complete", {
@@ -579,8 +578,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 	 */
 	async isAvailable(): Promise<boolean> {
 		try {
-			const file = Bun.file(this.filePath);
-			return await file.exists();
+			return existsSync(this.filePath);
 		} catch {
 			return false;
 		}
@@ -762,8 +760,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 	 * Persist task metadata back to YAML file
 	 */
 	private async persistMetadataToFile(task: MilhouseTask): Promise<void> {
-		const file = Bun.file(this.filePath);
-		const content = await file.text();
+		const content = readFileSync(this.filePath, "utf-8");
 		const parsed = YAML.parse(content) as YamlTaskFile;
 
 		const yamlTask = parsed.tasks.find((t) => t.title === task.title);
@@ -795,7 +792,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 				}));
 			}
 
-			await Bun.write(this.filePath, YAML.stringify(parsed));
+			writeFileSync(this.filePath, YAML.stringify(parsed));
 			this.cachedCollection = null;
 		}
 	}
@@ -832,8 +829,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 	 * @param task - Task data to add
 	 */
 	async addTask(task: Omit<YamlTask, "completed">): Promise<string> {
-		const file = Bun.file(this.filePath);
-		const content = await file.text();
+		const content = readFileSync(this.filePath, "utf-8");
 		const parsed = YAML.parse(content) as YamlTaskFile;
 
 		parsed.tasks.push({
@@ -841,7 +837,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 			completed: false,
 		});
 
-		await Bun.write(this.filePath, YAML.stringify(parsed));
+		writeFileSync(this.filePath, YAML.stringify(parsed));
 		this.cachedCollection = null;
 
 		// Return the new task ID
@@ -854,8 +850,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 	 * @param taskId - Task identifier
 	 */
 	async removeTask(taskId: string): Promise<void> {
-		const file = Bun.file(this.filePath);
-		const content = await file.text();
+		const content = readFileSync(this.filePath, "utf-8");
 		const parsed = YAML.parse(content) as YamlTaskFile;
 
 		const collection = await this.load({ includeCompleted: true });
@@ -863,7 +858,7 @@ export class YamlTaskSource implements IMilhouseTaskSource, ITaskSource {
 
 		if (task) {
 			parsed.tasks = parsed.tasks.filter((t) => t.title !== task.title);
-			await Bun.write(this.filePath, YAML.stringify(parsed));
+			writeFileSync(this.filePath, YAML.stringify(parsed));
 			this.cachedCollection = null;
 		}
 	}
