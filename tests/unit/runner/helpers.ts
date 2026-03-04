@@ -130,6 +130,7 @@ const DEFAULT_USER_CONFIG: ResolvedFullConfig = {
 	rules: [],
 	boundaries: { neverTouch: [] },
 	execution: { mode: "branch", autoCommit: true, createPr: false, draftPr: true, skipMerge: false },
+	gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
 	report: { enabled: false, format: "json", autoGenerate: false },
 	skipTests: false,
 	skipLint: false,

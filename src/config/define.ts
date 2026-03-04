@@ -73,6 +73,13 @@ export interface Config {
 		skipMerge?: boolean;
 	};
 
+	gates?: {
+		evidence?: boolean;
+		diffHygiene?: boolean;
+		placeholder?: boolean;
+		dod?: boolean;
+	};
+
 	/** Extra instructions appended to agent prompts per phase */
 	prompts?: Partial<
 		Record<
@@ -167,6 +174,8 @@ export const DEFAULTS = {
 		skipMerge: false,
 	},
 
+	gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
+
 	report: { enabled: true, format: "json", autoGenerate: true },
 
 	skipTests: false,
@@ -196,6 +205,7 @@ export interface ResolvedFullConfig {
 		draftPr: boolean;
 		skipMerge: boolean;
 	};
+	gates: { evidence: boolean; diffHygiene: boolean; placeholder: boolean; dod: boolean };
 	report: { enabled: boolean; format: string; autoGenerate: boolean };
 	skipTests: boolean;
 	skipLint: boolean;
@@ -234,6 +244,7 @@ export function resolveConfig(user: Config): ResolvedFullConfig {
 		rules: user.rules ?? DEFAULTS.rules,
 		boundaries: { ...DEFAULTS.boundaries, ...strip(user.boundaries) },
 		execution: { ...DEFAULTS.execution, ...strip(user.execution) },
+		gates: { ...DEFAULTS.gates, ...strip(user.gates) },
 		report: { ...DEFAULTS.report, ...strip(user.report) },
 
 		skipTests: user.skipTests ?? DEFAULTS.skipTests,
