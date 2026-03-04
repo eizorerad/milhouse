@@ -98,119 +98,176 @@ export const spinners = {
 	count: (): number => activeSpinners.size,
 };
 
+// Stored unsubscribe functions for event handler cleanup
+let unsubscribers: (() => void)[] = [];
+
 // Wire spinners to event bus for automatic lifecycle management
 export function initSpinnerEventHandlers(): void {
+	// Clean up any previously registered handlers to prevent accumulation
+	for (const unsub of unsubscribers) {
+		unsub();
+	}
+	unsubscribers = [];
+
 	// Pipeline phase events
-	bus.on("pipeline:phase:start", ({ phase }) => {
-		const phaseKey = phase as keyof typeof theme.phase;
-		const text = theme.phase[phaseKey]
-			? `Running ${formatPhase(phaseKey)} phase...`
-			: `Running ${phase} phase...`;
-		spinners.start(`phase-${phase}`, text, "phase");
-	});
+	unsubscribers.push(
+		bus.on("pipeline:phase:start", ({ phase }) => {
+			const phaseKey = phase as keyof typeof theme.phase;
+			const text = theme.phase[phaseKey]
+				? `Running ${formatPhase(phaseKey)} phase...`
+				: `Running ${phase} phase...`;
+			spinners.start(`phase-${phase}`, text, "phase");
+		}),
+	);
 
-	bus.on("pipeline:phase:complete", ({ phase, duration }) => {
-		const phaseKey = phase as keyof typeof theme.phase;
-		const durationStr = theme.muted(`(${(duration / 1000).toFixed(1)}s)`);
-		const text = theme.phase[phaseKey]
-			? `${formatPhase(phaseKey)} phase complete ${durationStr}`
-			: `${phase} phase complete ${durationStr}`;
-		spinners.succeed(`phase-${phase}`, text);
-	});
+	unsubscribers.push(
+		bus.on("pipeline:phase:complete", ({ phase, duration }) => {
+			const phaseKey = phase as keyof typeof theme.phase;
+			const durationStr = theme.muted(`(${(duration / 1000).toFixed(1)}s)`);
+			const text = theme.phase[phaseKey]
+				? `${formatPhase(phaseKey)} phase complete ${durationStr}`
+				: `${phase} phase complete ${durationStr}`;
+			spinners.succeed(`phase-${phase}`, text);
+		}),
+	);
 
-	bus.on("pipeline:phase:error", ({ phase, error }) => {
-		const phaseKey = phase as keyof typeof theme.phase;
-		const text = theme.phase[phaseKey]
-			? `${formatPhase(phaseKey)} phase failed: ${theme.error(error.message)}`
-			: `${phase} phase failed: ${theme.error(error.message)}`;
-		spinners.fail(`phase-${phase}`, text);
-	});
+	unsubscribers.push(
+		bus.on("pipeline:phase:error", ({ phase, error }) => {
+			const phaseKey = phase as keyof typeof theme.phase;
+			const text = theme.phase[phaseKey]
+				? `${formatPhase(phaseKey)} phase failed: ${theme.error(error.message)}`
+				: `${phase} phase failed: ${theme.error(error.message)}`;
+			spinners.fail(`phase-${phase}`, text);
+		}),
+	);
 
 	// Task events
-	bus.on("task:start", ({ taskId, title }) => {
-		spinners.start(`task-${taskId}`, title, "task");
-	});
+	unsubscribers.push(
+		bus.on("task:start", ({ taskId, title }) => {
+			spinners.start(`task-${taskId}`, title, "task");
+		}),
+	);
 
-	bus.on("task:progress", ({ taskId, step, detail }) => {
-		const text = detail ? `${step} ${theme.dim(detail)}` : step;
-		spinners.update(`task-${taskId}`, text);
-	});
+	unsubscribers.push(
+		bus.on("task:progress", ({ taskId, step, detail }) => {
+			const text = detail ? `${step} ${theme.dim(detail)}` : step;
+			spinners.update(`task-${taskId}`, text);
+		}),
+	);
 
-	bus.on("task:complete", ({ taskId, success, duration }) => {
-		const durationStr = theme.muted(`(${(duration / 1000).toFixed(1)}s)`);
-		if (success) {
-			spinners.succeed(`task-${taskId}`, `Task complete ${durationStr}`);
-		} else {
-			spinners.fail(`task-${taskId}`, `Task failed ${durationStr}`);
-		}
-	});
+	unsubscribers.push(
+		bus.on("task:complete", ({ taskId, success, duration }) => {
+			const durationStr = theme.muted(`(${(duration / 1000).toFixed(1)}s)`);
+			if (success) {
+				spinners.succeed(`task-${taskId}`, `Task complete ${durationStr}`);
+			} else {
+				spinners.fail(`task-${taskId}`, `Task failed ${durationStr}`);
+			}
+		}),
+	);
 
-	bus.on("task:error", ({ taskId, error }) => {
-		spinners.fail(`task-${taskId}`, `Task error: ${theme.error(error.message)}`);
-	});
+	unsubscribers.push(
+		bus.on("task:error", ({ taskId, error }) => {
+			spinners.fail(`task-${taskId}`, `Task error: ${theme.error(error.message)}`);
+		}),
+	);
 
 	// Engine events
-	bus.on("engine:start", ({ engine, taskId }) => {
-		const engineKey = engine as keyof typeof theme.engine;
-		const engineName = theme.engine[engineKey] ? theme.engine[engineKey](engine) : engine;
-		spinners.start(`engine-${taskId}`, `${engineName} processing...`, "engine");
-	});
+	unsubscribers.push(
+		bus.on("engine:start", ({ engine, taskId }) => {
+			const engineKey = engine as keyof typeof theme.engine;
+			const engineName = theme.engine[engineKey] ? theme.engine[engineKey](engine) : engine;
+			spinners.start(`engine-${taskId}`, `${engineName} processing...`, "engine");
+		}),
+	);
 
-	bus.on("engine:complete", ({ taskId }) => {
-		spinners.succeed(`engine-${taskId}`);
-	});
+	unsubscribers.push(
+		bus.on("engine:complete", ({ taskId }) => {
+			spinners.succeed(`engine-${taskId}`);
+		}),
+	);
 
-	bus.on("engine:error", ({ taskId, error }) => {
-		spinners.fail(`engine-${taskId}`, `Engine error: ${theme.error(error.message)}`);
-	});
+	unsubscribers.push(
+		bus.on("engine:error", ({ taskId, error }) => {
+			spinners.fail(`engine-${taskId}`, `Engine error: ${theme.error(error.message)}`);
+		}),
+	);
 
 	// Git events
-	bus.on("git:worktree:create", ({ path, branch }) => {
-		spinners.start(
-			`git-worktree-${path}`,
-			`Creating worktree ${theme.path(path)} on ${theme.code(branch)}`,
-			"git",
-		);
-	});
+	unsubscribers.push(
+		bus.on("git:worktree:create", ({ path, branch }) => {
+			spinners.start(
+				`git-worktree-${path}`,
+				`Creating worktree ${theme.path(path)} on ${theme.code(branch)}`,
+				"git",
+			);
+		}),
+	);
 
-	bus.on("git:worktree:cleanup", ({ path }) => {
-		spinners.succeed(`git-worktree-${path}`, `Cleaned up worktree ${theme.path(path)}`);
-	});
+	unsubscribers.push(
+		bus.on("git:worktree:cleanup", ({ path }) => {
+			spinners.succeed(`git-worktree-${path}`, `Cleaned up worktree ${theme.path(path)}`);
+		}),
+	);
 
-	bus.on("git:merge:start", ({ source, target }) => {
-		spinners.start(
-			`git-merge-${source}`,
-			`Merging ${theme.code(source)} → ${theme.code(target)}`,
-			"git",
-		);
-	});
+	unsubscribers.push(
+		bus.on("git:merge:start", ({ source, target }) => {
+			spinners.start(
+				`git-merge-${source}`,
+				`Merging ${theme.code(source)} → ${theme.code(target)}`,
+				"git",
+			);
+		}),
+	);
 
-	bus.on("git:merge:complete", ({ source, target }) => {
-		spinners.succeed(`git-merge-${source}`, `Merged ${theme.code(source)} → ${theme.code(target)}`);
-	});
+	unsubscribers.push(
+		bus.on("git:merge:complete", ({ source, target }) => {
+			spinners.succeed(
+				`git-merge-${source}`,
+				`Merged ${theme.code(source)} → ${theme.code(target)}`,
+			);
+		}),
+	);
 
-	bus.on("git:merge:conflict", ({ source, target, files }) => {
-		spinners.warn(
-			`git-merge-${source}`,
-			`Merge conflict ${theme.code(source)} → ${theme.code(target)}: ${files.length} files`,
-		);
-	});
+	unsubscribers.push(
+		bus.on("git:merge:conflict", ({ source, target, files }) => {
+			spinners.warn(
+				`git-merge-${source}`,
+				`Merge conflict ${theme.code(source)} → ${theme.code(target)}: ${files.length} files`,
+			);
+		}),
+	);
 
 	// Probe events
-	bus.on("probe:start", ({ name }) => {
-		spinners.start(`probe-${name}`, `Running probe: ${theme.info(name)}`, "probe");
-	});
+	unsubscribers.push(
+		bus.on("probe:start", ({ name }) => {
+			spinners.start(`probe-${name}`, `Running probe: ${theme.info(name)}`, "probe");
+		}),
+	);
 
-	bus.on("probe:complete", ({ name }) => {
-		spinners.succeed(`probe-${name}`, `Probe complete: ${theme.info(name)}`);
-	});
+	unsubscribers.push(
+		bus.on("probe:complete", ({ name }) => {
+			spinners.succeed(`probe-${name}`, `Probe complete: ${theme.info(name)}`);
+		}),
+	);
 
-	bus.on("probe:error", ({ name, error }) => {
-		spinners.fail(
-			`probe-${name}`,
-			`Probe error: ${theme.info(name)} - ${theme.error(error.message)}`,
-		);
-	});
+	unsubscribers.push(
+		bus.on("probe:error", ({ name, error }) => {
+			spinners.fail(
+				`probe-${name}`,
+				`Probe error: ${theme.info(name)} - ${theme.error(error.message)}`,
+			);
+		}),
+	);
+}
+
+// Tear down all spinner event handlers and optionally stop active spinners
+export function teardownSpinnerEventHandlers(): void {
+	for (const unsub of unsubscribers) {
+		unsub();
+	}
+	unsubscribers = [];
+	spinners.stopAll();
 }
 
 // Export Ora type for external use
