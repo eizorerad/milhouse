@@ -249,6 +249,80 @@ describe("OpencodeServerExecutor", () => {
 			});
 		});
 	});
+
+	describe("maxPortRetries config", () => {
+		it("should have maxPortRetries in default config", () => {
+			executor = new OpencodeServerExecutor();
+			// Access the private config to verify the default is set
+			const config = (executor as unknown as { config: { maxPortRetries: number } }).config;
+			expect(config.maxPortRetries).toBe(3);
+		});
+
+		it("should accept custom maxPortRetries", () => {
+			executor = new OpencodeServerExecutor({ maxPortRetries: 5 });
+			const config = (executor as unknown as { config: { maxPortRetries: number } }).config;
+			expect(config.maxPortRetries).toBe(5);
+		});
+
+		it("should accept maxPortRetries of 0", () => {
+			executor = new OpencodeServerExecutor({ maxPortRetries: 0 });
+			const config = (executor as unknown as { config: { maxPortRetries: number } }).config;
+			expect(config.maxPortRetries).toBe(0);
+		});
+	});
+
+	describe("isPortConflictError", () => {
+		// Access the private method via type cast for testing
+		function checkPortConflict(error: unknown): boolean {
+			const exec = new OpencodeServerExecutor();
+			return (exec as unknown as { isPortConflictError(error: unknown): boolean }).isPortConflictError(error);
+		}
+
+		it("should detect EADDRINUSE", () => {
+			expect(checkPortConflict(new Error("EADDRINUSE"))).toBe(true);
+		});
+
+		it("should detect 'address already in use'", () => {
+			expect(checkPortConflict(new Error("listen EADDRINUSE: address already in use 127.0.0.1:4096"))).toBe(true);
+		});
+
+		it("should detect 'port is already'", () => {
+			expect(checkPortConflict(new Error("port is already allocated"))).toBe(true);
+		});
+
+		it("should detect 'bind' errors", () => {
+			expect(checkPortConflict(new Error("failed to bind to port 4096"))).toBe(true);
+		});
+
+		it("should return false for timeout errors", () => {
+			expect(checkPortConflict(new Error("The operation timed out."))).toBe(false);
+		});
+
+		it("should return false for ECONNREFUSED", () => {
+			expect(checkPortConflict(new Error("ECONNREFUSED"))).toBe(false);
+		});
+
+		it("should return false for unrelated errors", () => {
+			expect(checkPortConflict(new Error("OpenCode is not installed"))).toBe(false);
+		});
+
+		it("should handle non-Error values", () => {
+			expect(checkPortConflict("EADDRINUSE")).toBe(true);
+			expect(checkPortConflict("some random string")).toBe(false);
+		});
+	});
+
+	describe("startServer retry behavior", () => {
+		it("should not retry on non-port-conflict errors", async () => {
+			// startServer calls ensureInstalled() first, which will throw
+			// "OpenCode is not installed" if opencode is not present.
+			// This error is NOT a port conflict, so it should be thrown immediately.
+			executor = new OpencodeServerExecutor({ autoInstall: false });
+			await expect(executor.startServer("/tmp/test")).rejects.toThrow();
+			// Verify server is not running (no retry loop hung)
+			expect(executor.isServerRunning()).toBe(false);
+		});
+	});
 });
 
 describe("createOpencodeExecutor", () => {

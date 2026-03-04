@@ -77,6 +77,14 @@ export interface OpencodeServerConfig {
 	 * @default true - Enabled by default for automated pipeline usage
 	 */
 	yolo?: boolean;
+	/**
+	 * Maximum number of port-conflict retries when starting the server.
+	 * If the acquired port is stolen by another process before OpenCode binds to it
+	 * (TOCTOU race), startServer will retry with a new port up to this many times.
+	 *
+	 * @default 3
+	 */
+	maxPortRetries?: number;
 }
 
 /**
@@ -92,6 +100,7 @@ const DEFAULT_CONFIG: Required<Omit<OpencodeServerConfig, "port" | "password" | 
 	verbose: false,
 	requestTimeout: 900000, // 15 minutes - long timeout for AI operations
 	yolo: true, // Auto-approve all permission prompts for automated pipelines
+	maxPortRetries: 3, // Retry up to 3 times on port-conflict (TOCTOU mitigation)
 };
 
 // ============================================================================
@@ -191,6 +200,10 @@ export class OpencodeServerExecutor {
 	 * 3. Spawns the `opencode serve` process
 	 * 4. Waits for the server to become healthy
 	 *
+	 * If the server fails to start due to a port conflict (EADDRINUSE), the method
+	 * retries with a new port up to `maxPortRetries` times to mitigate the inherent
+	 * TOCTOU race condition in port availability checking.
+	 *
 	 * @param workDir - Working directory for the server (project root)
 	 * @returns The port the server is running on
 	 * @throws Error if the server fails to start
@@ -211,15 +224,6 @@ export class OpencodeServerExecutor {
 		// Ensure OpenCode is installed
 		await this.ensureInstalled();
 
-		// Acquire a port
-		this.port = await PortManager.acquirePort(this.config.port);
-		this.baseUrl = `http://${this.config.hostname}:${this.port}`;
-
-		this.log(`Starting OpenCode server on ${this.baseUrl}...`);
-
-		// Build the command arguments
-		const args = ["serve", "--port", String(this.port), "--hostname", this.config.hostname];
-
 		// Build environment variables - filter out undefined values
 		const env: Record<string, string> = {};
 		for (const [key, value] of Object.entries(process.env)) {
@@ -239,25 +243,74 @@ export class OpencodeServerExecutor {
 			this.log("YOLO mode enabled - all permission prompts will be auto-approved");
 		}
 
-		// Spawn the server process
-		this.serverProcess = Bun.spawn(["opencode", ...args], {
-			cwd: workDir,
-			env,
-			stdout: this.config.verbose ? "inherit" : "pipe",
-			stderr: this.config.verbose ? "inherit" : "pipe",
-		});
+		const maxRetries = this.config.maxPortRetries;
+		let lastError: Error | undefined;
 
-		// Wait for the server to become healthy
-		try {
-			await this.waitForHealthy();
-			this.isRunning = true;
-			this.log(`OpenCode server started successfully on port ${this.port}`);
-			return this.port;
-		} catch (error) {
-			// Clean up on failure
-			await this.cleanup();
-			throw error;
+		// Use the preferred port only on the first attempt
+		let preferredPort: number | undefined = this.config.port;
+
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			// Acquire a port (skip preferred port on retries since it already failed)
+			this.port = await PortManager.acquirePort(preferredPort);
+			this.baseUrl = `http://${this.config.hostname}:${this.port}`;
+
+			this.log(`Starting OpenCode server on ${this.baseUrl}...`);
+
+			// Build the command arguments
+			const args = ["serve", "--port", String(this.port), "--hostname", this.config.hostname];
+
+			// Spawn the server process
+			this.serverProcess = Bun.spawn(["opencode", ...args], {
+				cwd: workDir,
+				env,
+				stdout: this.config.verbose ? "inherit" : "pipe",
+				stderr: this.config.verbose ? "inherit" : "pipe",
+			});
+
+			// Wait for the server to become healthy
+			try {
+				await this.waitForHealthy();
+				this.isRunning = true;
+				this.log(`OpenCode server started successfully on port ${this.port}`);
+				return this.port;
+			} catch (error) {
+				lastError = error instanceof Error ? error : new Error(String(error));
+
+				if (this.isPortConflictError(error) && attempt < maxRetries) {
+					this.log(
+						`Port ${this.port} conflict detected (attempt ${attempt + 1}/${maxRetries + 1}), retrying with a new port...`,
+					);
+					await this.cleanup();
+					// Don't pass preferred port on subsequent attempts
+					preferredPort = undefined;
+					continue;
+				}
+
+				// Non-port-conflict error or retries exhausted
+				await this.cleanup();
+				throw lastError;
+			}
 		}
+
+		// Should not be reached, but satisfy the type checker
+		throw lastError ?? new Error("Failed to start server after retries");
+	}
+
+	/**
+	 * Check if an error indicates a port conflict (EADDRINUSE or similar).
+	 *
+	 * @param error - The error to check
+	 * @returns true if the error is a port-conflict error
+	 */
+	private isPortConflictError(error: unknown): boolean {
+		const message = error instanceof Error ? error.message : String(error);
+		const lower = message.toLowerCase();
+		return (
+			lower.includes("eaddrinuse") ||
+			lower.includes("address already in use") ||
+			lower.includes("port is already") ||
+			lower.includes("bind")
+		);
 	}
 
 	/**
