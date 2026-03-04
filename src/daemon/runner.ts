@@ -22,6 +22,7 @@ import {
 	endSession,
 	markSessionCrashed,
 	recordOrchestratorDecision,
+	recordRunComplete,
 	recordRunStart,
 	saveState,
 } from "./session-state.ts";
@@ -198,40 +199,62 @@ export async function runDaemonLoop(
 
 			// ── Step 7: Record result with cost extraction ──
 
-			const costData = extractRunCostData(result, workDir);
-			if (costData.extractionFailed) sessionState.costExtractionFailures++;
-			if (typeof costData.cost === "number") sessionState.totalCost += costData.cost;
-
-			// Track consecutive failures
-			if (result.exitCode === 0) {
-				sessionState.consecutiveFailures = 0;
-			} else {
-				sessionState.consecutiveFailures++;
-			}
-
-			const durationMin = Math.round(result.duration / 60_000);
-			if (result.killedByWatchdog) {
-				appendLog(workDir, "watchdog:kill", { reason: result.killReason, duration: result.duration }, costData.runId, runEntry.number);
-				logWarn(`Run #${runEntry.number} killed by watchdog after ${durationMin}min`);
-			} else if (result.exitCode === 0) {
-				appendLog(workDir, "run:complete", { duration: result.duration, cost: costData.cost }, costData.runId, runEntry.number);
-				const costStr = typeof costData.cost === "number" ? `$${costData.cost.toFixed(2)}` : "unknown";
-				logSuccess(`Run #${runEntry.number} completed in ${durationMin}min (cost: ${costStr})`);
-			} else {
-				appendLog(workDir, "run:failed", { exitCode: result.exitCode, duration: result.duration }, costData.runId, runEntry.number);
-				logError(`Run #${runEntry.number} failed (exit ${result.exitCode}) after ${durationMin}min`);
-			}
-
-			if (sessionState.costExtractionFailures > 0) {
-				logWarn(`Cost data unreliable: ${sessionState.costExtractionFailures} of ${sessionState.runs.length} runs have missing cost data`);
-			}
-
+			let costData: ReturnType<typeof extractRunCostData> | undefined;
 			try {
-				saveState(sessionState, workDir);
-			} catch (saveError) {
-				logError(`Failed to persist session state: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
-				appendLog(workDir, "daemon:crash", { error: "saveState failed", details: saveError instanceof Error ? saveError.message : String(saveError) });
-				// Continue — in-memory sessionState still has correct cost data for budget enforcement
+				costData = extractRunCostData(result, workDir);
+				if (costData.extractionFailed) sessionState.costExtractionFailures++;
+				if (typeof costData.cost === "number") sessionState.totalCost += costData.cost;
+
+				recordRunComplete(runEntry, {
+					exitCode: result.exitCode,
+					killedByWatchdog: result.killedByWatchdog,
+					duration: result.duration,
+					runId: costData.runId,
+					cost: costData.cost,
+				});
+
+				// Track consecutive failures
+				if (result.exitCode === 0) {
+					sessionState.consecutiveFailures = 0;
+				} else {
+					sessionState.consecutiveFailures++;
+				}
+
+				const durationMin = Math.round(result.duration / 60_000);
+				if (result.killedByWatchdog) {
+					appendLog(workDir, "watchdog:kill", { reason: result.killReason, duration: result.duration }, costData.runId, runEntry.number);
+					logWarn(`Run #${runEntry.number} killed by watchdog after ${durationMin}min`);
+				} else if (result.exitCode === 0) {
+					appendLog(workDir, "run:complete", { duration: result.duration, cost: costData.cost }, costData.runId, runEntry.number);
+					const costStr = typeof costData.cost === "number" ? `$${costData.cost.toFixed(2)}` : "unknown";
+					logSuccess(`Run #${runEntry.number} completed in ${durationMin}min (cost: ${costStr})`);
+				} else {
+					appendLog(workDir, "run:failed", { exitCode: result.exitCode, duration: result.duration }, costData.runId, runEntry.number);
+					logError(`Run #${runEntry.number} failed (exit ${result.exitCode}) after ${durationMin}min`);
+				}
+
+				if (sessionState.costExtractionFailures > 0) {
+					logWarn(`Cost data unreliable: ${sessionState.costExtractionFailures} of ${sessionState.runs.length} runs have missing cost data`);
+				}
+
+				try {
+					saveState(sessionState, workDir);
+				} catch (saveError) {
+					logError(`Failed to persist session state: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+					appendLog(workDir, "daemon:crash", { error: "saveState failed", details: saveError instanceof Error ? saveError.message : String(saveError) });
+					// Continue — in-memory sessionState still has correct cost data for budget enforcement
+				}
+			} finally {
+				// Ensure entry is finalized even if cost extraction or state-saving throws
+				if (runEntry.result === "pending") {
+					recordRunComplete(runEntry, {
+						exitCode: result.exitCode,
+						killedByWatchdog: result.killedByWatchdog,
+						duration: result.duration,
+						runId: costData?.runId,
+						cost: costData?.cost,
+					});
+				}
 			}
 
 			// ── Step 8: Sleep ──
