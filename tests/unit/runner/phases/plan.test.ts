@@ -6,9 +6,14 @@
  * @module tests/unit/runner/phases/plan.test.ts
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { planPhaseConfig } from "../../../../src/runner/phases/plan.ts";
-import { createMockIssue, createMockPhaseContext } from "../helpers.ts";
+import * as issuesModule from "../../../../src/state/issues.ts";
+import * as planStoreModule from "../../../../src/state/plan-store.ts";
+import * as runsModule from "../../../../src/state/runs.ts";
+import * as tasksModule from "../../../../src/state/tasks.ts";
+import * as logger from "../../../../src/ui/logger.ts";
+import { createMockIssue, createMockPhaseContext, createMockTask } from "../helpers.ts";
 
 // ============================================================================
 // parseResponse
@@ -287,6 +292,135 @@ describe("planPhaseConfig", () => {
 				},
 			];
 			expect(planPhaseConfig.nextPhase!(results, ctx)).toBe("completed");
+		});
+	});
+
+	// ============================================================================
+	// saveResults — updateIssueForRun null guard
+	// ============================================================================
+
+	describe("saveResults", () => {
+		let logWarnSpy: ReturnType<typeof spyOn>;
+		let updateIssueSpy: ReturnType<typeof spyOn>;
+		let createTaskSpy: ReturnType<typeof spyOn>;
+		let loadTasksSpy: ReturnType<typeof spyOn>;
+		let updateRunStatsSpy: ReturnType<typeof spyOn>;
+		let writeWbsPlanSpy: ReturnType<typeof spyOn>;
+		let writeWbsJsonSpy: ReturnType<typeof spyOn>;
+
+		beforeEach(() => {
+			logWarnSpy = spyOn(logger, "logWarn").mockImplementation(() => {});
+			writeWbsPlanSpy = spyOn(planStoreModule, "writeIssueWbsPlanForRun").mockImplementation(() => {});
+			writeWbsJsonSpy = spyOn(planStoreModule, "writeIssueWbsJsonForRun").mockImplementation(() => {});
+			loadTasksSpy = spyOn(tasksModule, "loadTasksForRun").mockReturnValue([]);
+			updateRunStatsSpy = spyOn(runsModule, "updateRunStatsWithLock").mockResolvedValue(undefined as never);
+		});
+
+		afterEach(() => {
+			logWarnSpy?.mockRestore();
+			updateIssueSpy?.mockRestore();
+			createTaskSpy?.mockRestore();
+			loadTasksSpy?.mockRestore();
+			updateRunStatsSpy?.mockRestore();
+			writeWbsPlanSpy?.mockRestore();
+			writeWbsJsonSpy?.mockRestore();
+		});
+
+		it("logs warning when updateIssueForRun returns null but tasks are still created", async () => {
+			const task = createMockTask({ id: "T-1", issue_id: "ISS-PLAN-NULL" });
+			createTaskSpy = spyOn(tasksModule, "createTaskForRunSafe").mockResolvedValue(task);
+			updateIssueSpy = spyOn(issuesModule, "updateIssueForRun").mockReturnValue(null);
+			loadTasksSpy.mockRestore();
+			loadTasksSpy = spyOn(tasksModule, "loadTasksForRun").mockReturnValue([task]);
+
+			const issue = createMockIssue({ id: "ISS-PLAN-NULL", status: "CONFIRMED" });
+			const ctx = createMockPhaseContext({ runId: "run-plan-null" });
+
+			const results = [
+				{
+					item: issue,
+					result: {
+						issue_id: "ISS-PLAN-NULL",
+						summary: "Fix the bug",
+						tasks: [
+							{
+								title: "Task 1",
+								description: "Do something",
+								files: ["src/a.ts"],
+								depends_on: [] as string[],
+								checks: ["bun test"],
+								acceptance: [{ description: "It works", check_command: "bun test", verified: false }],
+								risk: "Low",
+								rollback: "Revert",
+								parallel_group: 0,
+							},
+						],
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			await planPhaseConfig.saveResults(results, ctx);
+
+			// Task was still created
+			expect(createTaskSpy).toHaveBeenCalledTimes(1);
+
+			// updateIssueForRun was called
+			expect(updateIssueSpy).toHaveBeenCalledTimes(1);
+
+			// logWarn was called with the issue ID
+			const warnCalls = logWarnSpy.mock.calls.map((c: unknown[]) => c[0] as string);
+			const nullWarning = warnCalls.find((m: string) => m.includes("ISS-PLAN-NULL") && m.includes("null"));
+			expect(nullWarning).toBeDefined();
+
+			// totalTasks counting still works — updateRunStatsWithLock should have been called
+			expect(updateRunStatsSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not log warning when updateIssueForRun returns an issue", async () => {
+			const issue = createMockIssue({ id: "ISS-PLAN-OK", status: "CONFIRMED" });
+			const task = createMockTask({ id: "T-2", issue_id: "ISS-PLAN-OK" });
+			createTaskSpy = spyOn(tasksModule, "createTaskForRunSafe").mockResolvedValue(task);
+			updateIssueSpy = spyOn(issuesModule, "updateIssueForRun").mockReturnValue(issue);
+			loadTasksSpy.mockRestore();
+			loadTasksSpy = spyOn(tasksModule, "loadTasksForRun").mockReturnValue([task]);
+
+			const ctx = createMockPhaseContext({ runId: "run-plan-ok" });
+
+			const results = [
+				{
+					item: issue,
+					result: {
+						issue_id: "ISS-PLAN-OK",
+						summary: "Fix the bug",
+						tasks: [
+							{
+								title: "Task 1",
+								description: "Do something",
+								files: ["src/a.ts"],
+								depends_on: [] as string[],
+								checks: ["bun test"],
+								acceptance: [{ description: "It works", check_command: "bun test", verified: false }],
+								risk: "Low",
+								rollback: "Revert",
+								parallel_group: 0,
+							},
+						],
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			await planPhaseConfig.saveResults(results, ctx);
+
+			// No null-related warnings
+			const warnCalls = logWarnSpy.mock.calls.map((c: unknown[]) => c[0] as string);
+			const nullWarning = warnCalls.find((m: string) => m.includes("null"));
+			expect(nullWarning).toBeUndefined();
 		});
 	});
 

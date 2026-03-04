@@ -201,12 +201,15 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 			}
 
 			// Update issue with related task IDs
-			updateIssueForRun(
+			const updated = updateIssueForRun(
 				ctx.runId,
 				issue.id,
 				{ related_task_ids: [...issue.related_task_ids, ...createdTaskIds] },
 				ctx.workDir,
 			);
+			if (updated === null) {
+				logWarn(`[plan] updateIssueForRun returned null for issue ${issue.id} in run ${ctx.runId} — related_task_ids link was not persisted`);
+			}
 
 			totalTasks += createdTaskIds.length;
 		}
