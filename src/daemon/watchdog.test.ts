@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { spawnWithWatchdog } from "./watchdog.ts";
+import { resolveWatchdogAction, spawnWithWatchdog } from "./watchdog.ts";
 
 // ─── Test helpers ──────────────────────────────────────────────────────
 
@@ -246,6 +246,20 @@ describe("killProcess SIGKILL timer", () => {
 		// After fix: clearTimeout should have been called with the SIGKILL timer handle
 		// Before fix: clearTimeout is never called → the timer leaks
 		expect(clearedTimeouts.has(sigkillHandle)).toBe(true);
+	});
+});
+
+describe("resolveWatchdogAction", () => {
+	test("returns 'stop' for 'kill-and-stop'", () => {
+		expect(resolveWatchdogAction("kill-and-stop")).toBe("stop");
+	});
+
+	test("returns 'skip' for 'kill-and-skip'", () => {
+		expect(resolveWatchdogAction("kill-and-skip")).toBe("skip");
+	});
+
+	test("returns 'continue' for 'kill-and-retry'", () => {
+		expect(resolveWatchdogAction("kill-and-retry")).toBe("continue");
 	});
 });
 

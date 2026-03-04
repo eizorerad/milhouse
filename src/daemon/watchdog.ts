@@ -163,6 +163,22 @@ export async function spawnWithWatchdog(
 	};
 }
 
+/**
+ * Map an onTimeout policy to a post-kill action for the daemon loop.
+ */
+export function resolveWatchdogAction(
+	onTimeout: DaemonWatchdogConfig["onTimeout"],
+): "stop" | "skip" | "continue" {
+	switch (onTimeout) {
+		case "kill-and-stop":
+			return "stop";
+		case "kill-and-skip":
+			return "skip";
+		case "kill-and-retry":
+			return "continue";
+	}
+}
+
 function killProcess(proc: Subprocess, reason: string): ReturnType<typeof setTimeout> | undefined {
 	try {
 		proc.kill("SIGTERM");
