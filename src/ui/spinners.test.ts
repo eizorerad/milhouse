@@ -12,12 +12,13 @@ describe("initSpinnerEventHandlers", () => {
 	let stopAllSpy: ReturnType<typeof spyOn>;
 
 	beforeEach(() => {
+		// biome-ignore lint/suspicious/noExplicitAny: mock return type for Ora
 		startSpy = spyOn(spinners, "start").mockImplementation((() => ({})) as any);
-		succeedSpy = spyOn(spinners, "succeed").mockImplementation((() => {}) as any);
-		failSpy = spyOn(spinners, "fail").mockImplementation((() => {}) as any);
-		warnSpy = spyOn(spinners, "warn").mockImplementation((() => {}) as any);
-		updateSpy = spyOn(spinners, "update").mockImplementation((() => {}) as any);
-		stopAllSpy = spyOn(spinners, "stopAll").mockImplementation((() => {}) as any);
+		succeedSpy = spyOn(spinners, "succeed").mockImplementation(() => {});
+		failSpy = spyOn(spinners, "fail").mockImplementation(() => {});
+		warnSpy = spyOn(spinners, "warn").mockImplementation(() => {});
+		updateSpy = spyOn(spinners, "update").mockImplementation(() => {});
+		stopAllSpy = spyOn(spinners, "stopAll").mockImplementation(() => {});
 	});
 
 	afterEach(() => {
@@ -152,34 +153,33 @@ describe("initSpinnerEventHandlers", () => {
 	});
 
 	// =========================================================================
-	// Bug: handlers accumulate on repeated init (documents the defect)
+	// Fixed: handlers no longer accumulate on repeated init
 	// =========================================================================
 
-	describe("handler accumulation bug", () => {
-		test("handlers accumulate when init called twice", () => {
+	describe("handler accumulation fix", () => {
+		test("handlers do not accumulate when init called twice", () => {
 			initSpinnerEventHandlers();
 			initSpinnerEventHandlers();
 			bus.emit("pipeline:phase:start", { runId: "r1", phase: "scan" });
-			// Bug: each init adds another handler, so event fires twice
-			expect(startSpy).toHaveBeenCalledTimes(2);
+			// Fix: re-init cleans up previous handlers, so event fires once
+			expect(startSpy).toHaveBeenCalledTimes(1);
 		});
 
-		test("handlers accumulate across all event types", () => {
+		test("handlers do not accumulate across repeated inits", () => {
 			initSpinnerEventHandlers();
 			initSpinnerEventHandlers();
 			initSpinnerEventHandlers();
 
 			bus.emit("task:start", { taskId: "t1", title: "Test" });
-			expect(startSpy).toHaveBeenCalledTimes(3);
+			expect(startSpy).toHaveBeenCalledTimes(1);
 
 			bus.emit("task:error", { taskId: "t1", error: new Error("fail") });
-			expect(failSpy).toHaveBeenCalledTimes(3);
+			expect(failSpy).toHaveBeenCalledTimes(1);
 		});
 	});
 
 	// =========================================================================
-	// Idempotency: repeated init should not duplicate handlers (after fix)
-	// These tests will pass once Task 2 applies the idempotency guard.
+	// Idempotency: repeated init should not duplicate handlers
 	// =========================================================================
 
 	describe("idempotent init", () => {
@@ -200,8 +200,7 @@ describe("initSpinnerEventHandlers", () => {
 	});
 
 	// =========================================================================
-	// Cleanup: teardown removes all handlers (after fix)
-	// These tests will pass once Task 2 exports teardownSpinnerEventHandlers.
+	// Cleanup: teardown removes all handlers
 	// =========================================================================
 
 	describe("cleanup via teardownSpinnerEventHandlers", () => {
@@ -211,7 +210,8 @@ describe("initSpinnerEventHandlers", () => {
 		});
 
 		test("cleanup: teardown removes all handlers so events no longer trigger spinners", () => {
-			const teardown = (spinnersModule as Record<string, unknown>).teardownSpinnerEventHandlers as () => void;
+			const teardown = (spinnersModule as Record<string, unknown>)
+				.teardownSpinnerEventHandlers as () => void;
 			if (typeof teardown !== "function") {
 				throw new Error("teardownSpinnerEventHandlers not yet exported");
 			}
@@ -235,7 +235,8 @@ describe("initSpinnerEventHandlers", () => {
 		});
 
 		test("cleanup: teardown then re-init works correctly", () => {
-			const teardown = (spinnersModule as Record<string, unknown>).teardownSpinnerEventHandlers as () => void;
+			const teardown = (spinnersModule as Record<string, unknown>)
+				.teardownSpinnerEventHandlers as () => void;
 			if (typeof teardown !== "function") {
 				throw new Error("teardownSpinnerEventHandlers not yet exported");
 			}
