@@ -3,6 +3,8 @@ dist/
 *.log
 .DS_Store
 docs/
+plans/
+.claude/
 
 # Milhouse — track config, ignore runtime data
 .milhouse/*
