@@ -261,5 +261,30 @@ describe("session-state", () => {
 			expect(state.runs[0].cost).toBe(0.75);
 			expect(state.runs[0]).toBe(entry); // same reference
 		});
+
+		test("persisted state contains completed run entries after saveState", () => {
+			const state = makeDaemonState();
+			const entry = recordRunStart(state);
+
+			recordRunComplete(entry, {
+				exitCode: 0,
+				killedByWatchdog: false,
+				duration: 10000,
+				runId: "run-persist-1",
+				cost: 3.50,
+			});
+
+			saveState(state, workDir);
+			const loaded = loadState(workDir);
+
+			expect(loaded).not.toBeNull();
+			expect(loaded!.runs).toHaveLength(1);
+			expect(loaded!.runs[0].result).not.toBe("pending");
+			expect(loaded!.runs[0].result).toBe("success");
+			expect(loaded!.runs[0].finishedAt).toBeDefined();
+			expect(loaded!.runs[0].exitCode).toBe(0);
+			expect(loaded!.runs[0].cost).toBe(3.50);
+			expect(loaded!.runs[0].runId).toBe("run-persist-1");
+		});
 	});
 });
