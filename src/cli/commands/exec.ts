@@ -123,11 +123,11 @@ ${task.checks.map((c) => `- \`${c}\``).join("\n")}`);
 	if (task.acceptance.length > 0) {
 		parts.push(`### Acceptance Criteria
 ${task.acceptance
-	.map(
-		(a) =>
-			`- [ ] ${a.description}${a.check_command ? ` (verify with: \`${a.check_command}\`)` : ""}`,
-	)
-	.join("\n")}`);
+				.map(
+					(a) =>
+						`- [ ] ${a.description}${a.check_command ? ` (verify with: \`${a.check_command}\`)` : ""}`,
+				)
+				.join("\n")}`);
 	}
 
 	// Risk and rollback
@@ -322,9 +322,10 @@ export function getReadyTasksForRun(runId: string, workDir: string): Task[] {
 	const readyTasks: Task[] = [];
 
 	for (const task of tasks) {
-		// Include both "pending" and "merge_error" tasks
+		// Include "pending", "failed", and "merge_error" tasks
 		// merge_error tasks need to be re-executed because their merge failed
-		if (task.status !== "pending" && task.status !== "merge_error") {
+		// failed tasks need to be re-executed on --resume
+		if (task.status !== "pending" && task.status !== "merge_error" && task.status !== "failed") {
 			continue;
 		}
 
@@ -395,9 +396,10 @@ export async function runExec(options: RuntimeOptions): Promise<ExecResult> {
 
 	// Load tasks for the selected run
 	const allTasks = loadTasksForRun(runId, workDir);
-	// Include both "pending" and "merge_error" tasks
+	// Include "pending", "failed", and "merge_error" tasks
 	// merge_error tasks need to be re-executed because their merge failed
-	let pendingTasks = allTasks.filter((t) => t.status === "pending" || t.status === "merge_error");
+	// failed tasks are retried on --resume
+	let pendingTasks = allTasks.filter((t) => t.status === "pending" || t.status === "merge_error" || t.status === "failed");
 
 	// Apply severity filtering to all execution modes (not just issue-based).
 	// Filter tasks by their issue_id: only keep tasks whose parent issue passes the severity filter.

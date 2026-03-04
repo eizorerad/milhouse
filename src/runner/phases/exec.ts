@@ -111,11 +111,11 @@ ${task.checks.map((c) => `- \`${c}\``).join("\n")}`);
 	if (task.acceptance.length > 0) {
 		parts.push(`### Acceptance Criteria
 ${task.acceptance
-	.map(
-		(a) =>
-			`- [ ] ${a.description}${a.check_command ? ` (verify with: \`${a.check_command}\`)` : ""}`,
-	)
-	.join("\n")}`);
+				.map(
+					(a) =>
+						`- [ ] ${a.description}${a.check_command ? ` (verify with: \`${a.check_command}\`)` : ""}`,
+				)
+				.join("\n")}`);
 	}
 
 	if (task.risk) {
@@ -173,14 +173,14 @@ export function resetStaleRunningTasks(runId: string, workDir: string): number {
 }
 
 /**
- * Get tasks ready for execution (pending or merge_error with all deps satisfied)
+ * Get tasks ready for execution (pending, failed, or merge_error with all deps satisfied)
  */
 export function getReadyTasksForRun(runId: string, workDir: string): Task[] {
 	const tasks = loadTasksForRun(runId, workDir);
 	const readyTasks: Task[] = [];
 
 	for (const task of tasks) {
-		if (task.status !== "pending" && task.status !== "merge_error") continue;
+		if (task.status !== "pending" && task.status !== "merge_error" && task.status !== "failed") continue;
 
 		const allDepsDone = task.depends_on.every((depId: string) => {
 			const dep = tasks.find((t: Task) => t.id === depId);
@@ -440,7 +440,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 
 		// Load tasks
 		const allTasks = loadTasksForRun(runId, workDir);
-		let pendingTasks = allTasks.filter((t) => t.status === "pending" || t.status === "merge_error");
+		let pendingTasks = allTasks.filter((t) => t.status === "pending" || t.status === "merge_error" || t.status === "failed");
 
 		// Severity filtering
 		const hasSeverityFilter = !!(config.minSeverity || config.severityFilter?.length);
@@ -460,7 +460,7 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		}
 
 		if (pendingTasks.length === 0) {
-			logWarn("No pending or merge_error tasks found.");
+			logWarn("No pending, failed, or merge_error tasks found.");
 			return [];
 		}
 
@@ -485,8 +485,8 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 		if (config.taskId) {
 			const specificTask = readTask(config.taskId, workDir);
 			if (!specificTask) throw new Error(`Task not found: ${config.taskId}`);
-			if (specificTask.status !== "pending")
-				throw new Error(`Task not pending (status: ${specificTask.status}): ${config.taskId}`);
+			if (specificTask.status !== "pending" && specificTask.status !== "failed" && specificTask.status !== "merge_error")
+				throw new Error(`Task not executable (status: ${specificTask.status}): ${config.taskId}`);
 
 			const spinner = new ProgressSpinner("Executing tasks", ["EX"]);
 			const result = await executeTaskWithTracking(

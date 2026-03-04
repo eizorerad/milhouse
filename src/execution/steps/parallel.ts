@@ -778,10 +778,11 @@ export async function runParallelGroup(
 	// Track branches whose worktree cleanup failed (leftInPlace or error)
 	const failedCleanupBranches = new Set<string>();
 
-	// Filter to only pending or merge_error tasks
+	// Filter to only pending, failed, or merge_error tasks
 	// merge_error tasks need to be re-executed because their merge failed
+	// failed tasks are retried on --resume
 	const pendingTasks = group.tasks.filter(
-		(t) => t.status === "pending" || t.status === "merge_error",
+		(t) => t.status === "pending" || t.status === "merge_error" || t.status === "failed",
 	);
 
 	if (pendingTasks.length === 0) {
