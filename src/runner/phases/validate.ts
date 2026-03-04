@@ -160,7 +160,7 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 			}));
 
 			const issue = r.item as Issue;
-			updateIssueForRun(
+			const updated = updateIssueForRun(
 				ctx.runId,
 				issue.id,
 				{
@@ -171,6 +171,11 @@ export const validatePhaseConfig: PhaseConfig<Issue, ValidationResult> = {
 				},
 				ctx.workDir,
 			);
+
+			if (updated === null) {
+				logWarn(`[validate] updateIssueForRun returned null for issue ${issue.id} in run ${ctx.runId} — status update was not persisted`);
+				continue;
+			}
 
 			validated++;
 		}
