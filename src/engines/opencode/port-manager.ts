@@ -27,6 +27,13 @@ const MAX_PORT = 65535;
 const MAX_PORT_RANGE = 100;
 
 /**
+ * Timeout in milliseconds for a single port availability check.
+ * If the listen/close cycle doesn't complete within this time,
+ * the check resolves as false to prevent hanging the sequential acquirePort loop.
+ */
+const PORT_CHECK_TIMEOUT_MS = 3000;
+
+/**
  * Set of ports currently in use by this process.
  * This prevents the same port from being assigned to multiple servers
  * within the same milhouse instance.
@@ -82,9 +89,10 @@ function getBasePort(): number {
  * ```
  */
 async function isPortAvailable(port: number): Promise<boolean> {
-	return new Promise((resolve) => {
-		const server: Server = createServer();
+	const server: Server = createServer();
+	let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
+	const checkPromise = new Promise<boolean>((resolve) => {
 		server.once("error", (err: NodeJS.ErrnoException) => {
 			if (err.code === "EADDRINUSE" || err.code === "EACCES") {
 				resolve(false);
@@ -105,6 +113,26 @@ async function isPortAvailable(port: number): Promise<boolean> {
 		// Try to listen on the port
 		server.listen(port, "127.0.0.1");
 	});
+
+	const timeoutPromise = new Promise<boolean>((resolve) => {
+		timeoutId = setTimeout(() => {
+			logger.debug(`Port ${port} check timed out after ${PORT_CHECK_TIMEOUT_MS}ms`);
+			// Force-close the server to prevent fd leaks; ignore errors
+			try {
+				server.close();
+			} catch {
+				// Ignore close errors during timeout cleanup
+			}
+			server.removeAllListeners();
+			resolve(false);
+		}, PORT_CHECK_TIMEOUT_MS);
+	});
+
+	try {
+		return await Promise.race([checkPromise, timeoutPromise]);
+	} finally {
+		clearTimeout(timeoutId);
+	}
 }
 
 /**
