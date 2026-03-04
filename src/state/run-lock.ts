@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRunDir } from "./runs.ts";
+import { isPidAlive } from "../daemon/pid-alive.ts";
 
 interface LockInfo {
 	pid: number;
@@ -14,15 +15,6 @@ interface LockInfo {
 
 function getLockPath(runId: string, phase: string, workDir: string): string {
 	return join(getRunDir(runId, workDir), `${phase}.lock`);
-}
-
-function isPidAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
 }
 
 const MAX_RETRY_ATTEMPTS = 3;
