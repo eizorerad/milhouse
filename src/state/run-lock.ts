@@ -25,8 +25,12 @@ function isPidAlive(pid: number): boolean {
 	}
 }
 
+const MAX_RETRY_ATTEMPTS = 3;
+
 /**
- * Acquire a run-level lock for a specific phase
+ * Acquire a run-level lock for a specific phase.
+ * Uses writeFileSync with the 'wx' (exclusive create) flag for atomic
+ * lock acquisition, eliminating the TOCTOU race between check and write.
  * @throws Error if the run is already locked by an active process
  */
 export function acquireRunLock(
@@ -36,48 +40,61 @@ export function acquireRunLock(
 ): { release: () => void } {
 	const lockPath = getLockPath(runId, phase, workDir);
 	const dir = join(lockPath, "..");
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-
-	// Check existing lock
-	if (existsSync(lockPath)) {
-		try {
-			const content = readFileSync(lockPath, "utf-8");
-			const lock: LockInfo = JSON.parse(content);
-
-			if (isPidAlive(lock.pid)) {
-				throw new Error(
-					`Run ${runId} phase "${phase}" is locked by PID ${lock.pid} since ${lock.startedAt}`,
-				);
-			}
-			// Stale lock — process is dead, overwrite
-		} catch (e) {
-			if (e instanceof Error && e.message.includes("is locked by PID")) {
-				throw e;
-			}
-			// Corrupted lock file, overwrite
-		}
-	}
+	mkdirSync(dir, { recursive: true });
 
 	const lockInfo: LockInfo = {
 		pid: process.pid,
 		startedAt: new Date().toISOString(),
 	};
 
-	writeFileSync(lockPath, JSON.stringify(lockInfo));
-
-	return {
-		release: () => {
-			try {
-				if (existsSync(lockPath)) {
-					rmSync(lockPath);
-				}
-			} catch {
-				// Best-effort release
+	for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
+		try {
+			writeFileSync(lockPath, JSON.stringify(lockInfo), { flag: "wx" });
+			// Exclusive write succeeded — lock acquired
+			return {
+				release: () => {
+					try {
+						rmSync(lockPath, { force: true });
+					} catch {
+						// Best-effort release
+					}
+				},
+			};
+		} catch (err: unknown) {
+			const error = err as NodeJS.ErrnoException;
+			if (error.code !== "EEXIST") {
+				throw error;
 			}
-		},
-	};
+
+			// Lock file already exists — check if holder is still alive
+			try {
+				const content = readFileSync(lockPath, "utf-8");
+				const lock: LockInfo = JSON.parse(content);
+
+				if (isPidAlive(lock.pid)) {
+					throw new Error(
+						`Run ${runId} phase "${phase}" is locked by PID ${lock.pid} since ${lock.startedAt}`,
+					);
+				}
+				// Stale lock — PID is dead, remove and retry
+			} catch (e) {
+				if (e instanceof Error && e.message.includes("is locked by PID")) {
+					throw e;
+				}
+				// Corrupted or unreadable lock file — remove and retry
+			}
+
+			try {
+				rmSync(lockPath, { force: true });
+			} catch {
+				// Removal failed (e.g., race with another process); retry will hit EEXIST again
+			}
+		}
+	}
+
+	throw new Error(
+		`Failed to acquire lock for run ${runId} phase "${phase}" after ${MAX_RETRY_ATTEMPTS} attempts`,
+	);
 }
 
 /**
