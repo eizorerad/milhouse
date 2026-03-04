@@ -14,6 +14,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	renameSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -324,7 +325,6 @@ export class YamlFsConfigStore implements ConfigStore {
 	 */
 	private isLockStale(lockPath: string): boolean {
 		try {
-			const { statSync } = require("node:fs");
 			const stats = statSync(lockPath);
 			const age = Date.now() - stats.mtimeMs;
 			return age > LOCK_TIMEOUT_MS * 2;
