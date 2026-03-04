@@ -16,6 +16,7 @@ import {
 import { join } from "node:path";
 import { getMilhouseDir } from "../state/paths.ts";
 import { saveJsonFile } from "../state/json-io.ts";
+import { sleepSync } from "../utils/sleep.ts";
 import type {
 	DaemonLogEntry,
 	DaemonEventType,
@@ -124,7 +125,7 @@ export function loadState(workDir: string): DaemonState | null {
 	} catch {
 		// Retry once after a short delay — handles transient read during atomic write
 		try {
-			Bun.sleepSync(50);
+			sleepSync(50);
 			return JSON.parse(readFileSync(path, "utf-8"));
 		} catch {
 			return null;

@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { StateParseError, StateWriteError, logStateError } from "./errors.ts";
+import { sleepSync } from "../utils/sleep.ts";
 
 /**
  * Load a JSON file with Zod schema validation.
@@ -77,7 +78,7 @@ export function saveJsonFile(filePath: string, data: unknown, atomic = true): vo
 			} catch (error) {
 				lastError = error;
 				if (attempt < maxRetries - 1) {
-					Bun.sleepSync(retryDelayMs);
+					sleepSync(retryDelayMs);
 				}
 			}
 		}

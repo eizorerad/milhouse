@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { ITaskSource, TaskSourceConfig } from "../core/types";
 import { MarkdownTaskSource } from "../sources/markdown";
 import { MarkdownFolderTaskSource } from "../sources/markdown-folder";
@@ -73,8 +74,7 @@ export async function createTaskSourceAsync(config: TaskSourceConfig): Promise<I
  */
 export async function detectTaskSource(projectPath: string): Promise<TaskSourceConfig | null> {
 	// Check for PRD.md (common pattern)
-	const prdFile = Bun.file(`${projectPath}/PRD.md`);
-	if (await prdFile.exists()) {
+	if (existsSync(`${projectPath}/PRD.md`)) {
 		return {
 			type: "markdown",
 			path: `${projectPath}/PRD.md`,
@@ -82,8 +82,7 @@ export async function detectTaskSource(projectPath: string): Promise<TaskSourceC
 	}
 
 	// Check for tasks.md
-	const tasksMarkdown = Bun.file(`${projectPath}/tasks.md`);
-	if (await tasksMarkdown.exists()) {
+	if (existsSync(`${projectPath}/tasks.md`)) {
 		return {
 			type: "markdown",
 			path: `${projectPath}/tasks.md`,
@@ -91,16 +90,14 @@ export async function detectTaskSource(projectPath: string): Promise<TaskSourceC
 	}
 
 	// Check for tasks.yaml or tasks.yml
-	const tasksYaml = Bun.file(`${projectPath}/tasks.yaml`);
-	if (await tasksYaml.exists()) {
+	if (existsSync(`${projectPath}/tasks.yaml`)) {
 		return {
 			type: "yaml",
 			path: `${projectPath}/tasks.yaml`,
 		};
 	}
 
-	const tasksYml = Bun.file(`${projectPath}/tasks.yml`);
-	if (await tasksYml.exists()) {
+	if (existsSync(`${projectPath}/tasks.yml`)) {
 		return {
 			type: "yaml",
 			path: `${projectPath}/tasks.yml`,
@@ -108,8 +105,7 @@ export async function detectTaskSource(projectPath: string): Promise<TaskSourceC
 	}
 
 	// Check for .milhouse/tasks.yaml
-	const milhouseTasks = Bun.file(`${projectPath}/.milhouse/tasks.yaml`);
-	if (await milhouseTasks.exists()) {
+	if (existsSync(`${projectPath}/.milhouse/tasks.yaml`)) {
 		return {
 			type: "yaml",
 			path: `${projectPath}/.milhouse/tasks.yaml`,
@@ -117,19 +113,12 @@ export async function detectTaskSource(projectPath: string): Promise<TaskSourceC
 	}
 
 	// Check for docs/ folder with markdown files
-	const docsFolder = Bun.file(`${projectPath}/docs`);
-	try {
-		// If docs folder exists, use markdown-folder source
-		const stat = await docsFolder.exists();
-		if (stat) {
-			return {
-				type: "markdown-folder",
-				path: `${projectPath}/docs`,
-				patterns: ["**/*.md"],
-			};
-		}
-	} catch {
-		// Folder doesn't exist
+	if (existsSync(`${projectPath}/docs`)) {
+		return {
+			type: "markdown-folder",
+			path: `${projectPath}/docs`,
+			patterns: ["**/*.md"],
+		};
 	}
 
 	return null;

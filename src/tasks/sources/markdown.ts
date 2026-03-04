@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { bus } from "../../events";
 import type { TaskStatus } from "../../schemas/tasks.schema";
 import type { ITaskSource, TaskSourceConfig } from "../core/types";
@@ -231,8 +232,7 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 			return this.applyLoadOptions(this.cachedCollection, options);
 		}
 
-		const file = Bun.file(this.filePath);
-		const content = await file.text();
+		const content = readFileSync(this.filePath, "utf-8");
 		const tasks = this.parseMarkdownContent(content);
 
 		// Apply filtering and sorting
@@ -565,8 +565,7 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 	 * @param status - New status
 	 */
 	async updateStatus(taskId: string, status: TaskStatus): Promise<void> {
-		const file = Bun.file(this.filePath);
-		const content = await file.text();
+		const content = readFileSync(this.filePath, "utf-8");
 		const lines = content.split("\n");
 
 		// Find the task to get its line number
@@ -587,7 +586,7 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 				lines[lineIndex] = line.replace(/- \[x\]/i, "- [ ]");
 			}
 
-			await Bun.write(this.filePath, lines.join("\n"));
+			writeFileSync(this.filePath, lines.join("\n"));
 
 			// Emit event
 			bus.emit("task:complete", {
@@ -606,8 +605,7 @@ export class MarkdownTaskSource implements IMilhouseTaskSource, ITaskSource {
 	 */
 	async isAvailable(): Promise<boolean> {
 		try {
-			const file = Bun.file(this.filePath);
-			return await file.exists();
+			return existsSync(this.filePath);
 		} catch {
 			return false;
 		}
