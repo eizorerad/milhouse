@@ -26,6 +26,7 @@ import {
 	recordRunStart,
 	saveState,
 } from "./session-state.ts";
+import { createRunCost } from "../runner/cost.ts";
 import { writeSessionReport } from "./session-report.ts";
 import { cleanStaleLocks } from "./stale-locks.ts";
 import type {
@@ -292,9 +293,12 @@ export async function runDaemonLoop(
 
 	// Generate report and end session
 	try {
+		const sessionCost = createRunCost();
+		sessionCost.totalCost = sessionState.totalCost;
 		const reportResult = writeSessionReport(
 			{ id: sessionState.sessionId, created_at: sessionState.startedAt, updated_at: new Date().toISOString(), phase: "completed" as const, issues_found: 0, issues_validated: 0, tasks_total: 0, tasks_completed: 0, tasks_failed: 0 },
 			workDir,
+			sessionCost,
 		);
 		appendLog(workDir, "report:generated", { path: reportResult });
 		logInfo(`Report generated`);
