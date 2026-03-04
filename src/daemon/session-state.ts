@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getMilhouseDir } from "../state/paths.ts";
+import { isPidAlive } from "./pid-alive.ts";
 import { saveJsonFile } from "../state/json-io.ts";
 import { sleepSync } from "../utils/sleep.ts";
 import type {
@@ -290,11 +291,18 @@ export function readDaemonPid(workDir: string): number | null {
 		const pid = Number.parseInt(readFileSync(path, "utf-8").trim(), 10);
 		if (Number.isNaN(pid)) return null;
 
-		// Check if PID is alive
-		process.kill(pid, 0);
+		if (!isPidAlive(pid)) {
+			try {
+				rmSync(path);
+			} catch {
+				// Best effort
+			}
+			return null;
+		}
+
 		return pid;
 	} catch {
-		// PID is dead or file is corrupt — clean up
+		// File is corrupt — clean up
 		try {
 			rmSync(path);
 		} catch {

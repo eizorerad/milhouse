@@ -2,13 +2,13 @@
  * Stale lock cleanup
  *
  * Scans .milhouse/runs/ for .lock files left behind by dead processes.
- * Uses process.kill(pid, 0) to check if the owning process is still alive.
  * Dead locks are removed so daemon can proceed.
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { getRunsDir } from "../state/runs.ts";
+import { isPidAlive } from "./pid-alive.ts";
 
 interface LockFileContent {
 	pid: number;
@@ -95,13 +95,4 @@ export function cleanStaleLocks(workDir = process.cwd()): CleanedLock[] {
 	}
 
 	return cleaned;
-}
-
-function isPidAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
 }
