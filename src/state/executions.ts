@@ -692,3 +692,14 @@ export async function deleteExecutionSafe(
 ): Promise<boolean> {
 	return withExecutionsLock(workDir, () => deleteExecution(id, workDir));
 }
+
+/**
+ * Add follow-up tasks to an execution with file locking for concurrent safety.
+ */
+export async function addFollowUpTasksSafe(
+	id: string,
+	taskIds: string[],
+	workDir = process.cwd(),
+): Promise<ExecutionRecord | null> {
+	return withExecutionsLock(workDir, () => addFollowUpTasks(id, taskIds, workDir));
+}

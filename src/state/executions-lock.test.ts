@@ -5,6 +5,8 @@ import * as lockfile from "proper-lockfile";
 import { loggers } from "../observability/logger.js";
 import { StateLockError } from "./errors.js";
 import {
+	addFollowUpTasks,
+	addFollowUpTasksSafe,
 	createExecution,
 	createExecutionSafe,
 	deleteExecution,
@@ -209,6 +211,62 @@ describe("executions locking", () => {
 			const result = await deleteExecutionSafe("nonexistent", testDir);
 
 			expect(result).toBe(false);
+		});
+	});
+
+	describe("addFollowUpTasksSafe", () => {
+		test("delegates to addFollowUpTasks and returns updated record with merged follow_up_task_ids", async () => {
+			const created = createExecution(
+				{
+					task_id: "T1",
+					started_at: new Date().toISOString(),
+					agent_role: "EX",
+					input_tokens: 0,
+					output_tokens: 0,
+					follow_up_task_ids: ["existing-task"],
+				},
+				testDir,
+			);
+
+			const releaseFn = mock(() => Promise.resolve());
+			lockSpy.mockResolvedValueOnce(releaseFn);
+
+			const result = await addFollowUpTasksSafe(
+				created.id,
+				["new-task-1", "new-task-2"],
+				testDir,
+			);
+
+			expect(result).not.toBeNull();
+			expect(result?.follow_up_task_ids).toContain("existing-task");
+			expect(result?.follow_up_task_ids).toContain("new-task-1");
+			expect(result?.follow_up_task_ids).toContain("new-task-2");
+			expect(result?.follow_up_task_ids).toHaveLength(3);
+			expect(releaseFn).toHaveBeenCalledTimes(1);
+		});
+
+		test("returns null for non-existent execution", async () => {
+			const releaseFn = mock(() => Promise.resolve());
+			lockSpy.mockResolvedValueOnce(releaseFn);
+
+			const result = await addFollowUpTasksSafe("nonexistent", ["task-1"], testDir);
+
+			expect(result).toBeNull();
+			expect(releaseFn).toHaveBeenCalledTimes(1);
+		});
+
+		test("lock is released even when underlying operation throws", async () => {
+			const releaseFn = mock(() => Promise.resolve());
+			lockSpy.mockResolvedValueOnce(releaseFn);
+
+			// Use withExecutionsLock directly with a throwing operation to verify lock release
+			await expect(
+				withExecutionsLock(testDir, () => {
+					throw new Error("follow-up failed");
+				}),
+			).rejects.toThrow("follow-up failed");
+
+			expect(releaseFn).toHaveBeenCalledTimes(1);
 		});
 	});
 });
