@@ -464,8 +464,8 @@ export interface ConflictResolutionResult {
  * Milhouse execution constants
  */
 export const MILHOUSE_EXECUTION = {
-	/** Default task timeout in milliseconds (10 minutes) */
-	DEFAULT_TASK_TIMEOUT_MS: 600_000,
+	/** Default task timeout in milliseconds (20 minutes) */
+	DEFAULT_TASK_TIMEOUT_MS: 1_200_000,
 	/** Default retry delay in milliseconds */
 	DEFAULT_RETRY_DELAY_MS: 5_000,
 	/** Maximum parallel workers */
