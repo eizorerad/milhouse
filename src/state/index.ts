@@ -193,6 +193,7 @@ export {
 	createExecutionSafe,
 	updateExecutionSafe,
 	deleteExecutionSafe,
+	addFollowUpTasksSafe,
 } from "./executions.ts";
 
 // Runs module - Run management
