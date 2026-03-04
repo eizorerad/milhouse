@@ -6,6 +6,7 @@
  */
 
 import { writeSessionReport } from "../../../daemon/session-report.ts";
+import { createRunCost } from "../../../runner/cost.ts";
 import { getCurrentRun } from "../../../state/runs.ts";
 import type { RunMeta } from "../../../state/types.ts";
 import { logError, logInfo } from "../../../ui/logger.ts";
@@ -35,7 +36,7 @@ export async function daemonReport(
 
 	const jsonOnly = args.includes("--json");
 
-	const result = writeSessionReport(state, opts.workDir);
+	const result = writeSessionReport(state, opts.workDir, createRunCost());
 
 	if (jsonOnly) {
 		if (result.jsonPath) {

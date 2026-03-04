@@ -6,17 +6,17 @@
  */
 
 import { generateReport, type ReportResult } from "../report/generator.ts";
-import { createRunCost } from "../runner/cost.ts";
+import type { RunCost } from "../runner/cost.ts";
 import type { RunMeta } from "../state/types.ts";
 
 /**
  * Write a session report for the given run state.
  * Generates both markdown and JSON report files.
  */
-export function writeSessionReport(state: RunMeta, workDir: string): ReportResult {
+export function writeSessionReport(state: RunMeta, workDir: string, cost: RunCost): ReportResult {
 	return generateReport({
 		runId: state.id,
-		cost: createRunCost(),
+		cost,
 		duration: Date.now() - new Date(state.created_at).getTime(),
 		workDir,
 		format: "both",
