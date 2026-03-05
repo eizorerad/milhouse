@@ -24,7 +24,7 @@ import { scanPhaseConfig } from "../runner/phases/scan.ts";
 import { validatePhaseConfig } from "../runner/phases/validate.ts";
 import { verifyPhaseConfig } from "../runner/phases/verify.ts";
 import type { PhaseConfig, PhaseRunResult, ResolvedConfig } from "../runner/types.ts";
-import { loadRunMeta, loadRunsIndex } from "../state/runs.ts";
+import { loadRunMeta, loadRunsIndex, RunStore } from "../state/runs.ts";
 import type { RunMeta } from "../state/types.ts";
 import { formatDuration, logError, logInfo, logWarn } from "../ui/logger.ts";
 import { validateResumeOutputs } from "./resume-validator.ts";
@@ -198,10 +198,15 @@ async function selectRunForResume(workDir: string, runId?: string): Promise<stri
 
 /** Determine which phase to resume from based on run metadata. */
 function getResumeStartPhase(runId: string, workDir: string): string {
-	const meta = loadRunMeta(runId, workDir);
-	if (!meta) throw new Error(`Run ${runId} not found`);
-	if (PHASE_ORDER.includes(meta.phase)) return meta.phase;
-	return "scan";
+	try {
+		const store = RunStore.byId(workDir, runId);
+		const meta = store.getMeta();
+		if (!meta) throw new Error(`Run ${runId} metadata not found`);
+		if (PHASE_ORDER.includes(meta.phase)) return meta.phase;
+		return "scan";
+	} catch (error) {
+		throw new Error(`Run ${runId} not found`);
+	}
 }
 
 /** Build a failed PipelineResult. */
@@ -231,22 +236,32 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 	// --resume: pick an incomplete run (interactive if multiple)
 	// --run (without --resume): always starts fresh, no prompt
 	if (options.resume) {
-		runId = await selectRunForResume(workDir, runId);
-		options.startPhase = options.startPhase ?? getResumeStartPhase(runId, workDir);
+		try {
+			runId = await selectRunForResume(workDir, runId);
 
-		// Validate that prior phase outputs exist before skipping phases
-		const validation = validateResumeOutputs(runId, options.startPhase, workDir);
-		if (!validation.valid && validation.firstInvalidPhase) {
-			logWarn(
-				`Resume validation failed: missing outputs for phase "${validation.firstInvalidPhase}". Falling back to re-run from "${validation.firstInvalidPhase}".`,
-			);
-			for (const err of validation.errors) {
-				logWarn(`  ${err}`);
+			// Validate run exists before proceeding
+			RunStore.byId(workDir, runId);
+
+			options.startPhase = options.startPhase ?? getResumeStartPhase(runId, workDir);
+
+			// Validate that prior phase outputs exist before skipping phases
+			const validation = validateResumeOutputs(runId, options.startPhase, workDir);
+			if (!validation.valid && validation.firstInvalidPhase) {
+				logWarn(
+					`Resume validation failed: missing outputs for phase "${validation.firstInvalidPhase}". Falling back to re-run from "${validation.firstInvalidPhase}".`,
+				);
+				for (const err of validation.errors) {
+					logWarn(`  ${err}`);
+				}
+				options.startPhase = validation.firstInvalidPhase;
 			}
-			options.startPhase = validation.firstInvalidPhase;
-		}
 
-		logInfo(`Resuming run ${runId} from phase "${options.startPhase}"`);
+			logInfo(`Resuming run ${runId} from phase "${options.startPhase}"`);
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : `Run ${runId} not found`;
+			logError(errorMsg);
+			process.exit(1);
+		}
 	}
 
 	const phases = resolvePhases(options);

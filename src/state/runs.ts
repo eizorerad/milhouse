@@ -704,3 +704,53 @@ export function getDateFromDuration(duration: string): Date {
 	const ms = parseDuration(duration);
 	return new Date(Date.now() - ms);
 }
+
+// ============================================================================
+// RUNSTORE CLASS
+// ============================================================================
+
+/**
+ * RunStore provides validated access to run data.
+ * Throws descriptive errors when runs don't exist.
+ */
+export class RunStore {
+	private constructor(
+		public readonly runId: string,
+		public readonly workDir: string,
+	) {}
+
+	/**
+	 * Get a RunStore instance for the specified run.
+	 * Validates that the run directory exists before returning.
+	 *
+	 * @throws Error if run directory does not exist
+	 */
+	static byId(workDir: string, runId: string): RunStore {
+		const runDir = getRunDir(runId, workDir);
+		if (!existsSync(runDir)) {
+			throw new Error(`Run ${runId} not found in ${workDir}`);
+		}
+		return new RunStore(runId, workDir);
+	}
+
+	/**
+	 * Load run metadata
+	 */
+	getMeta(): RunMeta | null {
+		return loadRunMeta(this.runId, this.workDir);
+	}
+
+	/**
+	 * Get run directory path
+	 */
+	getRunDir(): string {
+		return getRunDir(this.runId, this.workDir);
+	}
+
+	/**
+	 * Get run state directory path
+	 */
+	getStateDir(): string {
+		return getRunStateDir(this.runId, this.workDir);
+	}
+}

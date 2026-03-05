@@ -9,7 +9,7 @@
 import { generateReport } from "../../report/generator.ts";
 import { loadResolvedConfig } from "../../runner/config-loader.ts";
 import { createRunCost } from "../../runner/cost.ts";
-import { loadRunMeta, loadRunsIndex } from "../../state/runs.ts";
+import { loadRunsIndex, RunStore } from "../../state/runs.ts";
 import { logError, logInfo } from "../../ui/logger.ts";
 import type { RuntimeOptions } from "../runtime-options.ts";
 
@@ -28,9 +28,18 @@ export async function runReport(options: RuntimeOptions & { format?: string }): 
 		runId = index.runs[index.runs.length - 1].id;
 	}
 
-	const meta = loadRunMeta(runId, workDir);
+	// Validate run exists
+	let store: RunStore;
+	try {
+		store = RunStore.byId(workDir, runId);
+	} catch (error) {
+		logError(error instanceof Error ? error.message : `Run ${runId} not found.`);
+		return;
+	}
+
+	const meta = store.getMeta();
 	if (!meta) {
-		logError(`Run ${runId} not found.`);
+		logError(`Run ${runId} metadata not found.`);
 		return;
 	}
 

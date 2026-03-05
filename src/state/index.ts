@@ -224,6 +224,7 @@ export {
 	cleanupOldRuns,
 	parseDuration,
 	getDateFromDuration,
+	RunStore,
 } from "./runs.ts";
 export type { CleanupOldRunsOptions, CleanupResult } from "./runs.ts";
 
