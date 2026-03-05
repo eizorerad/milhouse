@@ -140,8 +140,8 @@ describe("createWorktree - handling existing branches", () => {
 		}
 
 		// Verify -B flag is used (force create/reset branch)
-		const worktreeAddCall = runGitCommandSpy.mock.calls.find((call) =>
-			call[0].includes("worktree") && call[0].includes("add"),
+		const worktreeAddCall = runGitCommandSpy.mock.calls.find((call: unknown[]) =>
+			Array.isArray(call[0]) && call[0].includes("worktree") && call[0].includes("add"),
 		);
 		expect(worktreeAddCall?.[0]).toContain("-B");
 	});
@@ -168,8 +168,8 @@ describe("createWorktree - handling existing branches", () => {
 		}
 
 		// Verify -B flag is used (this allows resetting existing branch)
-		const worktreeAddCall = runGitCommandSpy.mock.calls.find((call) =>
-			call[0].includes("worktree") && call[0].includes("add"),
+		const worktreeAddCall = runGitCommandSpy.mock.calls.find((call: unknown[]) =>
+			Array.isArray(call[0]) && call[0].includes("worktree") && call[0].includes("add"),
 		);
 		expect(worktreeAddCall?.[0]).toContain("-B");
 	});
@@ -231,8 +231,8 @@ describe("createWorktree - integration scenarios", () => {
 
 		// Verify that -B flag is used, allowing the operation to succeed
 		// even though the branch already existed
-		const worktreeAddCall = runGitCommandSpy.mock.calls.find((call) =>
-			call[0].includes("worktree") && call[0].includes("add"),
+		const worktreeAddCall = runGitCommandSpy.mock.calls.find((call: unknown[]) =>
+			Array.isArray(call[0]) && call[0].includes("worktree") && call[0].includes("add"),
 		);
 		expect(worktreeAddCall).toBeDefined();
 		expect(worktreeAddCall?.[0]).toContain("-B");
