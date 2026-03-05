@@ -422,6 +422,281 @@ describe("planPhaseConfig", () => {
 			const nullWarning = warnCalls.find((m: string) => m.includes("null"));
 			expect(nullWarning).toBeUndefined();
 		});
+
+		it("is idempotent - calling saveResults twice doesn't create duplicate tasks", async () => {
+			const issue = createMockIssue({ id: "ISS-IDEM-1", status: "CONFIRMED", related_task_ids: [] });
+			let taskIdCounter = 1;
+			const createdTasks: typeof tasksModule.Task[] = [];
+
+			// Mock saveTasksForRunSafe to track saved tasks
+			let saveTasksSpy: ReturnType<typeof spyOn>;
+			saveTasksSpy = spyOn(tasksModule, "saveTasksForRunSafe").mockImplementation(async (runId, tasks) => {
+				// Store the tasks that were saved
+				createdTasks.length = 0;
+				createdTasks.push(...tasks);
+			});
+
+			// Mock createTaskForRunSafe to generate unique task IDs
+			createTaskSpy = spyOn(tasksModule, "createTaskForRunSafe").mockImplementation(async (runId, taskData) => {
+				const newTask = createMockTask({
+					id: `T-${taskIdCounter++}`,
+					issue_id: taskData.issue_id,
+					title: taskData.title,
+					status: "pending",
+				});
+				return newTask;
+			});
+
+			// Mock updateIssueForRun to return the updated issue
+			updateIssueSpy = spyOn(issuesModule, "updateIssueForRun").mockReturnValue(issue);
+
+			// First call: no existing tasks
+			loadTasksSpy.mockRestore();
+			loadTasksSpy = spyOn(tasksModule, "loadTasksForRun").mockReturnValue([]);
+
+			const ctx = createMockPhaseContext({ runId: "run-idem-1" });
+			const results = [
+				{
+					item: issue,
+					result: {
+						issue_id: "ISS-IDEM-1",
+						summary: "Fix the bug",
+						tasks: [
+							{
+								title: "Task 1",
+								description: "First task",
+								files: ["src/a.ts"],
+								depends_on: [] as string[],
+								checks: ["bun test"],
+								acceptance: [{ description: "It works", check_command: "bun test", verified: false }],
+								risk: "Low",
+								rollback: "Revert",
+								parallel_group: 0,
+							},
+							{
+								title: "Task 2",
+								description: "Second task",
+								files: ["src/b.ts"],
+								depends_on: [] as string[],
+								checks: ["bun test"],
+								acceptance: [{ description: "Also works", check_command: "bun test", verified: false }],
+								risk: "Low",
+								rollback: "Revert",
+								parallel_group: 0,
+							},
+						],
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			// First call to saveResults
+			await planPhaseConfig.saveResults(results, ctx);
+
+			// Should have created 2 tasks
+			expect(createTaskSpy).toHaveBeenCalledTimes(2);
+			const firstCallTaskCount = createTaskSpy.mock.calls.length;
+
+			// Reset loadTasksForRun to return the tasks created in the first run
+			const tasksAfterFirstRun = [
+				createMockTask({ id: "T-1", issue_id: "ISS-IDEM-1", title: "Task 1" }),
+				createMockTask({ id: "T-2", issue_id: "ISS-IDEM-1", title: "Task 2" }),
+			];
+			loadTasksSpy.mockRestore();
+			loadTasksSpy = spyOn(tasksModule, "loadTasksForRun").mockReturnValue(tasksAfterFirstRun);
+
+			// Second call to saveResults with same results
+			await planPhaseConfig.saveResults(results, ctx);
+
+			// Should have created 2 more tasks (total 4 calls to createTaskForRunSafe)
+			expect(createTaskSpy).toHaveBeenCalledTimes(firstCallTaskCount + 2);
+
+			// But saveTasksForRunSafe should have been called to filter out old tasks first
+			// Check that it was called with empty array (filtered out the 2 existing tasks)
+			const saveTasksCalls = saveTasksSpy.mock.calls;
+			// First call should filter out existing tasks for ISS-IDEM-1
+			expect(saveTasksCalls.length).toBeGreaterThanOrEqual(2);
+
+			// Verify that the saved tasks after re-plan only contain new tasks
+			// (the filtering should have removed the old ones)
+			const filterCall = saveTasksCalls.find((call) => {
+				const [runId, tasks] = call as [string, typeof tasksModule.Task[]];
+				return tasks.length === 0; // Should save empty array after filtering
+			});
+			expect(filterCall).toBeDefined();
+
+			saveTasksSpy.mockRestore();
+		});
+
+		it("replaces tasks when re-planning the same issue", async () => {
+			const issue = createMockIssue({ id: "ISS-REPLACE-1", status: "CONFIRMED", related_task_ids: ["OLD-T-1"] });
+
+			// Existing task from previous plan
+			const existingTask = createMockTask({ id: "OLD-T-1", issue_id: "ISS-REPLACE-1", title: "Old Task" });
+
+			let saveTasksSpy: ReturnType<typeof spyOn>;
+			let savedTasks: typeof tasksModule.Task[] = [];
+
+			saveTasksSpy = spyOn(tasksModule, "saveTasksForRunSafe").mockImplementation(async (runId, tasks) => {
+				savedTasks = [...tasks];
+			});
+
+			// New task from re-plan
+			const newTask = createMockTask({ id: "NEW-T-1", issue_id: "ISS-REPLACE-1", title: "New Task" });
+			createTaskSpy = spyOn(tasksModule, "createTaskForRunSafe").mockResolvedValue(newTask);
+
+			updateIssueSpy = spyOn(issuesModule, "updateIssueForRun").mockImplementation((runId, issueId, update) => {
+				return { ...issue, ...update };
+			});
+
+			// Load existing task
+			loadTasksSpy.mockRestore();
+			loadTasksSpy = spyOn(tasksModule, "loadTasksForRun").mockReturnValue([existingTask]);
+
+			const ctx = createMockPhaseContext({ runId: "run-replace-1" });
+			const results = [
+				{
+					item: issue,
+					result: {
+						issue_id: "ISS-REPLACE-1",
+						summary: "Updated plan",
+						tasks: [
+							{
+								title: "New Task",
+								description: "Replacement task",
+								files: ["src/new.ts"],
+								depends_on: [] as string[],
+								checks: ["bun test"],
+								acceptance: [{ description: "New criteria", check_command: "bun test", verified: false }],
+								risk: "Low",
+								rollback: "Revert",
+								parallel_group: 0,
+							},
+						],
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			await planPhaseConfig.saveResults(results, ctx);
+
+			// Verify old task was filtered out
+			expect(saveTasksSpy).toHaveBeenCalled();
+			const filterCall = saveTasksSpy.mock.calls[0];
+			const filteredTasks = filterCall[1] as typeof tasksModule.Task[];
+			// Should have filtered out OLD-T-1 (which belongs to ISS-REPLACE-1)
+			expect(filteredTasks.every((t) => t.issue_id !== "ISS-REPLACE-1")).toBe(true);
+
+			// Verify updateIssueForRun was called with new task IDs (replacing, not appending)
+			const updateCalls = updateIssueSpy.mock.calls;
+			expect(updateCalls.length).toBeGreaterThanOrEqual(1);
+
+			// Should have been called with the new task IDs array (which replaces the old one)
+			const updateCall = updateCalls.find((call) => {
+				const update = call[2] as { related_task_ids?: string[] };
+				return update.related_task_ids?.length === 1 && update.related_task_ids[0] === "NEW-T-1";
+			});
+			expect(updateCall).toBeDefined();
+
+			saveTasksSpy.mockRestore();
+		});
+
+		it("updates task_total stat correctly when re-planning", async () => {
+			const issue = createMockIssue({ id: "ISS-STAT-1", status: "CONFIRMED", related_task_ids: [] });
+
+			// First run: 2 tasks
+			const firstTasks = [
+				createMockTask({ id: "T-1", issue_id: "ISS-STAT-1" }),
+				createMockTask({ id: "T-2", issue_id: "ISS-STAT-1" }),
+			];
+
+			let taskCounter = 3;
+			createTaskSpy = spyOn(tasksModule, "createTaskForRunSafe").mockImplementation(async () => {
+				return createMockTask({ id: `T-${taskCounter++}`, issue_id: "ISS-STAT-1" });
+			});
+
+			const saveTasksSpy = spyOn(tasksModule, "saveTasksForRunSafe").mockResolvedValue(undefined);
+			updateIssueSpy = spyOn(issuesModule, "updateIssueForRun").mockReturnValue(issue);
+
+			// First call: no existing tasks
+			loadTasksSpy.mockRestore();
+			loadTasksSpy = spyOn(tasksModule, "loadTasksForRun")
+				.mockReturnValueOnce([]) // First call for filtering
+				.mockReturnValueOnce([]) // Second call for stats
+				.mockReturnValueOnce(firstTasks) // Third call for filtering in second saveResults
+				.mockReturnValueOnce([
+					createMockTask({ id: "T-3", issue_id: "ISS-STAT-1" }),
+					createMockTask({ id: "T-4", issue_id: "ISS-STAT-1" }),
+					createMockTask({ id: "T-5", issue_id: "ISS-STAT-1" }),
+				]); // Fourth call for stats
+
+			const ctx = createMockPhaseContext({ runId: "run-stat-1" });
+			const results = [
+				{
+					item: issue,
+					result: {
+						issue_id: "ISS-STAT-1",
+						summary: "Plan v1",
+						tasks: [
+							{
+								title: "Task 1",
+								files: [],
+								depends_on: [] as string[],
+								checks: [],
+								acceptance: [],
+							},
+							{
+								title: "Task 2",
+								files: [],
+								depends_on: [] as string[],
+								checks: [],
+								acceptance: [],
+							},
+						],
+					},
+					success: true,
+					inputTokens: 100,
+					outputTokens: 50,
+				},
+			];
+
+			// First call
+			await planPhaseConfig.saveResults(results, ctx);
+
+			// Verify updateRunStatsWithLock was called
+			expect(updateRunStatsSpy).toHaveBeenCalledTimes(1);
+
+			// Second call with 3 tasks (re-plan)
+			const updatedResults = [
+				{
+					...results[0],
+					result: {
+						...results[0].result,
+						tasks: [
+							{ title: "Task 3", files: [], depends_on: [] as string[], checks: [], acceptance: [] },
+							{ title: "Task 4", files: [], depends_on: [] as string[], checks: [], acceptance: [] },
+							{ title: "Task 5", files: [], depends_on: [] as string[], checks: [], acceptance: [] },
+						],
+					},
+				},
+			];
+
+			await planPhaseConfig.saveResults(updatedResults, ctx);
+
+			// Verify updateRunStatsWithLock was called again
+			expect(updateRunStatsSpy).toHaveBeenCalledTimes(2);
+
+			// Verify the stat reflects the new task count (3 tasks), not cumulative (5 tasks)
+			const lastStatsCall = updateRunStatsSpy.mock.calls[1];
+			const statsUpdate = lastStatsCall[1] as { tasks_total: number };
+			expect(statsUpdate.tasks_total).toBe(3);
+
+			saveTasksSpy.mockRestore();
+		});
 	});
 
 	// ============================================================================
