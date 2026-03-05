@@ -302,8 +302,36 @@ describe("execPhaseConfig", () => {
 			expect(typeof execPhaseConfig.customExecute).toBe("function");
 		});
 
-		it("loadItems throws (uses customExecute)", () => {
-			expect(() => execPhaseConfig.loadItems({} as never)).toThrow("exec uses customExecute");
+		it("loadItems returns filtered tasks (consistent with customExecute)", async () => {
+			const testDir = join(process.cwd(), ".test-exec-loaditems");
+			if (existsSync(testDir)) {
+				rmSync(testDir, { recursive: true, force: true });
+			}
+			mkdirSync(join(testDir, ".milhouse"), { recursive: true });
+
+			try {
+				const run = await createRun({ scope: "loadItems test", workDir: testDir });
+				createTaskForRun(run.id, { title: "Task 1", issue_id: "ISS-1", status: "pending", parallel_group: 0, depends_on: [], files: [], checks: [], acceptance: [] }, testDir);
+				createTaskForRun(run.id, { title: "Task 2", issue_id: "ISS-2", status: "failed", parallel_group: 0, depends_on: [], files: [], checks: [], acceptance: [] }, testDir);
+				createTaskForRun(run.id, { title: "Task 3", issue_id: "ISS-3", status: "done", parallel_group: 0, depends_on: [], files: [], checks: [], acceptance: [] }, testDir);
+
+				const ctx = {
+					runId: run.id,
+					workDir: testDir,
+					engine: {} as never,
+					config: {} as never,
+					startTime: Date.now(),
+					userConfig: {} as never,
+					store: {},
+				};
+				const items = execPhaseConfig.loadItems(ctx);
+				expect(items.length).toBe(2); // pending and failed, not done
+				expect(items.every((t) => t.status === "pending" || t.status === "failed")).toBe(true);
+			} finally {
+				if (existsSync(testDir)) {
+					rmSync(testDir, { recursive: true, force: true });
+				}
+			}
 		});
 
 		it("buildPrompt throws (uses customExecute)", () => {
