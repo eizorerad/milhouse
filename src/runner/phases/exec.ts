@@ -421,8 +421,10 @@ export const execPhaseConfig: PhaseConfig<Task, ExecTaskResult> = {
 	},
 
 	// Not used — customExecute replaces the standard flow
-	loadItems() {
-		throw new Error("exec uses customExecute");
+	// But implemented for consistency and potential future use
+	loadItems(ctx: PhaseContext): Task[] {
+		const allTasks = loadTasksForRun(ctx.runId, ctx.workDir);
+		return allTasks.filter((t: Task) => t.status === "pending" || t.status === "failed" || t.status === "merge_error");
 	},
 	buildPrompt() {
 		throw new Error("exec uses customExecute");
