@@ -143,6 +143,24 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 	},
 
 	async saveResults(results, ctx) {
+		// Extract issue IDs from successful results that are being planned
+		const plannedIssueIds = new Set<string>();
+		for (const r of results) {
+			if (r.success && r.result.tasks.length > 0) {
+				plannedIssueIds.add((r.item as Issue).id);
+			}
+		}
+
+		// Remove existing tasks for planned issues to prevent duplicates on re-run
+		if (plannedIssueIds.size > 0) {
+			const existingTasks = loadTasksForRun(ctx.runId, ctx.workDir);
+			const filteredTasks = existingTasks.filter((t) => !plannedIssueIds.has(t.issue_id || ""));
+
+			// Use saveTasksForRunSafe with file locking to prevent concurrent modification
+			const { saveTasksForRunSafe } = await import("../../state/tasks.ts");
+			await saveTasksForRunSafe(ctx.runId, filteredTasks, ctx.workDir, { force: true });
+		}
+
 		let totalTasks = 0;
 
 		for (const r of results) {
@@ -200,11 +218,11 @@ export const planPhaseConfig: PhaseConfig<Issue, PlanResult> = {
 				createdTaskTitles.push(wbsTask.title);
 			}
 
-			// Update issue with related task IDs
+			// Update issue with related task IDs (replacing, not appending)
 			const updated = updateIssueForRun(
 				ctx.runId,
 				issue.id,
-				{ related_task_ids: [...issue.related_task_ids, ...createdTaskIds] },
+				{ related_task_ids: createdTaskIds },
 				ctx.workDir,
 			);
 			if (updated === null) {
