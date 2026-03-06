@@ -73,8 +73,8 @@ export async function loadConfig(
 		try {
 			const mod = await import(pathToFileURL(configPath).href);
 			userConfig = (mod.default ?? mod) as Partial<Config>;
-		} catch {
-			// Failed to load config, use defaults
+		} catch (err) {
+			console.warn(`Warning: Failed to load config from ${configPath}: ${err instanceof Error ? err.message : err}. Using defaults.`);
 		}
 	}
 
