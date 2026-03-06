@@ -4,6 +4,7 @@
 
 import type { RunStore } from "./state.ts";
 import type { Issue, RunMeta, Task } from "./types.ts";
+import { formatDuration } from "./ui.ts";
 
 export interface RunReport {
 	meta: RunMeta;
@@ -188,14 +189,3 @@ function countBy<T>(items: T[], key: (item: T) => string): Record<string, number
 	return result;
 }
 
-function formatDuration(ms: number): string {
-	if (ms <= 0) return "N/A";
-	const secs = Math.floor(ms / 1000);
-	if (secs < 60) return `${secs}s`;
-	const mins = Math.floor(secs / 60);
-	const remSecs = secs % 60;
-	if (mins < 60) return `${mins}m ${remSecs}s`;
-	const hours = Math.floor(mins / 60);
-	const remMins = mins % 60;
-	return `${hours}h ${remMins}m`;
-}
