@@ -122,10 +122,11 @@ export const log = {
 
 	phase: (name: string) => {
 		const color = theme.phase[name] ?? theme.brand;
+		const sep = "-".repeat(Math.min(getMaxWidth(), 60));
 		console.log("");
-		console.log(pc.dim("--------------------------------------------------"));
+		console.log(pc.dim(sep));
 		console.log(`  ${pc.bold(color(name.toUpperCase()))}`);
-		console.log(pc.dim("--------------------------------------------------"));
+		console.log(pc.dim(sep));
 	},
 
 	summary: (succeeded: number, total: number, cost: number, duration: number) => {
