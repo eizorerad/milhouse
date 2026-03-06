@@ -5,6 +5,7 @@ dist/
 docs/
 plans/
 .claude/
+old/
 
 # Milhouse — track config, ignore runtime data
 .milhouse/

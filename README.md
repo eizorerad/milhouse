@@ -4,30 +4,33 @@
 
 Milhouse investigates before it acts and verifies after. Instead of throwing a prompt at an AI and hoping, it runs a structured pipeline: scan the codebase, validate findings with evidence, plan tasks, execute in isolated worktrees, and verify through quality gates.
 
-## What's New in v0.2.0
+## v0.3 — Rewrite from scratch
 
-Complete rewrite for simplicity and reliability:
+v0.3 is a complete rewrite. Same pipeline concept, 95% less code.
 
-- **One runner for all phases.** Five separate 800-line command files replaced by a single PhaseRunner (~300 lines). All phases — scan, validate, plan, consolidate, verify — go through the same code path with the same retry, cost tracking, and progress display logic.
-- **One config file.** `.milhouse/config.ts` is the single place to configure everything: pipeline phases, workers per phase, model overrides, rules, boundaries, quality gates, cost budget. Typed — IDE autocomplete and `tsc` catch errors.
-- **No more `current_run` pointer.** The mutable global pointer that caused race conditions in parallel runs is gone. All state operations take an explicit `runId`. The latest run is derived from the runs index.
-- **Pipeline-first CLI.** `milhouse "fix auth bugs"` runs the full pipeline with that text as scope. No more single-task mode — the pipeline is the default.
-- **Stateless orchestrator.** The pipeline orchestrator doesn't hold state between phases. Each phase reads from disk, writes to disk. Resume after crash works by checking what's already on disk.
-- **~2000 lines of dead code removed.** Old pipeline, agent factories, capability system, compat module, duplicate config loaders — all cleaned up.
-- **Bug fixes.** Timer leak in agent timeouts, retry comparison by object reference, duplicate `phaseCost` declaration, crash-resume duplicates, dangling dependency references, 56-year duration display.
+| | v0.2 | v0.3 |
+|---|---|---|
+| Lines of code | 68,000 | ~3,000 |
+| Files | 242 | 17 |
+| Dependencies | 17 | 2 |
+| Config systems | 4 | 1 |
+| Engine abstractions | 7 | 1 |
 
 ---
 
 ## Quick Start
 
 ```bash
+# Install
 npm install -g milhouse-cli
+
+# Initialize project
 cd your-project
 milhouse --init
+
+# Run full pipeline
 milhouse "fix authentication bugs"
 ```
-
-That runs the full pipeline: **scan** the repo for auth bugs, **validate** each finding, **plan** tasks with dependencies, **execute** in worktrees, **verify** results through 5 quality gates.
 
 ---
 
@@ -40,42 +43,76 @@ scan → validate → plan → consolidate → exec → verify
 
 | Phase | Agent | What happens |
 |-------|-------|-------------|
-| **scan** | LI (Lead Investigator) | Analyzes codebase, identifies work items |
-| **validate** | IV (Issue Validator) | Runs probes (Postgres, Redis, Docker, deps), collects evidence |
-| **plan** | PL (Planner) | Generates WBS with tasks, dependencies, acceptance criteria |
-| **consolidate** | CDM (Consolidator) | Deduplicates, builds dependency graph, assigns parallel groups |
-| **exec** | EX (Executor) | Executes tasks in isolated git worktrees |
-| **verify** | TV (Truth Verifier) | Runs 5 quality gates, blocks unverified changes |
+| **scan** | Lead Investigator | Analyzes codebase, identifies work items (bugs, features, refactors) |
+| **validate** | Issue Validator | Validates each finding with file:line evidence |
+| **plan** | Planner | Generates WBS — tasks with dependencies and acceptance criteria |
+| **consolidate** | Dependency Manager | Deduplicates tasks, resolves cross-issue dependencies, assigns parallel groups |
+| **exec** | Executor | Executes tasks in isolated git worktrees, one per issue |
+| **verify** | Truth Verifier | Runs quality gates, blocks unverified changes |
 
-Each phase can run independently (`milhouse --scan`, `milhouse --validate`, etc.) or as a full pipeline (`milhouse --run`).
+---
+
+## CLI
+
+```bash
+# Full pipeline
+milhouse "fix auth bugs"                    # Scope from positional args
+milhouse --run --scope "frontend perf"      # Explicit scope
+
+# Single phase
+milhouse --scan --scope "security"
+milhouse --validate
+milhouse --plan
+milhouse --exec --workers 5
+
+# Resume after failure
+milhouse --resume
+milhouse --resume --run-id run-20260304-xxx
+
+# Report
+milhouse --report                           # Terminal format
+milhouse --report --format md               # Markdown format
+milhouse --report --run-id run-20260304-xxx # Specific run
+
+# Options
+milhouse --engine gemini "fix bugs"         # Use Gemini CLI
+milhouse --model opus "fix bugs"            # Override model
+milhouse --workers 5 "fix bugs"             # Parallel exec workers
+milhouse -v --run                           # Verbose output
+```
 
 ---
 
 ## Configuration
 
-`milhouse --init` creates `.milhouse/config.ts` — one file where everything is configured:
+`milhouse --init` creates `.milhouse/config.ts`:
 
 ```typescript
 import type { Config } from "milhouse";
 
 const config: Config = {
-  // Which phases to run and in what order. Remove a phase to skip it.
+  // AI engine: "claude" | "gemini" | "aider"
+  engine: "claude",
+  model: "sonnet",
+
+  // Pipeline phases (remove to skip)
   pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
 
-  // Per-phase: workers (parallel agents), retries, model override
+  // Per-phase settings
   phases: {
-    scan:     { workers: 1, retries: 2 },
-    validate: { workers: 5, retries: 2 },
-    plan:     { workers: 5, retries: 3 },
-    exec:     { workers: 3, retries: 3 },
-    verify:   { workers: 1, retries: 1 },
+    scan:        { workers: 1, retries: 2 },
+    validate:    { workers: 5, retries: 2 },
+    plan:        { workers: 5, retries: 3 },
+    consolidate: { workers: 1, retries: 2 },
+    exec:        { workers: 3, retries: 3 },
+    verify:      { workers: 5, retries: 1 },
   },
 
-  // Project info (auto-detected)
-  project: { name: "my-app", language: "typescript", framework: "express" },
+  // Project info
+  project: { name: "my-app", language: "typescript", framework: "express", description: "" },
   commands: { test: "bun test", lint: "biome check", build: "bun run build" },
 
-  // Rules injected into every agent prompt
+  // Rules injected into every prompt
   rules: [
     "Never modify migration files",
     "Always use parameterized SQL queries",
@@ -84,230 +121,179 @@ const config: Config = {
   // Files agents must never touch
   boundaries: { neverTouch: ["migrations/**", ".env*"] },
 
-  // Quality gates (all enabled by default)
+  // Quality gates
   gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
 
-  // Cost tracking and budget limit
-  cost: { budgetLimit: 10 },  // $10 max per run, 0 = unlimited
+  // Cost budget ($0 = unlimited)
+  cost: { inputPerMillion: 5, outputPerMillion: 25, budget: 50 },
 };
 
 export default config;
 ```
 
-CLI flags override config for that run: `milhouse --run --workers 2` uses 2 workers regardless of config.
+CLI flags override config: `milhouse --workers 5 --model opus --run`.
 
 ---
 
 ## AI Engines
 
-Milhouse doesn't call APIs directly. It spawns CLI tools as child processes:
+Milhouse spawns CLI tools as child processes — no API keys in your config:
+
+| Engine | Command | Notes |
+|--------|---------|-------|
+| **Claude Code** (default) | `claude` | Stream JSON output, token tracking |
+| **Gemini CLI** | `gemini` | Text output |
+| **Aider** | `aider` | Text output, `--yes-always --no-git` |
 
 ```bash
-milhouse "fix bugs"              # Claude Code (default)
-milhouse --gemini "fix bugs"     # Gemini CLI
-milhouse --aider "fix bugs"      # Aider
-milhouse --opencode "fix bugs"   # OpenCode
-milhouse --codex "fix bugs"      # Codex
-milhouse --model sonnet "fix"    # Override model
-```
-
-The engine and model can also be set in `.milhouse/config.ts`.
-
----
-
-## Pipeline Control
-
-```bash
-# Full pipeline
-milhouse "fix auth bugs"
-milhouse --run --scope "frontend performance"
-
-# Partial pipeline
-milhouse --run --end-phase consolidate    # Plan only, don't execute
-milhouse --run --start-phase exec         # Execute existing plan
-
-# Resume after failure
-milhouse --resume
-
-# Individual phases
-milhouse --scan --scope "security"
-milhouse --validate
-milhouse --exec --workers 5
+milhouse --engine claude "fix bugs"     # Default
+milhouse --engine gemini "fix bugs"
+milhouse --engine aider "fix bugs"
 ```
 
 ---
 
 ## Quality Gates
 
-Every task passes 5 gates during verification:
+Every completed task passes through verification gates:
 
 | Gate | What it blocks |
 |------|----------------|
-| **Evidence** | Claims without `file:line` or probe proof |
-| **Diff Hygiene** | Silent refactors, whitespace changes, extra files |
-| **Placeholder** | `TODO`, `mock`, `return true` stubs |
-| **Env Consistency** | DB/cache changes without probe evidence |
-| **DoD** | Unverifiable acceptance criteria |
+| **Evidence** | Claims without commit or file:line proof |
+| **Diff Hygiene** | Silent refactors, whitespace changes, unrelated files |
+| **Placeholder** | `TODO`, `FIXME`, `mock`, stub code |
+| **DoD** | Unmet acceptance criteria |
 
-Gates are configurable in `.milhouse/config.ts`. Set any to `false` to skip.
-
----
-
-## Probes
-
-Read-only infrastructure probes run during validation:
-
-| Probe | What it checks |
-|-------|----------------|
-| **compose** | Docker Compose topology, .env files |
-| **postgres** | Schemas, migrations, constraints |
-| **redis** | TTL, keyspace, prefix patterns |
-| **storage** | S3/MinIO buckets, filesystem |
-| **deps** | Lockfile vs installed versions |
-| **repro** | Logs, reproduction steps |
-
-Probes auto-detect applicable infrastructure. Skip with `--skip-probes`.
+Disable any gate in config: `gates: { placeholder: false }`.
 
 ---
 
 ## Parallel Execution
 
+Exec phase runs issues in parallel using git worktrees:
+
 ```bash
-milhouse --exec --workers 5        # 5 parallel agents
-milhouse --exec --isolate          # Each issue in its own worktree
-milhouse --exec --pr               # Create PR per issue
-milhouse --exec --pr --draft       # Draft PRs
+milhouse --exec --workers 5    # 5 issues in parallel
 ```
 
-Each issue runs in a dedicated git worktree. Branches merge automatically after all agents complete.
+Each issue gets its own branch (`mh/<issue-id>`) and worktree. Branches merge automatically after completion. Failed merges are skipped with `--abort`.
 
 ---
 
-## Filtering
+## Run State
 
-```bash
-milhouse --validate --issues P-001,P-002       # Specific issues only
-milhouse --run --min-severity HIGH             # HIGH and CRITICAL only
-milhouse --exec --exclude-issues P-003         # Skip specific issues
-milhouse --run --severity CRITICAL,HIGH        # Exact severity match
-```
-
----
-
-## Run Management
-
-Each `--scan` creates a new run. All subsequent phases operate within that run.
-
-```bash
-milhouse runs list                # List all runs
-milhouse runs info [id]           # Show run details
-milhouse runs switch <id>         # Switch active run
-milhouse runs delete <id>         # Delete a run
-milhouse --run-id <id> --exec     # Use specific run
-```
-
----
-
-## Daemon Mode (Overnight Autonomous)
-
-Leave milhouse running overnight. It iterates the pipeline in a loop — scanning for issues, fixing them, re-scanning — until the work is done or a safety limit is hit.
-
-An AI orchestrator agent reviews progress between iterations and decides what to focus on next. Safety rails (budget, max runs, timeouts) are hardcoded and cannot be overridden by the AI.
-
-```bash
-# Fix bugs overnight, stop at 8am
-milhouse daemon start "fix all critical and high bugs" --until 08:00
-
-# Build a system from spec documents with $100 budget
-milhouse daemon start "build the auth system" --input specs/ --budget 100
-
-# Check on progress
-milhouse daemon status
-
-# View event log
-milhouse daemon log
-
-# Stop gracefully
-milhouse daemon stop
-
-# View the overnight report
-milhouse daemon report
-```
-
-### Safety Rails
-
-| Limit | Description |
-|-------|-------------|
-| `--budget <$>` | Stop when session cost reaches limit |
-| `--max-runs <n>` | Stop after N pipeline iterations |
-| `--until <HH:MM>` | Stop at clock time |
-| Consecutive failures | Stop after 3 crashes in a row |
-| Watchdog | Kill hung process after 30min of silence |
-
-### Configuration
-
-Add a `daemon` section to `.milhouse/config.ts`:
-
-```typescript
-daemon: {
-  orchestrator: { enabled: true, model: "sonnet" },
-  safety: { budgetLimit: 50, maxRuns: 20, maxConsecutiveFailures: 3 },
-  watchdog: { activityTimeout: 30, runTimeout: 180 },
-},
-```
-
-### OS Timer Integration
-
-For production reliability, use `milhouse daemon tick` with your OS scheduler:
-
-```bash
-# cron
-*/15 * * * * cd /path/to/project && milhouse daemon tick
-
-# Install OS-native timer (systemd/launchd/schtasks)
-milhouse daemon install --interval 15
-```
-
-Full daemon documentation: [docs/daemon.md](docs/daemon.md)
-
----
-
-## Project Structure
+Each run creates a directory under `.milhouse/runs/`:
 
 ```
 .milhouse/
-├── config.ts               # Central configuration (edit this)
-├── runs/
-│   └── run-20260220-xxx/
-│       ├── meta.json       # Run metadata and phase status
-│       ├── state/
-│       │   ├── issues.json # Work items with evidence
-│       │   └── tasks.json  # Tasks with dependencies
-│       ├── plans/
-│       │   ├── problem_brief.md
-│       │   └── wbs_P-xxx.md
-│       └── probes/         # Probe results
-├── daemon-state.json       # Daemon session state (when running)
-├── daemon-log.jsonl        # Daemon event log (append-only)
-├── daemon.pid              # Daemon PID file
-├── reports/
-│   └── overnight-2026-02-22.md  # Daemon session reports
-└── work/
-    └── worktrees/          # Isolated execution environments
+├── config.ts                   # Your config
+├── runs-index.json             # All runs
+└── runs/
+    └── run-20260304-xxx/
+        ├── meta.json           # Phase, timing, stats
+        ├── state/
+        │   ├── issues.json     # Scanned + validated issues
+        │   ├── tasks.json      # Planned tasks with status
+        │   └── verification.json
+        └── plans/
+            └── P-xxx.md        # Per-issue execution plans
+```
+
+Resume picks up from the last completed phase:
+
+```bash
+milhouse --resume              # Latest run
+milhouse --resume --run-id run-20260304-xxx
 ```
 
 ---
 
-## Install from Source
+## Architecture
+
+```
+src/
+├── index.ts          CLI entry point (parseArgs)
+├── config.ts         loadConfig + deepMerge + defaults
+├── pipeline.ts       Phase loop with budget gate
+├── runner.ts         Execute one phase: parallel AI calls + retry
+├── engine.ts         Spawn claude/gemini/aider + parse output
+├── state.ts          RunStore: all JSON read/write
+├── git.ts            Worktree create/cleanup/merge
+├── cost.ts           Token counting + budget
+├── report.ts         Run report generation
+├── types.ts          All types in one file
+├── ui.ts             Spinner + colored logger
+├── util.ts           JSON extraction + helpers
+├── prompts/
+│   ├── base.ts       PromptBuilder (shared patterns)
+│   ├── scan.ts       Lead Investigator prompt
+│   ├── validate.ts   Issue Validator prompt
+│   ├── plan.ts       Planner prompt
+│   ├── consolidate.ts Dependency Manager prompt
+│   ├── exec.ts       Executor prompt
+│   └── verify.ts     Truth Verifier prompt
+└── phases/
+    ├── scan.ts       loadItems → prompt → parse → save
+    ├── validate.ts
+    ├── plan.ts
+    ├── consolidate.ts
+    ├── exec.ts
+    └── verify.ts
+```
+
+Every phase implements the same interface:
+
+```typescript
+interface PhaseConfig<TItem, TResult> {
+  name: Phase;
+  schema?: Record<string, unknown>;
+  maxTurns?: number;
+  timeout?: number;
+  loadItems(store, config): TItem[];
+  buildPrompt(item, store, config): string;
+  parseResponse(response, item): TResult;
+  saveResults(results, store): void;
+}
+```
+
+---
+
+## Dependencies
+
+```json
+{
+  "dependencies": {
+    "p-limit": "^7.2.0",
+    "picocolors": "^1.1.1"
+  }
+}
+```
+
+Everything else is built-in: `util.parseArgs` for CLI, `Bun.spawn` for processes, `fs` for state.
+
+---
+
+## Development
 
 ```bash
 git clone https://github.com/eizorerad/milhouse.git
 cd milhouse
 pnpm install
-pnpm link --global
+
+# Dev mode
+bun run src/index.ts "fix bugs"
+
+# Tests
+bun test
+
+# Build
+bun run build
+
+# Type check
+pnpm typecheck
 ```
 
-Requires [Bun](https://bun.sh) for runtime and [pnpm](https://pnpm.io) for packages.
+Requires [Bun](https://bun.sh) ≥ 1.0.
 
 ---
 
@@ -318,14 +304,3 @@ MIT
 ---
 
 **Stop guessing. Start verifying.**
-
-```
-npm install -g milhouse-cli
-```
-
-
-**dev mode**
-
-```bash
-bun run src/index.ts --run "fix data flow bugs" --severity CRITICAL,HIGH
-```

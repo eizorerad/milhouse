@@ -1,0 +1,3 @@
+[test]
+# Only run tests from the current project, not from old/ reference code
+root = "./tests"

@@ -1,180 +1,164 @@
 #!/usr/bin/env bun
-import { parseArgs } from "./cli/args.ts";
-import { addRule, showConfig } from "./cli/commands/config.ts";
-import { parseFormats, runExport } from "./cli/commands/export.ts";
-import { runInit } from "./cli/commands/init.ts";
-import { runConsolidatePipeline } from "./cli/commands/pipeline/consolidate.ts";
-import { runExecPipeline } from "./cli/commands/pipeline/exec.ts";
-import { runPlanPipeline } from "./cli/commands/pipeline/plan.ts";
-import { runScanPipeline } from "./cli/commands/pipeline/scan.ts";
-import { runValidatePipeline } from "./cli/commands/pipeline/validate.ts";
-import { runVerifyPipeline } from "./cli/commands/pipeline/verify.ts";
-import { runReport } from "./cli/commands/report.ts";
-import { runPipelineV2 } from "./cli/commands/run.ts";
-import { daemonCommand } from "./cli/commands/daemon.ts";
-import { runsCommand } from "./cli/commands/runs.ts";
-import { logError } from "./ui/logger.ts";
+/**
+ * Milhouse v0.3 — CLI entry point.
+ *
+ * Usage:
+ *   milhouse "fix auth bugs"           # Full pipeline with scope
+ *   milhouse --run                      # Full pipeline
+ *   milhouse --scan --scope "bugs"      # Single phase
+ *   milhouse --resume                   # Resume from last checkpoint
+ *   milhouse --report                   # Show report for latest run
+ *   milhouse --init                     # Initialize project
+ */
+
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { parseArgs } from "node:util";
+import { CONFIG_TEMPLATE, loadConfig } from "./config.ts";
+import { runPipeline } from "./pipeline.ts";
+import { formatReportMarkdown, formatReportTerminal, generateReport } from "./report.ts";
+import { RunStore } from "./state.ts";
+import type { Phase } from "./types.ts";
+import { log, setVerbose } from "./ui.ts";
 
 async function main(): Promise<void> {
-	try {
-		const {
-			options,
-			task,
-			initMode,
-			showConfig: showConfigMode,
-			addRule: rule,
-			scanMode,
-			validateMode,
-			planMode,
-			consolidateMode,
-			execMode,
-			verifyMode,
-			exportMode,
-			exportFormat,
-			runMode,
-			resumeMode,
-			forceMode,
-			failFast: _failFast,
-			startPhase,
-			endPhase,
-			runsMode,
-			runsSubcommand,
-			runsArgs,
-			daemonMode,
-			daemonSubcommand,
-			daemonArgs,
-		} = parseArgs(process.argv);
+	const { values: opts, positionals } = parseArgs({
+		args: process.argv.slice(2),
+		options: {
+			// Pipeline
+			run: { type: "boolean", default: false },
+			resume: { type: "boolean", default: false },
+			init: { type: "boolean", default: false },
+			report: { type: "boolean", default: false },
+			// Individual phases
+			scan: { type: "boolean", default: false },
+			validate: { type: "boolean", default: false },
+			plan: { type: "boolean", default: false },
+			consolidate: { type: "boolean", default: false },
+			exec: { type: "boolean", default: false },
+			verify: { type: "boolean", default: false },
+			// Options
+			scope: { type: "string" },
+			workers: { type: "string" },
+			model: { type: "string" },
+			engine: { type: "string" },
+			"run-id": { type: "string" },
+			format: { type: "string" }, // "md" | "terminal"
+			verbose: { type: "boolean", short: "v", default: false },
+			help: { type: "boolean", short: "h", default: false },
+		},
+		allowPositionals: true,
+		strict: false,
+	});
 
-		// Handle "milhouse daemon" subcommand
-		if (daemonMode) {
-			await daemonCommand(daemonSubcommand, daemonArgs, {
-				workDir: process.cwd(),
-				options,
-			});
-			return;
-		}
+	if (opts.verbose) setVerbose(true);
 
-		// Handle "milhouse runs" subcommand
-		if (runsMode) {
-			if (!runsSubcommand) {
-				await runsCommand("list", runsArgs, { workDir: process.cwd() });
-			} else {
-				await runsCommand(runsSubcommand, runsArgs, { workDir: process.cwd() });
-			}
-			return;
-		}
+	if (opts.help) {
+		printHelp();
+		return;
+	}
 
-		// Handle --init
-		if (initMode) {
-			await runInit();
-			return;
-		}
+	// --init
+	if (opts.init) {
+		await initProject();
+		return;
+	}
 
-		// Handle --config
-		if (showConfigMode) {
-			await showConfig();
-			return;
-		}
+	// --report
+	if (opts.report) {
+		await showReport(opts["run-id"] as string | undefined, opts.format as string | undefined);
+		return;
+	}
 
-		// Handle --add-rule
-		if (rule) {
-			await addRule(rule);
-			return;
-		}
+	const workDir = process.cwd();
+	const scope = opts.scope ?? (positionals.join(" ") || undefined);
 
-		// Handle --scan (PhaseRunner)
-		if (scanMode) {
-			await runScanPipeline(options);
-			return;
-		}
+	// Build CLI overrides
+	const overrides: Record<string, unknown> = {};
+	if (opts.engine && typeof opts.engine === "string") overrides.engine = opts.engine;
+	if (opts.model && typeof opts.model === "string") overrides.model = opts.model;
+	if (opts.workers && typeof opts.workers === "string") {
+		const w = Number.parseInt(opts.workers, 10);
+		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
+	}
 
-		// Handle --validate (PhaseRunner)
-		if (validateMode) {
-			await runValidatePipeline(options);
-			return;
-		}
+	const config = await loadConfig(workDir, overrides);
 
-		// Handle --plan (PhaseRunner)
-		if (planMode) {
-			await runPlanPipeline(options);
-			return;
-		}
+	// Single phase mode
+	const phaseFlags: Phase[] = ["scan", "validate", "plan", "consolidate", "exec", "verify"];
+	const selectedPhase = phaseFlags.find((p) => opts[p as keyof typeof opts]);
+	if (selectedPhase) {
+		config.pipeline = [selectedPhase];
+	}
 
-		// Handle --consolidate (PhaseRunner)
-		if (consolidateMode) {
-			await runConsolidatePipeline(options);
-			return;
-		}
+	await runPipeline(config, {
+		scope: typeof scope === "string" ? scope : undefined,
+		resume: opts.resume === true,
+		runId: typeof opts["run-id"] === "string" ? opts["run-id"] : undefined,
+	});
+}
 
-		// Handle --exec (PhaseRunner)
-		if (execMode) {
-			await runExecPipeline(options);
-			return;
-		}
+async function showReport(runId?: string, format?: string): Promise<void> {
+	const workDir = process.cwd();
+	const store = runId ? RunStore.byId(workDir, runId) : RunStore.latest(workDir);
 
-		// Handle --verify (PhaseRunner)
-		if (verifyMode) {
-			await runVerifyPipeline(options);
-			return;
-		}
+	if (!store) {
+		log.error("No runs found. Start with: milhouse --run");
+		return;
+	}
 
-		// Handle --export
-		if (exportMode) {
-			await runExport(options, { formats: parseFormats(exportFormat) });
-			return;
-		}
+	const report = generateReport(store);
 
-		// Handle --run (new pipeline orchestrator)
-		if (runMode || resumeMode) {
-			// If --run "some scope" was used, set scanFocus from the task argument
-			// (the task arg is the positional arg, not consumed by --run which is boolean)
-			if (task && !options.scanFocus) {
-				options.scanFocus = task;
-			}
-			await runPipelineV2(options, {
-				startPhase,
-				endPhase,
-				resume: resumeMode,
-				force: forceMode,
-			});
-			return;
-		}
-
-		// Command aliases (e.g., "milhouse scan" as alias for "milhouse --scan")
-		if (task) {
-			const commandAliases: Record<string, () => Promise<unknown>> = {
-				scan: () => runScanPipeline(options),
-				validate: () => runValidatePipeline(options),
-				plan: () => runPlanPipeline(options),
-				consolidate: () => runConsolidatePipeline(options),
-				exec: () => runExecPipeline(options),
-				verify: () => runVerifyPipeline(options),
-				report: () => runReport(options),
-				init: () => runInit(),
-				config: () => showConfig(),
-			};
-
-			const aliasHandler = commandAliases[task.toLowerCase()];
-			if (aliasHandler) {
-				await aliasHandler();
-				return;
-			}
-
-			// Any other text → run full pipeline with it as scope
-			options.scanFocus = task;
-		}
-
-		// Default: run full pipeline
-		await runPipelineV2(options, {
-			startPhase,
-			endPhase,
-			resume: resumeMode,
-			force: forceMode,
-		});
-	} catch (error) {
-		logError(error instanceof Error ? error.message : String(error));
-		process.exit(1);
+	if (format === "md" || format === "markdown") {
+		console.log(formatReportMarkdown(report));
+	} else {
+		console.log(formatReportTerminal(report));
 	}
 }
 
-main();
+async function initProject(): Promise<void> {
+	const dir = join(process.cwd(), ".milhouse");
+	const configPath = join(dir, "config.ts");
+
+	if (existsSync(configPath)) {
+		log.warn(".milhouse/config.ts already exists");
+		return;
+	}
+
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(configPath, CONFIG_TEMPLATE);
+	log.success("Created .milhouse/config.ts");
+}
+
+function printHelp(): void {
+	console.log(`
+milhouse v0.3 — Correctness-first AI coding orchestrator
+
+Usage:
+  milhouse "fix auth bugs"              Full pipeline with scope
+  milhouse --run                        Full pipeline
+  milhouse --scan --scope "bugs"        Single phase
+  milhouse --resume                     Resume from checkpoint
+  milhouse --report                     Show latest run report
+  milhouse --report --format md         Report as markdown
+  milhouse --init                       Initialize project
+
+Pipeline:
+  scan → validate → plan → consolidate → exec → verify
+
+Options:
+  --scope <text>      Focus area for scan
+  --engine <name>     AI engine (claude, gemini, aider)
+  --model <name>      Model override
+  --workers <n>       Parallel workers for exec
+  --run-id <id>       Specific run ID
+  --format <fmt>      Report format: terminal (default) | md
+  -v, --verbose       Verbose output
+  -h, --help          Show help
+`);
+}
+
+main().catch((err) => {
+	log.error(err instanceof Error ? err.message : String(err));
+	process.exit(1);
+});
