@@ -30,7 +30,7 @@ export function extractJson(response: string): string | null {
 			if (trimmed[i] === '"') {
 				i++;
 				while (i < trimmed.length && trimmed[i] !== '"') {
-					if (trimmed[i] === '\\') i++;
+					if (trimmed[i] === "\\") i++;
 					i++;
 				}
 				continue;

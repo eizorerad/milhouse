@@ -61,6 +61,16 @@ describe("extractJson", () => {
 		const input = '["arr[0]", "obj{x}"]';
 		expect(extractJson(input)).toBe(input);
 	});
+
+	it("handles top-level closing delimiters inside string values", () => {
+		const input = '{"msg": "}"}';
+		expect(extractJson(input)).toBe(input);
+	});
+
+	it("handles top-level closing delimiters inside array strings", () => {
+		const input = '["]"]';
+		expect(extractJson(input)).toBe(input);
+	});
 });
 
 describe("generateId", () => {

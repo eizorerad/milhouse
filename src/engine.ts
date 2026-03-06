@@ -192,7 +192,7 @@ export async function execute(
 	}
 
 	// Race: output vs timeout
-	let timerId: ReturnType<typeof setTimeout>;
+	let timerId: ReturnType<typeof setTimeout> | undefined;
 	const timeoutPromise = new Promise<never>((_, reject) => {
 		timerId = setTimeout(() => {
 			try { proc.kill(); } catch {}
@@ -214,5 +214,7 @@ export async function execute(
 		return spec.parseOutput(stdout);
 	})();
 
-	return Promise.race([outputPromise, timeoutPromise]).finally(() => clearTimeout(timerId));
+	return Promise.race([outputPromise, timeoutPromise]).finally(() => {
+		if (timerId !== undefined) clearTimeout(timerId);
+	});
 }
