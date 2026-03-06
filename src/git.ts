@@ -81,6 +81,7 @@ export async function mergeCompletedBranches(
 
 	log.info(`Merging ${branches.length} branch(es)...`);
 
+	const mergedBranches: string[] = [];
 	for (const branch of branches) {
 		const result = await git(
 			["merge", "--no-ff", branch, "-m", `Merge ${branch}`],
@@ -88,14 +89,15 @@ export async function mergeCompletedBranches(
 		);
 		if (result.ok) {
 			log.success(`Merged ${branch}`);
+			mergedBranches.push(branch);
 		} else {
-			log.warn(`Merge failed for ${branch}, aborting and skipping`);
+			log.warn(`Merge failed for ${branch}, aborting and skipping. Branch preserved for manual resolution.`);
 			await git(["merge", "--abort"], baseDir);
 		}
 	}
 
-	// Cleanup merged branches
-	for (const branch of branches) {
+	// Cleanup only successfully merged branches
+	for (const branch of mergedBranches) {
 		await git(["branch", "-D", branch], baseDir);
 	}
 }
