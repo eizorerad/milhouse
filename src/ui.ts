@@ -87,19 +87,6 @@ export const theme = {
 	} as Record<string, (t: string) => string>,
 };
 
-// ASCII-safe icons (no emoji — works everywhere)
-export const icons: Record<string, string> = {
-	scan: ">",
-	validate: "v",
-	plan: "p",
-	consolidate: "c",
-	exec: "x",
-	verify: "?",
-	success: "+",
-	error: "x",
-	warning: "!",
-	info: "*",
-};
 
 // ─── Banner ─────────────────────────────────────────────────────────────────
 
