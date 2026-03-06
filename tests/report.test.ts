@@ -2,12 +2,17 @@
  * Tests for report generation.
  */
 
-import { describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	type RunReport,
 	formatReportMarkdown,
 	formatReportTerminal,
+	generateReport,
 } from "../src/report.ts";
+import { RunStore } from "../src/state.ts";
 
 const mockReport: RunReport = {
 	meta: {
@@ -93,6 +98,44 @@ describe("formatReportMarkdown", () => {
 	it("includes duration", () => {
 		const md = formatReportMarkdown(mockReport);
 		expect(md).toContain("1h 30m");
+	});
+});
+
+describe("generateReport", () => {
+	let tmpDir: string;
+
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-report-test-"));
+	});
+
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("includes verification data from store", () => {
+		const store = RunStore.create(tmpDir);
+		store.saveVerification({
+			overall_pass: true,
+			tasks: [
+				{ overall_pass: true },
+				{ overall_pass: true },
+				{ overall_pass: false },
+			],
+		});
+
+		const report = generateReport(store);
+		expect(report.verification.overall_pass).toBe(true);
+		expect(report.verification.passed).toBe(2);
+		expect(report.verification.failed).toBe(1);
+	});
+
+	it("handles missing verification data", () => {
+		const store = RunStore.create(tmpDir);
+
+		const report = generateReport(store);
+		expect(report.verification.overall_pass).toBe(false);
+		expect(report.verification.passed).toBe(0);
+		expect(report.verification.failed).toBe(0);
 	});
 });
 
