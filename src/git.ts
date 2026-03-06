@@ -109,3 +109,41 @@ export async function getCurrentBranch(baseDir: string): Promise<string> {
 	const result = await git(["branch", "--show-current"], baseDir);
 	return result.stdout || "main";
 }
+
+/**
+ * Parse task numbers from git log output.
+ * Matches commit messages like `[ISSUE-ID] Task N: title`.
+ */
+export function parseTaskNumbersFromLog(logOutput: string): Set<number> {
+	const result = new Set<number>();
+	const regex = /\[.+?\]\s+Task\s+(\d+):/g;
+	let match: RegExpExecArray | null;
+	while ((match = regex.exec(logOutput)) !== null) {
+		result.add(Number(match[1]));
+	}
+	return result;
+}
+
+/**
+ * Get task numbers that have commits on a branch for a given issue.
+ */
+export async function getCommittedTaskNumbers(
+	issueId: string,
+	branch: string,
+	cwd: string,
+): Promise<Set<number>> {
+	const result = await git(
+		["log", branch, "--oneline", `--grep=[${issueId}]`],
+		cwd,
+	);
+	if (!result.ok) return new Set();
+	return parseTaskNumbersFromLog(result.stdout);
+}
+
+/**
+ * Check if a branch exists.
+ */
+export async function branchExists(branch: string, cwd: string): Promise<boolean> {
+	const result = await git(["rev-parse", "--verify", branch], cwd);
+	return result.ok;
+}

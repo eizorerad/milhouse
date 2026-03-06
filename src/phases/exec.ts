@@ -4,6 +4,7 @@
  * Worktree management is handled by the runner.
  */
 
+import { branchExists, getCommittedTaskNumbers } from "../git.ts";
 import { buildExecPrompt } from "../prompts/exec.ts";
 import type { RunStore } from "../state.ts";
 import type { Config, Issue, IssueGroup, PhaseConfig, Task } from "../types.ts";
@@ -61,7 +62,7 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 		return { issueId: item.issueId, taskIds: item.tasks.map(t => t.id) };
 	},
 
-	saveResults(results, store) {
+	async saveResults(results, store) {
 		// Batch update: load all tasks once, apply all changes, save once
 		const allTasks: Task[] = store.loadTasks();
 		const taskMap = new Map<string, Task>(allTasks.map((t: Task) => [t.id, t]));
@@ -71,13 +72,46 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 
 		for (const r of results) {
 			const group = r.item as IssueGroup;
+			const sorted = [...group.tasks].sort((a, b) => a.parallel_group - b.parallel_group);
+
+			// Build a map from task number (1-indexed) to task id
+			const numberToId = new Map<number, string>();
+			for (let i = 0; i < sorted.length; i++) {
+				numberToId.set(i + 1, sorted[i].id);
+			}
+
+			let committedNumbers: Set<number>;
+
+			if (r.success) {
+				// Success path: commits are on HEAD after merge
+				committedNumbers = await getCommittedTaskNumbers(group.issueId, "HEAD", store.workDir);
+			} else {
+				// Failure path: check if branch still exists for partial commits
+				const branch = `mh/${group.issueId}`;
+				const exists = await branchExists(branch, store.workDir);
+				committedNumbers = exists
+					? await getCommittedTaskNumbers(group.issueId, branch, store.workDir)
+					: new Set();
+			}
+
+			// Determine which task ids were committed
+			const committedIds = new Set<string>();
+			for (const [num, id] of numberToId) {
+				if (committedNumbers.has(num)) committedIds.add(id);
+			}
+
 			for (const groupTask of group.tasks) {
 				const task = taskMap.get(groupTask.id);
 				if (!task) continue;
-				if (r.success) {
+
+				if (committedIds.has(groupTask.id)) {
 					task.status = "done";
 					task.updated_at = timestamp;
 					completed++;
+				} else if (r.success) {
+					// Success but task wasn't committed — leave as pending
+					task.status = "pending";
+					task.updated_at = timestamp;
 				} else {
 					task.status = "failed";
 					task.error = r.error;
