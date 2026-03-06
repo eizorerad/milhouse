@@ -10,7 +10,7 @@ import { execute } from "./engine.ts";
 import { cleanupWorktree, createWorktree, mergeCompletedBranches } from "./git.ts";
 import type { RunStore } from "./state.ts";
 import type { Config, EngineResult, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
-import { ParallelSpinner, Spinner, log } from "./ui.ts";
+import { ParallelSpinner, Spinner, log, theme } from "./ui.ts";
 
 /**
  * Run a single phase with parallel execution, retry, and live progress.
@@ -126,7 +126,10 @@ export async function runPhase<TItem, TResult>(
 						};
 					} catch (err) {
 						lastError = err instanceof Error ? err.message : String(err);
-						log.warn(`[${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`);
+						const warnMsg = `${theme.warning("!")} [${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`;
+						if (spinner) spinner.writeLine(warnMsg);
+						else if (parallel) parallel.writeLine(warnMsg);
+						else log.warn(`[${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`);
 						if (attempt < maxRetries) {
 							await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
 						}

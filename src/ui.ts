@@ -204,6 +204,19 @@ export class Spinner {
 		this.text = text;
 	}
 
+	/** Write a line cleanly during active spinner rendering. */
+	writeLine(msg: string): void {
+		if (this.timer) clearInterval(this.timer);
+		process.stdout.write("\r\x1b[K");
+		process.stdout.write(msg + "\n");
+		if (this.timer) {
+			this.timer = setInterval(() => {
+				this.render();
+				this.frame++;
+			}, 120);
+		}
+	}
+
 	private stop(finalText: string): void {
 		if (this.timer) { clearInterval(this.timer); this.timer = null; }
 		process.stdout.write(`\r${finalText}`);
@@ -318,6 +331,19 @@ export class ParallelSpinner {
 	releaseSlot(slotNum: number): void {
 		this.completed++;
 		this.slots.set(slotNum, { id: null, status: "idle" });
+	}
+
+	/** Write a line cleanly during active spinner rendering. */
+	writeLine(msg: string): void {
+		if (this.timer) clearInterval(this.timer);
+		process.stdout.write("\r\x1b[K");
+		process.stdout.write(msg + "\n");
+		if (this.timer) {
+			this.timer = setInterval(() => {
+				this.render();
+				this.frame++;
+			}, 120);
+		}
 	}
 
 	private stop(finalText: string): void {
