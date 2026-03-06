@@ -148,14 +148,22 @@ export const log = {
 	},
 };
 
-// ─── Elapsed time formatting ────────────────────────────────────────────────
+// ─── Time formatting ────────────────────────────────────────────────────────
+
+export function formatDuration(ms: number): string {
+	if (ms <= 0) return "N/A";
+	const secs = Math.floor(ms / 1000);
+	if (secs < 60) return `${secs}s`;
+	const mins = Math.floor(secs / 60);
+	const remSecs = secs % 60;
+	if (mins < 60) return `${mins}m ${remSecs}s`;
+	const hours = Math.floor(mins / 60);
+	const remMins = mins % 60;
+	return `${hours}h ${remMins}m`;
+}
 
 function formatElapsed(startTime: number): string {
-	const elapsed = Date.now() - startTime;
-	const secs = Math.floor(elapsed / 1000);
-	const mins = Math.floor(secs / 60);
-	const rem = secs % 60;
-	return mins > 0 ? `${mins}m ${rem}s` : `${secs}s`;
+	return formatDuration(Date.now() - startTime);
 }
 
 // ─── Terminal width ─────────────────────────────────────────────────────────
