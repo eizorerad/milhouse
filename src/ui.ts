@@ -4,49 +4,7 @@
  * Uses picocolors + raw stdout writes.
  */
 
-import { createRequire } from "node:module";
-
-type ColorFn = (text: string) => string;
-
-interface PicoColorsLike {
-	isColorSupported: boolean;
-	bold: ColorFn;
-	cyan: ColorFn;
-	dim: ColorFn;
-	gray: ColorFn;
-	yellow: ColorFn;
-}
-
-function identity(text: string): string {
-	return text;
-}
-
-function loadColors(): PicoColorsLike {
-	const require = createRequire(import.meta.url);
-	try {
-		const mod = require("picocolors");
-		const pc = (mod.default ?? mod) as Partial<PicoColorsLike>;
-		return {
-			isColorSupported: pc.isColorSupported ?? false,
-			bold: pc.bold ?? identity,
-			cyan: pc.cyan ?? identity,
-			dim: pc.dim ?? identity,
-			gray: pc.gray ?? identity,
-			yellow: pc.yellow ?? identity,
-		};
-	} catch {
-		return {
-			isColorSupported: false,
-			bold: identity,
-			cyan: identity,
-			dim: identity,
-			gray: identity,
-			yellow: identity,
-		};
-	}
-}
-
-const pc = loadColors();
+import pc from "picocolors";
 
 // ─── Verbose flag ────────────────────────────────────────────────────────────
 
