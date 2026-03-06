@@ -210,6 +210,11 @@ export class RunStore {
 		return new RunStore(workDir, last.id);
 	}
 
+	static list(workDir: string): RunsIndex["runs"] {
+		const indexPath = join(workDir, ".milhouse", "runs-index.json");
+		return readJson<RunsIndex>(indexPath, { runs: [] }).runs;
+	}
+
 	static byId(workDir: string, runId: string): RunStore {
 		return new RunStore(workDir, runId);
 	}

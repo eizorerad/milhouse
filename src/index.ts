@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import pc from "picocolors";
 import { CONFIG_TEMPLATE, loadConfig } from "./config.ts";
 import { runPipeline } from "./pipeline.ts";
 import { formatReportMarkdown, formatReportTerminal, generateReport } from "./report.ts";
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
 			resume: { type: "boolean", default: false },
 			init: { type: "boolean", default: false },
 			report: { type: "boolean", default: false },
+			runs: { type: "boolean", default: false },
 			// Individual phases
 			scan: { type: "boolean", default: false },
 			validate: { type: "boolean", default: false },
@@ -61,6 +63,12 @@ async function main(): Promise<void> {
 	// --init
 	if (opts.init) {
 		await initProject();
+		return;
+	}
+
+	// --runs
+	if (opts.runs) {
+		showRuns();
 		return;
 	}
 
@@ -96,6 +104,43 @@ async function main(): Promise<void> {
 		resume: opts.resume === true,
 		runId: typeof opts["run-id"] === "string" ? opts["run-id"] : undefined,
 	});
+}
+
+function showRuns(): void {
+	const workDir = process.cwd();
+	const runs = RunStore.list(workDir);
+
+	if (runs.length === 0) {
+		console.log("No runs found.");
+		return;
+	}
+
+	// Column widths
+	const idW = Math.max(2, ...runs.map((r) => r.id.length));
+	const scopeW = Math.max(5, ...runs.map((r) => (r.scope ?? "-").length));
+	const phaseW = Math.max(5, ...runs.map((r) => r.phase.length));
+	const createdW = Math.max(7, ...runs.map((r) => r.created_at.length));
+
+	const header = [
+		"ID".padEnd(idW),
+		"Scope".padEnd(scopeW),
+		"Phase".padEnd(phaseW),
+		"Created".padEnd(createdW),
+	].join("  ");
+
+	console.log(pc.bold(header));
+	console.log(pc.dim("-".repeat(header.length)));
+
+	for (const run of runs) {
+		console.log(
+			[
+				run.id.padEnd(idW),
+				(run.scope ?? "-").padEnd(scopeW),
+				run.phase.padEnd(phaseW),
+				run.created_at.padEnd(createdW),
+			].join("  "),
+		);
+	}
 }
 
 async function showReport(runId?: string, format?: string): Promise<void> {
@@ -139,6 +184,7 @@ Usage:
   milhouse --run                        Full pipeline
   milhouse --scan --scope "bugs"        Single phase
   milhouse --resume                     Resume from checkpoint
+  milhouse --runs                       List all runs
   milhouse --report                     Show latest run report
   milhouse --report --format md         Report as markdown
   milhouse --init                       Initialize project
