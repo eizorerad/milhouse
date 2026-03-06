@@ -2,7 +2,7 @@
  * Pipeline — loop over phases with budget checking.
  */
 
-import { createRunCost, formatCost, isBudgetExceeded } from "./cost.ts";
+import { formatCost, isBudgetExceeded } from "./cost.ts";
 import { scanPhase } from "./phases/scan.ts";
 import { validatePhase } from "./phases/validate.ts";
 import { planPhase } from "./phases/plan.ts";
@@ -49,7 +49,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		log.info(`New run: ${store.runId}`);
 	}
 
-	const cost = createRunCost();
+	const cost = store.loadCost();
 
 	printBanner();
 	log.info(`Pipeline: ${config.pipeline.join(" → ")}`);
@@ -74,6 +74,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		store.updatePhase(phaseName);
 
 		const results = await runPhase(phase, store, config, cost);
+		store.saveCost(cost);
 
 		// Stop if no results or all failed (and failFast)
 		const anySuccess = results.some((r) => r.success);
