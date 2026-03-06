@@ -103,6 +103,7 @@ export async function runPhase<TItem, TResult>(
 
 						// Track cost
 						addTokens(runCost, aiResult.inputTokens, aiResult.outputTokens, config);
+						store.saveCost(runCost);
 
 						if (parallel && slot != null) parallel.updateSlot(slot, "parsing");
 						if (spinner) spinner.update(`${phase.name} -- parsing response...`);
