@@ -167,6 +167,10 @@ export class RunStore {
 		writeJson(join(this.stateDir, "verification.json"), data);
 	}
 
+	loadVerification(): unknown {
+		return readJson<unknown>(join(this.stateDir, "verification.json"), null);
+	}
+
 	// ─── Static Constructors ───────────────────────────────────────
 
 	static create(workDir: string, scope?: string): RunStore {

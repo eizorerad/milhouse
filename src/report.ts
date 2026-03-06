@@ -2,8 +2,6 @@
  * Report — generate a summary report for a completed run.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { RunStore } from "./state.ts";
 import type { Issue, RunMeta, Task } from "./types.ts";
 
@@ -67,24 +65,14 @@ export function generateReport(store: RunStore): RunReport {
 
 	// Verification stats
 	let verificationStats = { passed: 0, failed: 0, overall_pass: false };
-	try {
-		const verPath = join(
-			store.workDir,
-			".milhouse",
-			"runs",
-			store.runId,
-			"state",
-			"verification.json",
-		);
-		const verData = JSON.parse(readFileSync(verPath, "utf-8"));
+	const verData = store.loadVerification() as Record<string, unknown> | null;
+	if (verData) {
 		const verTasks = Array.isArray(verData.tasks) ? verData.tasks : [];
 		verificationStats = {
 			passed: verTasks.filter((t: { overall_pass?: boolean }) => t.overall_pass).length,
 			failed: verTasks.filter((t: { overall_pass?: boolean }) => !t.overall_pass).length,
 			overall_pass: verData.overall_pass === true,
 		};
-	} catch {
-		// No verification data
 	}
 
 	// Timeline
