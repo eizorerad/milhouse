@@ -192,8 +192,9 @@ export async function execute(
 	}
 
 	// Race: output vs timeout
+	let timerId: ReturnType<typeof setTimeout>;
 	const timeoutPromise = new Promise<never>((_, reject) => {
-		setTimeout(() => {
+		timerId = setTimeout(() => {
 			try { proc.kill(); } catch {}
 			reject(new Error(`Engine ${spec.command} timed out after ${Math.round(timeout / 1000)}s`));
 		}, timeout);
@@ -213,5 +214,5 @@ export async function execute(
 		return spec.parseOutput(stdout);
 	})();
 
-	return Promise.race([outputPromise, timeoutPromise]);
+	return Promise.race([outputPromise, timeoutPromise]).finally(() => clearTimeout(timerId));
 }
