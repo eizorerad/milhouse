@@ -4,10 +4,6 @@
 
 import type { Config, RunCost } from "./types.ts";
 
-export function createRunCost(): RunCost {
-	return { inputTokens: 0, outputTokens: 0, totalCost: 0 };
-}
-
 export function addTokens(
 	cost: RunCost,
 	inputTokens: number,

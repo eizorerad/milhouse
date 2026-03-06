@@ -5,7 +5,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Issue, RunMeta, Task } from "./types.ts";
+import type { Issue, RunCost, RunMeta, Task } from "./types.ts";
 
 function now(): string {
 	return new Date().toISOString();
@@ -145,6 +145,20 @@ export class RunStore {
 
 	loadPlan(issueId: string): string | null {
 		return readTextFile(join(this.plansDir, `${issueId}.md`));
+	}
+
+	// ─── Cost ─────────────────────────────────────────────────────
+
+	loadCost(): RunCost {
+		return readJson<RunCost>(join(this.stateDir, "cost.json"), {
+			inputTokens: 0,
+			outputTokens: 0,
+			totalCost: 0,
+		});
+	}
+
+	saveCost(cost: RunCost): void {
+		writeJson(join(this.stateDir, "cost.json"), cost);
 	}
 
 	// ─── Verification ──────────────────────────────────────────────
