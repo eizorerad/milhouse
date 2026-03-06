@@ -126,6 +126,18 @@ function clearLine(): void {
 
 const FRAMES = ["|", "/", "-", "\\"];
 
+// ─── Shared stop/finish helper ──────────────────────────────────────────────
+
+function finishLine(
+	timer: ReturnType<typeof setInterval> | null,
+	finalText: string,
+): void {
+	if (timer) clearInterval(timer);
+	process.stdout.write(`\r${finalText}`);
+	clearLine();
+	process.stdout.write("\n");
+}
+
 // ─── Single Spinner (for single-item phases like scan, consolidate) ─────────
 
 export class Spinner {
@@ -172,10 +184,8 @@ export class Spinner {
 	}
 
 	private stop(finalText: string): void {
-		if (this.timer) { clearInterval(this.timer); this.timer = null; }
-		process.stdout.write(`\r${finalText}`);
-		clearLine();
-		process.stdout.write("\n");
+		finishLine(this.timer, finalText);
+		this.timer = null;
 	}
 
 	success(text?: string): void {
@@ -301,10 +311,8 @@ export class ParallelSpinner {
 	}
 
 	private stop(finalText: string): void {
-		if (this.timer) { clearInterval(this.timer); this.timer = null; }
-		process.stdout.write(`\r${finalText}`);
-		clearLine();
-		process.stdout.write("\n");
+		finishLine(this.timer, finalText);
+		this.timer = null;
 	}
 
 	success(text?: string): void {
