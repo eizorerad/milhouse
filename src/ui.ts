@@ -46,13 +46,25 @@ export const theme = {
 };
 
 
+// ─── ANSI helpers ───────────────────────────────────────────────────────────
+
+/** Strip ANSI escape codes from a string to get visible width. */
+export function stripAnsi(str: string): string {
+	return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 // ─── Banner ─────────────────────────────────────────────────────────────────
 
 export function printBanner(): void {
+	const innerWidth = 41;
+	const border = theme.brand(`+${"-".repeat(innerWidth)}+`);
+	const content = `  ${pc.bold(theme.brand("MILHOUSE"))} ${pc.gray("-- Pipeline Orchestrator")}`;
+	const visibleLen = stripAnsi(content).length;
+	const padding = " ".repeat(Math.max(0, innerWidth - visibleLen));
 	console.log("");
-	console.log(theme.brand("+-----------------------------------------+"));
-	console.log(`${theme.brand("|")}  ${pc.bold(theme.brand("MILHOUSE"))} ${pc.gray("-- Pipeline Orchestrator")}    ${theme.brand("|")}`);
-	console.log(theme.brand("+-----------------------------------------+"));
+	console.log(border);
+	console.log(`${theme.brand("|")}${content}${padding}${theme.brand("|")}`);
+	console.log(border);
 	console.log("");
 }
 
