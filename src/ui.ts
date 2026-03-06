@@ -331,10 +331,8 @@ export class ParallelSpinner {
 	}
 
 	private stop(finalText: string): void {
-		if (this.timer) { clearInterval(this.timer); this.timer = null; }
-		process.stdout.write(`\r${finalText}`);
-		clearLine();
-		process.stdout.write("\n");
+		finishLine(this.timer, finalText);
+		this.timer = null;
 	}
 
 	success(text?: string): void {
