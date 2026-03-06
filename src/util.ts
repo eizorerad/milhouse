@@ -27,6 +27,14 @@ export function extractJson(response: string): string | null {
 		const close = open === "[" ? "]" : "}";
 		let depth = 0;
 		for (let i = 0; i < trimmed.length; i++) {
+			if (trimmed[i] === '"') {
+				i++;
+				while (i < trimmed.length && trimmed[i] !== '"') {
+					if (trimmed[i] === '\\') i++;
+					i++;
+				}
+				continue;
+			}
 			if (trimmed[i] === open) depth++;
 			if (trimmed[i] === close) depth--;
 			if (depth === 0) return trimmed.slice(0, i + 1);

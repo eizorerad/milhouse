@@ -41,6 +41,26 @@ describe("extractJson", () => {
 		const input = "```\nhello world\n```";
 		expect(extractJson(input)).toBeNull();
 	});
+
+	it("handles square brackets inside string values", () => {
+		const input = '{"msg": "use arr[0]"}';
+		expect(extractJson(input)).toBe(input);
+	});
+
+	it("handles curly braces inside string values", () => {
+		const input = '{"msg": "obj{key}"}';
+		expect(extractJson(input)).toBe(input);
+	});
+
+	it("handles escaped quotes inside string values", () => {
+		const input = '{"msg": "say \\"hi\\""}';
+		expect(extractJson(input)).toBe(input);
+	});
+
+	it("handles array with string elements containing brackets", () => {
+		const input = '["arr[0]", "obj{x}"]';
+		expect(extractJson(input)).toBe(input);
+	});
 });
 
 describe("generateId", () => {
