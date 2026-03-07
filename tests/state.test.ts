@@ -2,11 +2,12 @@
  * Tests for run state persistence helpers.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { RunStore } from "../src/state.ts";
+import type { RunsIndex } from "../src/state.ts";
 
 describe("RunStore cost persistence", () => {
 	let tmpDir: string;
@@ -129,5 +130,105 @@ describe("RunStore cost persistence", () => {
 			tasks_completed: 1,
 			tasks_failed: 1,
 		});
+	});
+});
+
+describe("RunStore.listRuns", () => {
+	let tmpDir: string;
+
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-list-test-"));
+	});
+
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("returns empty array when no runs exist", () => {
+		const runs = RunStore.listRuns(tmpDir);
+		expect(runs).toEqual([]);
+	});
+
+	it("returns all runs with correct fields after creating multiple runs", () => {
+		RunStore.create(tmpDir, "scope-a");
+		RunStore.create(tmpDir, "scope-b");
+
+		const runs = RunStore.listRuns(tmpDir);
+		expect(runs).toHaveLength(2);
+		expect(runs[0].scope).toBe("scope-a");
+		expect(runs[0].status).toBe("running");
+		expect(runs[0].phase).toBe("scan");
+		expect(runs[0].created_at).toBeTruthy();
+		expect(runs[1].scope).toBe("scope-b");
+	});
+});
+
+describe("RunStore.cleanRuns", () => {
+	let tmpDir: string;
+
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-clean-test-"));
+	});
+
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	function setRunCreatedAt(workDir: string, runId: string, dateIso: string): void {
+		const indexPath = join(workDir, ".milhouse", "runs-index.json");
+		const index = JSON.parse(readFileSync(indexPath, "utf-8")) as RunsIndex;
+		const entry = index.runs.find((r) => r.id === runId);
+		if (entry) entry.created_at = dateIso;
+		writeFileSync(indexPath, JSON.stringify(index, null, 2));
+	}
+
+	it("removes completed runs older than N days and keeps recent ones", () => {
+		const old = RunStore.create(tmpDir, "old");
+		old.completeRun();
+		setRunCreatedAt(tmpDir, old.runId, "2020-01-01T00:00:00Z");
+
+		const recent = RunStore.create(tmpDir, "recent");
+		recent.completeRun();
+
+		const result = RunStore.cleanRuns(tmpDir, 30);
+		expect(result.removed).toEqual([old.runId]);
+		expect(result.kept).toBe(1);
+	});
+
+	it("keeps running runs regardless of age", () => {
+		const running = RunStore.create(tmpDir, "running");
+		setRunCreatedAt(tmpDir, running.runId, "2020-01-01T00:00:00Z");
+
+		const result = RunStore.cleanRuns(tmpDir, 0);
+		expect(result.removed).toEqual([]);
+		expect(result.kept).toBe(1);
+	});
+
+	it("returns correct removed/kept counts", () => {
+		const a = RunStore.create(tmpDir, "a");
+		a.completeRun();
+		setRunCreatedAt(tmpDir, a.runId, "2020-01-01T00:00:00Z");
+
+		const b = RunStore.create(tmpDir, "b");
+		b.stopRun("exec", "failed");
+		setRunCreatedAt(tmpDir, b.runId, "2020-02-01T00:00:00Z");
+
+		const c = RunStore.create(tmpDir, "c"); // running, recent
+
+		const result = RunStore.cleanRuns(tmpDir, 30);
+		expect(result.removed).toHaveLength(2);
+		expect(result.kept).toBe(1);
+	});
+
+	it("deletes cleaned run directories from disk", () => {
+		const store = RunStore.create(tmpDir, "deleteme");
+		store.completeRun();
+		setRunCreatedAt(tmpDir, store.runId, "2020-01-01T00:00:00Z");
+
+		const runDir = join(tmpDir, ".milhouse", "runs", store.runId);
+		expect(existsSync(runDir)).toBe(true);
+
+		RunStore.cleanRuns(tmpDir, 30);
+		expect(existsSync(runDir)).toBe(false);
 	});
 });
