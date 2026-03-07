@@ -37,7 +37,7 @@ describe("engine timeout cleanup", () => {
 
 		const result = await execute("test prompt", "/tmp", config, { timeout: 60_000 });
 
-		expect(result.response).toBe("hello world");
+		expect(result.result.response).toBe("hello world");
 		expect(clearTimeoutSpy).toHaveBeenCalled();
 		// Timer ID should have been passed to clearTimeout
 		const arg = clearTimeoutSpy.mock.calls[0]?.[0];

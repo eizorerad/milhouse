@@ -7,9 +7,9 @@
 import pLimit from "p-limit";
 import { addTokens } from "./cost.ts";
 import { execute } from "./engine.ts";
-import { cleanupWorktree, createWorktree, mergeCompletedBranches } from "./git.ts";
+import { cleanupDeferredWorktrees, cleanupWorktree, createWorktree, mergeCompletedBranches } from "./git.ts";
 import type { RunStore } from "./state.ts";
-import type { Config, EngineResult, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
+import type { Config, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
 import { ParallelSpinner, Spinner, log, theme } from "./ui.ts";
 
 /**
@@ -53,6 +53,8 @@ export async function runPhase<TItem, TResult>(
 	if (spinner) spinner.start();
 	if (parallel) parallel.start();
 
+	const failedCleanups: string[] = [];
+
 	const results = await Promise.all(
 		items.map((item, idx) =>
 			limit(async (): Promise<PhaseResult<TResult>> => {
@@ -80,6 +82,7 @@ export async function runPhase<TItem, TResult>(
 
 				// Retry loop
 				let lastError = "";
+				let lastProc: { kill(): void; readonly exited: Promise<number> } | undefined;
 				for (let attempt = 0; attempt <= maxRetries; attempt++) {
 					try {
 						if (parallel && slot != null) {
@@ -94,12 +97,13 @@ export async function runPhase<TItem, TResult>(
 						}
 
 						const prompt = phase.buildPrompt(item, store, config);
-						const aiResult: EngineResult = await execute(prompt, workDir, config, {
+						const { result: aiResult, proc } = await execute(prompt, workDir, config, {
 							model,
 							jsonSchema: phase.schema,
 							maxTurns: phase.maxTurns,
 							timeout: phase.timeout,
 						});
+						lastProc = proc;
 
 						// Track cost
 						addTokens(runCost, aiResult.inputTokens, aiResult.outputTokens, config);
@@ -110,10 +114,15 @@ export async function runPhase<TItem, TResult>(
 
 						const parsed = phase.parseResponse(aiResult.response, item);
 
-						// Cleanup worktree on success
+						// Kill subprocess and cleanup worktree on success
 						if (isExec) {
+							try { proc.kill(); } catch {}
+							await proc.exited.catch(() => {});
 							if (parallel && slot != null) parallel.updateSlot(slot, "cleanup");
-							await cleanupWorktree(workDir, store.workDir);
+							const cleaned = await cleanupWorktree(workDir, store.workDir);
+							if (!cleaned) {
+								failedCleanups.push(workDir);
+							}
 						}
 
 						if (parallel && slot != null) parallel.releaseSlot(slot);
@@ -136,9 +145,16 @@ export async function runPhase<TItem, TResult>(
 					}
 				}
 
-				// All retries failed — cleanup worktree
+				// All retries failed — kill subprocess and cleanup worktree
 				if (isExec) {
-					await cleanupWorktree(workDir, store.workDir).catch(() => {});
+					if (lastProc) {
+						try { lastProc.kill(); } catch {}
+						await lastProc.exited.catch(() => {});
+					}
+					const cleaned = await cleanupWorktree(workDir, store.workDir);
+					if (!cleaned) {
+						failedCleanups.push(workDir);
+					}
 				}
 
 				if (parallel && slot != null) parallel.releaseSlot(slot);
@@ -167,9 +183,10 @@ export async function runPhase<TItem, TResult>(
 		else parallel.fail(`${phase.name} failed`);
 	}
 
-	// 4. For exec: merge completed branches
+	// 4. For exec: merge completed branches, then retry deferred cleanups
 	if (isExec) {
 		await mergeCompletedBranches(results, store.workDir);
+		await cleanupDeferredWorktrees(failedCleanups, store.workDir);
 	}
 
 	// 5. Save results

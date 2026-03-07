@@ -2,7 +2,7 @@
  * Git — worktree + merge. Three functions.
  */
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { IssueGroup, PhaseResult } from "./types.ts";
 import { log } from "./ui.ts";
@@ -47,23 +47,82 @@ export async function createWorktree(
 	return worktreePath;
 }
 
+const CLEANUP_MAX_RETRIES = 3;
+const CLEANUP_RETRY_DELAY_MS = 2000;
+
+function isEBUSY(err: unknown): boolean {
+	return err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "EBUSY";
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
+}
+
 /**
  * Cleanup a worktree after execution.
+ * Returns true if cleanup succeeded, false otherwise.
+ * On Windows, retries with delay on EBUSY and uses rename-then-delete fallback.
  */
 export async function cleanupWorktree(
 	worktreePath: string,
 	baseDir: string,
-): Promise<void> {
-	const result = await git(["worktree", "remove", "--force", worktreePath], baseDir);
-	if (!result.ok) {
-		// Fallback: manual removal
+): Promise<boolean> {
+	const isWindows = process.platform === "win32";
+
+	for (let attempt = 0; attempt < CLEANUP_MAX_RETRIES; attempt++) {
+		// First try: git worktree remove --force
+		const result = await git(["worktree", "remove", "--force", worktreePath], baseDir);
+		if (result.ok) {
+			await git(["worktree", "prune"], baseDir);
+			return true;
+		}
+
+		// Fallback: manual removal (with rename-then-delete on Windows)
 		try {
-			rmSync(worktreePath, { recursive: true, force: true });
-		} catch {
-			log.warn(`Failed to remove worktree: ${worktreePath}`);
+			if (isWindows) {
+				const tempPath = `${worktreePath}._removing_${Date.now()}`;
+				renameSync(worktreePath, tempPath);
+				rmSync(tempPath, { recursive: true, force: true });
+			} else {
+				rmSync(worktreePath, { recursive: true, force: true });
+			}
+			await git(["worktree", "prune"], baseDir);
+			return true;
+		} catch (err) {
+			if (isEBUSY(err) && attempt < CLEANUP_MAX_RETRIES - 1) {
+				log.debug(`[git] EBUSY on worktree cleanup, retrying in ${CLEANUP_RETRY_DELAY_MS}ms (attempt ${attempt + 1}/${CLEANUP_MAX_RETRIES})`);
+				await sleep(CLEANUP_RETRY_DELAY_MS);
+				continue;
+			}
+			// Non-EBUSY error or final attempt
+			if (attempt === CLEANUP_MAX_RETRIES - 1) {
+				log.warn(`Failed to remove worktree after ${CLEANUP_MAX_RETRIES} attempts: ${worktreePath}`);
+			}
 		}
 	}
-	await git(["worktree", "prune"], baseDir);
+
+	return false;
+}
+
+/**
+ * Retry cleanup of worktree paths that failed during the run.
+ * Called after merge phase to give file locks more time to release.
+ */
+export async function cleanupDeferredWorktrees(
+	paths: string[],
+	baseDir: string,
+): Promise<void> {
+	if (paths.length === 0) return;
+
+	log.info(`Retrying cleanup of ${paths.length} deferred worktree(s)...`);
+
+	for (const worktreePath of paths) {
+		if (!existsSync(worktreePath)) continue;
+		const ok = await cleanupWorktree(worktreePath, baseDir);
+		if (!ok) {
+			log.warn(`Deferred cleanup still failed: ${worktreePath} — manual removal may be needed`);
+		}
+	}
 }
 
 /**
