@@ -4,7 +4,7 @@
  * One function: execute(prompt, workDir, config, opts)
  */
 
-import type { Config, EngineResult } from "./types.ts";
+import type { Config, EngineResult, ExecuteResult } from "./types.ts";
 
 // Inline debug log to avoid circular dependency
 const debugLog = (msg: string) => {
@@ -163,7 +163,7 @@ export async function execute(
 	workDir: string,
 	config: Config,
 	opts?: ExecuteOpts,
-): Promise<EngineResult> {
+): Promise<ExecuteResult> {
 	const spec = engines[config.engine];
 	if (!spec) {
 		throw new Error(`Unknown engine: ${config.engine}. Available: ${Object.keys(engines).join(", ")}`);
@@ -214,7 +214,9 @@ export async function execute(
 		return spec.parseOutput(stdout);
 	})();
 
-	return Promise.race([outputPromise, timeoutPromise]).finally(() => {
+	const result = await Promise.race([outputPromise, timeoutPromise]).finally(() => {
 		if (timerId !== undefined) clearTimeout(timerId);
 	});
+
+	return { result, proc };
 }

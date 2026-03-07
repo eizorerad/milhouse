@@ -108,6 +108,11 @@ export interface EngineResult {
 	outputTokens: number;
 }
 
+export interface ExecuteResult {
+	result: EngineResult;
+	proc: { kill(): void; readonly exited: Promise<number> };
+}
+
 // ─── Phase Runner ────────────────────────────────────────────────────────────
 
 export interface PhaseResult<T = unknown> {

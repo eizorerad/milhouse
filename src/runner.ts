@@ -9,7 +9,7 @@ import { addTokens } from "./cost.ts";
 import { execute } from "./engine.ts";
 import { cleanupWorktree, createWorktree, mergeCompletedBranches } from "./git.ts";
 import type { RunStore } from "./state.ts";
-import type { Config, EngineResult, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
+import type { Config, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
 import { ParallelSpinner, Spinner, log, theme } from "./ui.ts";
 
 /**
@@ -94,7 +94,7 @@ export async function runPhase<TItem, TResult>(
 						}
 
 						const prompt = phase.buildPrompt(item, store, config);
-						const aiResult: EngineResult = await execute(prompt, workDir, config, {
+						const { result: aiResult } = await execute(prompt, workDir, config, {
 							model,
 							jsonSchema: phase.schema,
 							maxTurns: phase.maxTurns,
