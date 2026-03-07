@@ -2,8 +2,9 @@
  * Report — generate a summary report for a completed run.
  */
 
+import { formatCost, formatPhaseCosts } from "./cost.ts";
 import type { RunStore } from "./state.ts";
-import type { Issue, RunMeta, Task } from "./types.ts";
+import type { PhaseCost, Phase, RunCost, RunMeta } from "./types.ts";
 import { formatDuration } from "./ui.ts";
 
 export interface RunReport {
@@ -28,6 +29,10 @@ export interface RunReport {
 		passed: number;
 		failed: number;
 		overall_pass: boolean;
+	};
+	cost: {
+		total: RunCost;
+		byPhase: Partial<Record<Phase, PhaseCost>>;
 	};
 	timeline: {
 		started: string;
@@ -76,6 +81,9 @@ export function generateReport(store: RunStore): RunReport {
 		};
 	}
 
+	// Cost
+	const runCost = store.loadCost();
+
 	// Timeline
 	const started = meta.created_at;
 	const finished = meta.updated_at;
@@ -87,6 +95,7 @@ export function generateReport(store: RunStore): RunReport {
 		issues: issueStats,
 		tasks: taskStats,
 		verification: verificationStats,
+		cost: { total: runCost, byPhase: runCost.byPhase },
 		timeline: { started, finished, durationMs },
 	};
 }
@@ -151,6 +160,21 @@ export function formatReportMarkdown(report: RunReport): string {
 	lines.push(`**Overall**: ${passIcon} ${report.verification.overall_pass ? "PASSED" : "FAILED"}`);
 	lines.push(`**Passed**: ${report.verification.passed} | **Failed**: ${report.verification.failed}`);
 
+	// Cost
+	lines.push("");
+	lines.push("## Cost");
+	lines.push("");
+	lines.push(`**Total**: ${formatCost(report.cost.total)}`);
+	const phaseEntries = Object.entries(report.cost.byPhase) as [Phase, PhaseCost][];
+	if (phaseEntries.length > 0) {
+		lines.push("");
+		lines.push(`| Phase | Input Tokens | Output Tokens | Cost |`);
+		lines.push(`|-------|-------------|---------------|------|`);
+		for (const [phase, pc] of phaseEntries) {
+			lines.push(`| ${phase} | ${pc.inputTokens.toLocaleString()} | ${pc.outputTokens.toLocaleString()} | $${pc.cost.toFixed(2)} |`);
+		}
+	}
+
 	return lines.join("\n");
 }
 
@@ -174,6 +198,7 @@ export function formatReportTerminal(report: RunReport): string {
 	lines.push(
 		`Verify: ${report.verification.overall_pass ? "PASS" : "FAIL"} (${report.verification.passed}/${report.verification.passed + report.verification.failed})`,
 	);
+	lines.push(`Cost:   ${formatCost(report.cost.total)}`);
 
 	return lines.join("\n");
 }
