@@ -3,7 +3,7 @@
  * All paths encapsulated. All operations go through here.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Issue, Phase, RunCost, RunMeta, RunStatus, Task } from "./types.ts";
 
@@ -43,7 +43,7 @@ function datestamp(): string {
 	return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
 
-interface RunsIndex {
+export interface RunsIndex {
 	runs: Array<{ id: string; scope?: string; created_at: string; phase: string; status?: RunStatus }>;
 }
 
@@ -274,5 +274,35 @@ export class RunStore {
 
 	static byId(workDir: string, runId: string): RunStore {
 		return new RunStore(workDir, runId);
+	}
+
+	static listRuns(workDir: string): RunsIndex["runs"] {
+		const indexPath = join(workDir, ".milhouse", "runs-index.json");
+		const index = readJson<RunsIndex>(indexPath, { runs: [] });
+		return index.runs;
+	}
+
+	static cleanRuns(workDir: string, maxAgeDays: number): { removed: string[]; kept: number } {
+		const indexPath = join(workDir, ".milhouse", "runs-index.json");
+		const index = readJson<RunsIndex>(indexPath, { runs: [] });
+		const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+		const removed: string[] = [];
+		const kept: typeof index.runs = [];
+
+		for (const run of index.runs) {
+			const isTerminal = run.status === "completed" || run.status === "failed";
+			const createdMs = new Date(run.created_at).getTime();
+			if (isTerminal && createdMs < cutoff) {
+				const runDir = join(workDir, ".milhouse", "runs", run.id);
+				if (existsSync(runDir)) rmSync(runDir, { recursive: true, force: true });
+				removed.push(run.id);
+			} else {
+				kept.push(run);
+			}
+		}
+
+		index.runs = kept;
+		writeJson(indexPath, index);
+		return { removed, kept: kept.length };
 	}
 }
