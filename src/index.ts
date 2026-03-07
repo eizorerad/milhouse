@@ -33,6 +33,9 @@ async function main(): Promise<void> {
 			resolve: { type: "boolean", default: false },
 			init: { type: "boolean", default: false },
 			report: { type: "boolean", default: false },
+			"list-runs": { type: "boolean", default: false },
+			clean: { type: "boolean", default: false },
+			days: { type: "string" },
 			// Individual phases
 			scan: { type: "boolean", default: false },
 			validate: { type: "boolean", default: false },
@@ -78,6 +81,40 @@ async function main(): Promise<void> {
 		const workDir = process.cwd();
 		const config = await loadConfig(workDir);
 		await runResolve(config);
+		return;
+	}
+
+	// --list-runs
+	if (opts["list-runs"]) {
+		const runs = RunStore.listRuns(process.cwd());
+		if (runs.length === 0) {
+			console.log("No runs found. Start with: milhouse --run");
+		} else {
+			const pad = (s: string, n: number) => s.padEnd(n);
+			console.log(
+				`${pad("ID", 30)} ${pad("Status", 12)} ${pad("Phase", 16)} ${pad("Scope", 20)} Created`,
+			);
+			console.log("-".repeat(100));
+			for (const run of runs) {
+				console.log(
+					`${pad(run.id, 30)} ${pad(run.status ?? "unknown", 12)} ${pad(run.phase, 16)} ${pad(run.scope ?? "-", 20)} ${run.created_at}`,
+				);
+			}
+		}
+		return;
+	}
+
+	// --clean
+	if (opts.clean) {
+		const days = typeof opts.days === "string" ? Number.parseInt(opts.days, 10) : 30;
+		const result = RunStore.cleanRuns(process.cwd(), days);
+		if (result.removed.length === 0) {
+			console.log("No runs to clean.");
+		} else {
+			console.log(`Removed ${result.removed.length} run(s):`);
+			for (const id of result.removed) console.log(`  - ${id}`);
+		}
+		console.log(`${result.kept} run(s) remaining.`);
 		return;
 	}
 
@@ -153,6 +190,9 @@ Usage:
   milhouse --resolve                    AI merge resolver for failed branches
   milhouse --report                     Show latest run report
   milhouse --report --format md         Report as markdown
+  milhouse --list-runs                  List all runs with status
+  milhouse --clean                      Remove old completed/failed runs
+  milhouse --clean --days 7             Clean runs older than 7 days
   milhouse --init                       Initialize project
 
 Pipeline:
@@ -165,6 +205,7 @@ Options:
   --workers <n>       Parallel workers for exec
   --run-id <id>       Specific run ID
   --format <fmt>      Report format: terminal (default) | md
+  --days <n>          Max age in days for --clean (default: 30)
   -v, --verbose       Verbose output
   -h, --help          Show help
 `);
