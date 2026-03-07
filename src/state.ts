@@ -92,6 +92,10 @@ export class RunStore {
 		writeJson(join(this.stateDir, "issues.json"), issues);
 	}
 
+	/**
+	 * @deprecated Not concurrency-safe — uses non-atomic load→modify→save.
+	 * Use the batch pattern instead: loadIssues() → modify in-memory → saveIssues().
+	 */
 	updateIssue(id: string, update: Partial<Issue>): void {
 		const issues = this.loadIssues();
 		const idx = issues.findIndex((i) => i.id === id);
@@ -111,6 +115,10 @@ export class RunStore {
 		writeJson(join(this.stateDir, "tasks.json"), tasks);
 	}
 
+	/**
+	 * @deprecated Not concurrency-safe — uses non-atomic load→modify→save.
+	 * Use the batch pattern instead: loadTasks() → modify in-memory → saveTasks().
+	 */
 	updateTask(id: string, update: Partial<Task>): void {
 		const tasks = this.loadTasks();
 		const idx = tasks.findIndex((t) => t.id === id);
