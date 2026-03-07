@@ -7,7 +7,7 @@
 import pLimit from "p-limit";
 import { addTokens } from "./cost.ts";
 import { execute } from "./engine.ts";
-import { cleanupWorktree, createWorktree, mergeCompletedBranches } from "./git.ts";
+import { cleanupDeferredWorktrees, cleanupWorktree, createWorktree, mergeCompletedBranches } from "./git.ts";
 import type { RunStore } from "./state.ts";
 import type { Config, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
 import { ParallelSpinner, Spinner, log, theme } from "./ui.ts";
@@ -183,9 +183,10 @@ export async function runPhase<TItem, TResult>(
 		else parallel.fail(`${phase.name} failed`);
 	}
 
-	// 4. For exec: merge completed branches
+	// 4. For exec: merge completed branches, then retry deferred cleanups
 	if (isExec) {
 		await mergeCompletedBranches(results, store.workDir);
+		await cleanupDeferredWorktrees(failedCleanups, store.workDir);
 	}
 
 	// 5. Save results

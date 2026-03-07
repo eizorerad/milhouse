@@ -105,6 +105,27 @@ export async function cleanupWorktree(
 }
 
 /**
+ * Retry cleanup of worktree paths that failed during the run.
+ * Called after merge phase to give file locks more time to release.
+ */
+export async function cleanupDeferredWorktrees(
+	paths: string[],
+	baseDir: string,
+): Promise<void> {
+	if (paths.length === 0) return;
+
+	log.info(`Retrying cleanup of ${paths.length} deferred worktree(s)...`);
+
+	for (const worktreePath of paths) {
+		if (!existsSync(worktreePath)) continue;
+		const ok = await cleanupWorktree(worktreePath, baseDir);
+		if (!ok) {
+			log.warn(`Deferred cleanup still failed: ${worktreePath} — manual removal may be needed`);
+		}
+	}
+}
+
+/**
  * Merge completed branches back to base branch, then cleanup.
  */
 export async function mergeCompletedBranches(
