@@ -190,7 +190,9 @@ Options:
   --scope <text>      Focus area for scan
   --engine <name>     AI engine (claude, gemini, aider)
   --model <name>      Model override
-  --workers <n>       Parallel workers for exec
+  --exec-workers <n>  Parallel workers for exec phase
+  --phase-workers <p>=<n>[,...]
+                      Set workers per phase (e.g., validate=8,exec=2)
   --run-id <id>       Specific run ID
   --format <fmt>      Report format: terminal (default) | md
   -v, --verbose       Verbose output
