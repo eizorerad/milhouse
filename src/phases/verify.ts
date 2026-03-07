@@ -3,7 +3,6 @@
  */
 
 import { buildVerifyPrompt, VERIFY_SCHEMA } from "../prompts/verify.ts";
-import type { RunStore } from "../state.ts";
 import type { PhaseConfig, Task } from "../types.ts";
 import { extractJson } from "../util.ts";
 

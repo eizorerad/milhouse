@@ -3,7 +3,6 @@
  */
 
 import { buildScanPrompt, SCAN_SCHEMA } from "../prompts/scan.ts";
-import type { RunStore } from "../state.ts";
 import type { Config, Issue, PhaseConfig, PhaseResult } from "../types.ts";
 import { log, severityColor } from "../ui.ts";
 import { extractJson, generateId, now } from "../util.ts";

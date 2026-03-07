@@ -6,7 +6,6 @@
 
 import { branchExists, getCommittedTaskNumbers } from "../git.ts";
 import { buildExecPrompt } from "../prompts/exec.ts";
-import type { RunStore } from "../state.ts";
 import type { Config, Issue, IssueGroup, PhaseConfig, Task } from "../types.ts";
 
 interface ExecResult {

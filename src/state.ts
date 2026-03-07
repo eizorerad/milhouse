@@ -5,7 +5,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Issue, Phase, RunCost, RunMeta, RunStatus, Task } from "./types.ts";
+import type { Issue, Phase, RunCost, RunMeta, RunStatus, RunStoreInterface, Task } from "./types.ts";
 
 function now(): string {
 	return new Date().toISOString();
@@ -64,7 +64,7 @@ function makeDefaultMeta(runId: string, scope?: string): RunMeta {
 	};
 }
 
-export class RunStore {
+export class RunStore implements RunStoreInterface {
 	constructor(
 		readonly workDir: string,
 		readonly runId: string,

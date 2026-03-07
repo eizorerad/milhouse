@@ -3,7 +3,6 @@
  */
 
 import { buildValidatePrompt, VALIDATE_SCHEMA } from "../prompts/validate.ts";
-import type { RunStore } from "../state.ts";
 import type { Issue, IssueStatus, PhaseConfig, PhaseResult } from "../types.ts";
 import { printIssueList } from "../ui.ts";
 import { extractJson } from "../util.ts";
