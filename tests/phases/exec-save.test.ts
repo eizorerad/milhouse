@@ -3,7 +3,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import type { IssueGroup, PhaseResult, Task } from "../../src/types.ts";
+import type { Issue, IssueGroup, PhaseResult, RunCost, RunMeta, RunStoreInterface, Task } from "../../src/types.ts";
+
+type ExecResult = {
+	issueId: string;
+	taskIds: string[];
+};
 
 // Mock git functions before importing exec
 const mockGetCommittedTaskNumbers = mock<(issueId: string, branch: string, cwd: string) => Promise<Set<number>>>();
@@ -37,7 +42,7 @@ function makeGroup(issueId: string, tasks: Task[]): IssueGroup {
 	};
 }
 
-function makeResult(group: IssueGroup, success: boolean, error?: string): PhaseResult {
+function makeResult(group: IssueGroup, success: boolean, error?: string): PhaseResult<ExecResult> {
 	return {
 		item: group,
 		result: { issueId: group.issueId, taskIds: group.tasks.map(t => t.id) },
@@ -50,7 +55,7 @@ function makeResult(group: IssueGroup, success: boolean, error?: string): PhaseR
 describe("exec saveResults", () => {
 	let savedTasks: Task[];
 	let savedStats: Record<string, number>;
-	let mockStore: { workDir: string; loadTasks: () => Task[]; saveTasks: (t: Task[]) => void; refreshStats: () => void };
+	let mockStore: RunStoreInterface;
 
 	beforeEach(() => {
 		savedTasks = [];
@@ -60,16 +65,48 @@ describe("exec saveResults", () => {
 	});
 
 	function setupStore(tasks: Task[]) {
+		const emptyMeta: RunMeta = {
+			id: "run-test",
+			phase: "exec",
+			issues_found: 0,
+			issues_validated: 0,
+			tasks_total: tasks.length,
+			tasks_completed: 0,
+			tasks_failed: 0,
+			created_at: "2026-01-01T00:00:00Z",
+			updated_at: "2026-01-01T00:00:00Z",
+		};
+
+		const emptyCost: RunCost = {
+			inputTokens: 0,
+			outputTokens: 0,
+			totalCost: 0,
+			byPhase: {},
+		};
+
 		mockStore = {
 			workDir: "/tmp/test",
+			runId: "run-test",
+			loadIssues: (): Issue[] => [],
+			saveIssues: () => {},
+			updateIssue: () => {},
 			loadTasks: () => structuredClone(tasks),
 			saveTasks: (t: Task[]) => { savedTasks = t; },
+			updateTask: () => {},
+			loadMeta: () => emptyMeta,
+			saveMeta: () => {},
 			refreshStats: () => {
 				savedStats = {
 					tasks_completed: savedTasks.filter((task) => task.status === "done").length,
 					tasks_failed: savedTasks.filter((task) => task.status === "failed").length,
 				};
 			},
+			savePlan: () => {},
+			loadPlan: () => null,
+			loadCost: () => emptyCost,
+			saveCost: () => {},
+			saveVerification: () => {},
+			loadVerification: () => null,
 		};
 	}
 
