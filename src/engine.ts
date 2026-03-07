@@ -101,10 +101,53 @@ function parseClaudeStreamJson(raw: string): EngineResult {
 }
 
 /**
- * Simple text-based output parser (for Gemini, Aider, etc.)
+ * Simple text-based output parser (unused engines fallback).
  */
 function parseTextOutput(raw: string): EngineResult {
 	return { response: raw.trim(), inputTokens: 0, outputTokens: 0 };
+}
+
+/**
+ * Parse Gemini CLI output for token usage metadata.
+ * Gemini CLI may output lines like: prompt_token_count: 123, candidates_token_count: 456
+ * Falls back to character-based estimation (chars/4) if not found.
+ */
+export function parseGeminiOutput(raw: string): EngineResult {
+	const response = raw.trim();
+	let inputTokens = 0;
+	let outputTokens = 0;
+	let foundUsage = false;
+
+	for (const line of raw.split("\n")) {
+		const promptMatch = line.match(/prompt_token_count\s*[:=]\s*(\d+)/);
+		if (promptMatch) {
+			inputTokens = parseInt(promptMatch[1], 10);
+			foundUsage = true;
+		}
+		const candidatesMatch = line.match(/candidates_token_count\s*[:=]\s*(\d+)/);
+		if (candidatesMatch) {
+			outputTokens = parseInt(candidatesMatch[1], 10);
+			foundUsage = true;
+		}
+	}
+
+	if (!foundUsage && response.length > 0) {
+		outputTokens = Math.ceil(response.length / 4);
+		debugLog("[engine] Gemini token usage not found in output, using character-based estimation");
+	}
+
+	return { response, inputTokens, outputTokens };
+}
+
+/**
+ * Estimate token usage from Aider text output.
+ * Aider does not report tokens — uses character-length heuristic.
+ */
+export function parseAiderOutput(raw: string): EngineResult {
+	const response = raw.trim();
+	const outputTokens = response.length > 0 ? Math.ceil(response.length / 4) : 0;
+	debugLog("[engine] Aider token counts are estimated from response length");
+	return { response, inputTokens: 0, outputTokens };
 }
 
 const engines: Record<string, EngineSpec> = {
@@ -140,7 +183,7 @@ const engines: Record<string, EngineSpec> = {
 			args.push(prompt);
 			return args;
 		},
-		parseOutput: parseTextOutput,
+		parseOutput: parseGeminiOutput,
 	},
 
 	aider: {
@@ -151,7 +194,7 @@ const engines: Record<string, EngineSpec> = {
 			if (opts?.model) args.push("--model", opts.model);
 			return args;
 		},
-		parseOutput: parseTextOutput,
+		parseOutput: parseAiderOutput,
 	},
 };
 

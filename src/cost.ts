@@ -4,6 +4,18 @@
 
 import type { Config, RunCost } from "./types.ts";
 
+// Inline debug log to avoid circular dependency
+const debugLog = (msg: string) => {
+	if (process.env.VERBOSE === "1") console.log(`… ${msg}`);
+};
+
+const CLAUDE_ENGINES = new Set(["claude"]);
+let estimatedTokensWarned = false;
+
+export function isEstimatedTokens(engine: string): boolean {
+	return !CLAUDE_ENGINES.has(engine);
+}
+
 export function createRunCost(): RunCost {
 	return { inputTokens: 0, outputTokens: 0, totalCost: 0 };
 }
@@ -14,6 +26,10 @@ export function addTokens(
 	outputTokens: number,
 	config: Config,
 ): void {
+	if (!estimatedTokensWarned && isEstimatedTokens(config.engine)) {
+		debugLog(`[cost] Token counts for engine "${config.engine}" are estimated — budget enforcement is approximate`);
+		estimatedTokensWarned = true;
+	}
 	cost.inputTokens += inputTokens;
 	cost.outputTokens += outputTokens;
 	cost.totalCost =
