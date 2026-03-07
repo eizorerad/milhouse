@@ -50,7 +50,7 @@ function makeResult(group: IssueGroup, success: boolean, error?: string): PhaseR
 describe("exec saveResults", () => {
 	let savedTasks: Task[];
 	let savedStats: Record<string, number>;
-	let mockStore: { workDir: string; loadTasks: () => Task[]; saveTasks: (t: Task[]) => void; updateStats: (s: Record<string, number>) => void };
+	let mockStore: { workDir: string; loadTasks: () => Task[]; saveTasks: (t: Task[]) => void; refreshStats: () => void };
 
 	beforeEach(() => {
 		savedTasks = [];
@@ -64,7 +64,12 @@ describe("exec saveResults", () => {
 			workDir: "/tmp/test",
 			loadTasks: () => structuredClone(tasks),
 			saveTasks: (t: Task[]) => { savedTasks = t; },
-			updateStats: (s: Record<string, number>) => { savedStats = s; },
+			refreshStats: () => {
+				savedStats = {
+					tasks_completed: savedTasks.filter((task) => task.status === "done").length,
+					tasks_failed: savedTasks.filter((task) => task.status === "failed").length,
+				};
+			},
 		};
 	}
 

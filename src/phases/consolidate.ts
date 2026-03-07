@@ -71,6 +71,6 @@ export const consolidatePhase: PhaseConfig<ConsolidateInput, ConsolidateResult> 
 		}
 
 		store.saveTasks(filtered);
-		store.updateStats({ tasks_total: filtered.length });
+		store.refreshStats();
 	},
 };

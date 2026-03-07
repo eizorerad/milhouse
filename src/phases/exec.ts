@@ -66,8 +66,6 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 		// Batch update: load all tasks once, apply all changes, save once
 		const allTasks: Task[] = store.loadTasks();
 		const taskMap = new Map<string, Task>(allTasks.map((t: Task) => [t.id, t]));
-		let completed = 0;
-		let failed = 0;
 		const timestamp = new Date().toISOString();
 
 		for (const r of results) {
@@ -102,7 +100,6 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 				if (committedIds.has(groupTask.id)) {
 					task.status = "done";
 					task.updated_at = timestamp;
-					completed++;
 				} else if (r.success) {
 					task.status = "pending";
 					task.updated_at = timestamp;
@@ -110,12 +107,11 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 					task.status = "failed";
 					task.error = r.error;
 					task.updated_at = timestamp;
-					failed++;
 				}
 			}
 		}
 
 		store.saveTasks(allTasks);
-		store.updateStats({ tasks_completed: completed, tasks_failed: failed });
+		store.refreshStats();
 	},
 };

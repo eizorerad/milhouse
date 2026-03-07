@@ -7,6 +7,7 @@
 
 export const PHASES = ["scan", "validate", "plan", "consolidate", "exec", "verify"] as const;
 export type Phase = (typeof PHASES)[number];
+export type RunStatus = "running" | "completed" | "failed" | "stopped";
 
 export interface PhaseOptions {
 	workers: number;
@@ -88,6 +89,8 @@ export interface RunMeta {
 	id: string;
 	scope?: string;
 	phase: string;
+	status?: RunStatus;
+	last_completed_phase?: Phase;
 	issues_found: number;
 	issues_validated: number;
 	tasks_total: number;

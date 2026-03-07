@@ -88,7 +88,7 @@ export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
 
 		// Single write with all updates
 		store.saveIssues(allIssues);
-		if (validated > 0) store.updateStats({ issues_validated: validated });
+		if (validated > 0) store.refreshStats();
 
 		printIssueList(allIssues);
 	},

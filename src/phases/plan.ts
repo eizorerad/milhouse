@@ -25,7 +25,12 @@ export const planPhase: PhaseConfig<Issue, PlanResult> = {
 	timeout: 5 * 60 * 1000, // 5 min per issue
 
 	loadItems(store) {
-		return store.loadIssues().filter((i: Issue) => i.status === "CONFIRMED" || i.status === "PARTIAL");
+		const plannedIssueIds = new Set(store.loadTasks().map((task: Task) => task.issue_id));
+		return store.loadIssues().filter(
+			(i: Issue) =>
+				(i.status === "CONFIRMED" || i.status === "PARTIAL") &&
+				!plannedIssueIds.has(i.id),
+		);
 	},
 
 	buildPrompt(issue) {
@@ -46,11 +51,13 @@ export const planPhase: PhaseConfig<Issue, PlanResult> = {
 	saveResults(results, store) {
 		const timestamp = now();
 		const allTasks: Task[] = [];
+		const plannedIssueIds = new Set<string>();
 
 		for (const r of results) {
 			if (!r.success) continue;
 			const issue = r.item as Issue;
 			const plan = r.result;
+			plannedIssueIds.add(issue.id);
 
 			// Save plan markdown
 			store.savePlan(issue.id, `# Plan: ${issue.title}\n\n${plan.summary}\n\n${plan.tasks.map((t, i) => `## Task ${i + 1}: ${t.title}\n${t.description ?? ""}`).join("\n\n")}`);
@@ -75,10 +82,10 @@ export const planPhase: PhaseConfig<Issue, PlanResult> = {
 
 		}
 
-		if (allTasks.length > 0) {
-			const existing = store.loadTasks();
+		if (plannedIssueIds.size > 0) {
+			const existing = store.loadTasks().filter((task: Task) => !plannedIssueIds.has(task.issue_id));
 			store.saveTasks([...existing, ...allTasks]);
-			store.updateStats({ tasks_total: existing.length + allTasks.length });
+			store.refreshStats();
 		}
 	},
 };

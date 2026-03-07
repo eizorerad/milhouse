@@ -77,7 +77,7 @@ export const scanPhase: PhaseConfig<ScanInput, ScanResult> = {
 
 		if (issues.length > 0) {
 			store.saveIssues(issues);
-			store.updateStats({ issues_found: issues.length });
+			store.refreshStats();
 			for (const i of issues) {
 				log.info(severityColor(i.severity, `[${i.severity}]`) + ` ${i.title}`);
 			}
