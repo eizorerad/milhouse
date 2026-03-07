@@ -31,10 +31,17 @@ export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
 	},
 
 	parseResponse(response, item) {
-		const jsonStr = extractJson(response);
-		if (!jsonStr) return { issue_id: item.id, status: "UNVALIDATED" as IssueStatus, summary: "No JSON" };
-
-		const parsed = JSON.parse(jsonStr);
+		// Try direct JSON.parse first (structured_output from --json-schema is clean JSON)
+		// biome-ignore lint: parsed needs any for JSON.parse compatibility
+		let parsed: any;
+		try {
+			parsed = JSON.parse(response);
+		} catch {
+			// Fallback: extract JSON from markdown/text response
+			const jsonStr = extractJson(response);
+			if (!jsonStr) return { issue_id: item.id, status: "UNVALIDATED" as IssueStatus, summary: "No JSON" };
+			parsed = JSON.parse(jsonStr);
+		}
 		const validStatuses: IssueStatus[] = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"];
 		const status = validStatuses.includes(parsed.status) ? parsed.status : "UNVALIDATED";
 
