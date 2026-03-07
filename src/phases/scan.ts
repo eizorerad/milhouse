@@ -5,6 +5,7 @@
 import { buildScanPrompt, SCAN_SCHEMA } from "../prompts/scan.ts";
 import type { RunStore } from "../state.ts";
 import type { Config, Issue, PhaseConfig, PhaseResult } from "../types.ts";
+import { log, severityColor } from "../ui.ts";
 import { extractJson, generateId, now } from "../util.ts";
 
 interface ScanInput { scope: string }
@@ -77,6 +78,9 @@ export const scanPhase: PhaseConfig<ScanInput, ScanResult> = {
 		if (issues.length > 0) {
 			store.saveIssues(issues);
 			store.updateStats({ issues_found: issues.length });
+			for (const i of issues) {
+				log.info(severityColor(i.severity, `[${i.severity}]`) + ` ${i.title}`);
+			}
 		}
 	},
 };
