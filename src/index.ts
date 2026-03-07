@@ -23,6 +23,51 @@ import { RunStore } from "./state.ts";
 import { PHASES, type Phase } from "./types.ts";
 import { log, setVerbose } from "./ui.ts";
 
+export interface WorkerFlags {
+	workers?: string;
+	execWorkers?: string;
+	phaseWorkers?: string;
+	engine?: string;
+	model?: string;
+}
+
+export function buildWorkerOverrides(flags: WorkerFlags): Record<string, unknown> {
+	const overrides: Record<string, unknown> = {};
+	if (flags.engine) overrides.engine = flags.engine;
+	if (flags.model) overrides.model = flags.model;
+
+	// --exec-workers (preferred) or --workers (deprecated alias)
+	if (flags.workers && !flags.execWorkers) {
+		log.warn("--workers is deprecated, use --exec-workers instead");
+	}
+	const effectiveExecWorkers = flags.execWorkers ?? flags.workers;
+	if (effectiveExecWorkers) {
+		const w = Number.parseInt(effectiveExecWorkers, 10);
+		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
+	}
+
+	// --phase-workers validate=8,exec=2,...
+	if (flags.phaseWorkers) {
+		const phasesOverride = (overrides.phases ?? {}) as Record<string, Record<string, unknown>>;
+		for (const pair of flags.phaseWorkers.split(",")) {
+			const [name, countStr] = pair.split("=");
+			if (!PHASES.includes(name as Phase)) {
+				log.warn(`--phase-workers: unknown phase "${name}", skipping`);
+				continue;
+			}
+			const count = Number.parseInt(countStr, 10);
+			if (Number.isNaN(count)) {
+				log.warn(`--phase-workers: invalid count for "${name}", skipping`);
+				continue;
+			}
+			phasesOverride[name] = { ...phasesOverride[name], workers: count };
+		}
+		overrides.phases = phasesOverride;
+	}
+
+	return overrides;
+}
+
 async function main(): Promise<void> {
 	const { values: opts, positionals } = parseArgs({
 		args: process.argv.slice(2),
@@ -87,39 +132,13 @@ async function main(): Promise<void> {
 	const scope = opts.scope ?? (positionals.join(" ") || undefined);
 
 	// Build CLI overrides
-	const overrides: Record<string, unknown> = {};
-	if (opts.engine && typeof opts.engine === "string") overrides.engine = opts.engine;
-	if (opts.model && typeof opts.model === "string") overrides.model = opts.model;
-	// --exec-workers (preferred) or --workers (deprecated alias)
-	const execWorkersRaw = opts["exec-workers"] ?? undefined;
-	const workersRaw = opts.workers ?? undefined;
-	if (typeof workersRaw === "string" && typeof execWorkersRaw !== "string") {
-		log.warn("--workers is deprecated, use --exec-workers instead");
-	}
-	const effectiveExecWorkers = typeof execWorkersRaw === "string" ? execWorkersRaw : typeof workersRaw === "string" ? workersRaw : undefined;
-	if (effectiveExecWorkers) {
-		const w = Number.parseInt(effectiveExecWorkers, 10);
-		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
-	}
-
-	// --phase-workers validate=8,exec=2,...
-	if (typeof opts["phase-workers"] === "string") {
-		const phasesOverride = (overrides.phases ?? {}) as Record<string, Record<string, unknown>>;
-		for (const pair of opts["phase-workers"].split(",")) {
-			const [name, countStr] = pair.split("=");
-			if (!PHASES.includes(name as Phase)) {
-				log.warn(`--phase-workers: unknown phase "${name}", skipping`);
-				continue;
-			}
-			const count = Number.parseInt(countStr, 10);
-			if (Number.isNaN(count)) {
-				log.warn(`--phase-workers: invalid count for "${name}", skipping`);
-				continue;
-			}
-			phasesOverride[name] = { ...phasesOverride[name], workers: count };
-		}
-		overrides.phases = phasesOverride;
-	}
+	const overrides = buildWorkerOverrides({
+		workers: typeof opts.workers === "string" ? opts.workers : undefined,
+		execWorkers: typeof opts["exec-workers"] === "string" ? opts["exec-workers"] : undefined,
+		phaseWorkers: typeof opts["phase-workers"] === "string" ? opts["phase-workers"] : undefined,
+		engine: typeof opts.engine === "string" ? opts.engine : undefined,
+		model: typeof opts.model === "string" ? opts.model : undefined,
+	});
 
 	const config = await loadConfig(workDir, overrides);
 
