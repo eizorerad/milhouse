@@ -80,6 +80,31 @@ export function printBanner(): void {
 	console.log("");
 }
 
+// ─── Issue list ─────────────────────────────────────────────────────────────
+
+import type { Issue } from "./types.ts";
+
+const statusColor: Record<string, (t: string) => string> = {
+	CONFIRMED: theme.success,
+	FALSE: theme.error,
+	PARTIAL: theme.warning,
+	MISDIAGNOSED: theme.accent,
+};
+
+const severityColor: Record<string, (t: string) => string> = {
+	CRITICAL: theme.error,
+	HIGH: theme.error,
+	MEDIUM: theme.warning,
+};
+
+export function printIssueList(issues: Issue[]): void {
+	for (const issue of issues) {
+		const sc = statusColor[issue.status] ?? pc.dim;
+		const vc = severityColor[issue.severity] ?? pc.dim;
+		console.log(`  ${sc(`[${issue.status}]`)} ${vc(`[${issue.severity}]`)} ${issue.title} ${pc.dim(`(${issue.id})`)}`);
+	}
+}
+
 // ─── Progress bar ───────────────────────────────────────────────────────────
 
 export function progressBar(current: number, total: number, width = 20): string {

@@ -5,6 +5,7 @@
 import { buildValidatePrompt, VALIDATE_SCHEMA } from "../prompts/validate.ts";
 import type { RunStore } from "../state.ts";
 import type { Issue, IssueStatus, PhaseConfig, PhaseResult } from "../types.ts";
+import { printIssueList } from "../ui.ts";
 import { extractJson } from "../util.ts";
 
 interface ValidateResult {
@@ -81,5 +82,7 @@ export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
 		// Single write with all updates
 		store.saveIssues(allIssues);
 		if (validated > 0) store.updateStats({ issues_validated: validated });
+
+		printIssueList(allIssues);
 	},
 };
