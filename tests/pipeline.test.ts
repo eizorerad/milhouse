@@ -16,6 +16,16 @@ mock.module("../src/runner.ts", () => ({
 	runPhase: mockRunPhase,
 }));
 
+const mockPreflight = mock<(...args: unknown[]) => Promise<void>>();
+
+mock.module("../src/preflight.ts", () => ({
+	preflight: mockPreflight,
+	KNOWN_ENGINES: ["claude", "gemini", "aider"],
+	checkEngine: async () => {},
+	checkGitRepo: async () => {},
+	checkConfig: () => {},
+}));
+
 const { runPipeline } = await import("../src/pipeline.ts");
 const { RunStore } = await import("../src/state.ts");
 
@@ -55,6 +65,8 @@ describe("runPipeline", () => {
 		originalCwd = process.cwd();
 		process.chdir(tmpDir);
 		mockRunPhase.mockReset();
+		mockPreflight.mockReset();
+		mockPreflight.mockResolvedValue(undefined);
 	});
 
 	afterEach(() => {
@@ -78,6 +90,27 @@ describe("runPipeline", () => {
 			status: "completed",
 			last_completed_phase: "plan",
 		});
+	});
+
+	it("calls preflight before proceeding", async () => {
+		const config = makeConfig(["scan"]);
+		mockPreflight.mockRejectedValueOnce(new Error("preflight failed"));
+
+		// runPipeline calls process.exit(1) on preflight failure; mock it to throw
+		// so execution actually stops
+		const originalExit = process.exit;
+		process.exit = (() => { throw new Error("EXIT"); }) as any;
+
+		try {
+			await runPipeline(config, { scope: "scope" });
+		} catch (e: any) {
+			expect(e.message).toBe("EXIT");
+		} finally {
+			process.exit = originalExit;
+		}
+
+		expect(mockPreflight).toHaveBeenCalledTimes(1);
+		expect(mockRunPhase).not.toHaveBeenCalled();
 	});
 
 	it("does not mark the run completed when a phase stops with no items", async () => {
