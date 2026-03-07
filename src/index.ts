@@ -20,8 +20,53 @@ import { runPipeline } from "./pipeline.ts";
 import { formatReportMarkdown, formatReportTerminal, generateReport } from "./report.ts";
 import { runResolve } from "./resolve.ts";
 import { RunStore } from "./state.ts";
-import type { Phase } from "./types.ts";
+import { PHASES, type Phase } from "./types.ts";
 import { log, setVerbose } from "./ui.ts";
+
+export interface WorkerFlags {
+	workers?: string;
+	execWorkers?: string;
+	phaseWorkers?: string;
+	engine?: string;
+	model?: string;
+}
+
+export function buildWorkerOverrides(flags: WorkerFlags): Record<string, unknown> {
+	const overrides: Record<string, unknown> = {};
+	if (flags.engine) overrides.engine = flags.engine;
+	if (flags.model) overrides.model = flags.model;
+
+	// --exec-workers (preferred) or --workers (deprecated alias)
+	if (flags.workers && !flags.execWorkers) {
+		log.warn("--workers is deprecated, use --exec-workers instead");
+	}
+	const effectiveExecWorkers = flags.execWorkers ?? flags.workers;
+	if (effectiveExecWorkers) {
+		const w = Number.parseInt(effectiveExecWorkers, 10);
+		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
+	}
+
+	// --phase-workers validate=8,exec=2,...
+	if (flags.phaseWorkers) {
+		const phasesOverride = (overrides.phases ?? {}) as Record<string, Record<string, unknown>>;
+		for (const pair of flags.phaseWorkers.split(",")) {
+			const [name, countStr] = pair.split("=");
+			if (!PHASES.includes(name as Phase)) {
+				log.warn(`--phase-workers: unknown phase "${name}", skipping`);
+				continue;
+			}
+			const count = Number.parseInt(countStr, 10);
+			if (Number.isNaN(count)) {
+				log.warn(`--phase-workers: invalid count for "${name}", skipping`);
+				continue;
+			}
+			phasesOverride[name] = { ...phasesOverride[name], workers: count };
+		}
+		overrides.phases = phasesOverride;
+	}
+
+	return overrides;
+}
 
 async function main(): Promise<void> {
 	const { values: opts, positionals } = parseArgs({
@@ -46,6 +91,8 @@ async function main(): Promise<void> {
 			// Options
 			scope: { type: "string" },
 			workers: { type: "string" },
+			"exec-workers": { type: "string" },
+			"phase-workers": { type: "string" },
 			model: { type: "string" },
 			engine: { type: "string" },
 			"run-id": { type: "string" },
@@ -122,13 +169,13 @@ async function main(): Promise<void> {
 	const scope = opts.scope ?? (positionals.join(" ") || undefined);
 
 	// Build CLI overrides
-	const overrides: Record<string, unknown> = {};
-	if (opts.engine && typeof opts.engine === "string") overrides.engine = opts.engine;
-	if (opts.model && typeof opts.model === "string") overrides.model = opts.model;
-	if (opts.workers && typeof opts.workers === "string") {
-		const w = Number.parseInt(opts.workers, 10);
-		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
-	}
+	const overrides = buildWorkerOverrides({
+		workers: typeof opts.workers === "string" ? opts.workers : undefined,
+		execWorkers: typeof opts["exec-workers"] === "string" ? opts["exec-workers"] : undefined,
+		phaseWorkers: typeof opts["phase-workers"] === "string" ? opts["phase-workers"] : undefined,
+		engine: typeof opts.engine === "string" ? opts.engine : undefined,
+		model: typeof opts.model === "string" ? opts.model : undefined,
+	});
 
 	const config = await loadConfig(workDir, overrides);
 
@@ -202,7 +249,9 @@ Options:
   --scope <text>      Focus area for scan
   --engine <name>     AI engine (claude, gemini, aider)
   --model <name>      Model override
-  --workers <n>       Parallel workers for exec
+  --exec-workers <n>  Parallel workers for exec phase
+  --phase-workers <p>=<n>[,...]
+                      Set workers per phase (e.g., validate=8,exec=2)
   --run-id <id>       Specific run ID
   --format <fmt>      Report format: terminal (default) | md
   --days <n>          Max age in days for --clean (default: 30)
