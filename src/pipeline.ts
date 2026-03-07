@@ -31,6 +31,7 @@ export interface PipelineOptions {
 
 export async function runPipeline(config: Config, opts: PipelineOptions = {}): Promise<void> {
 	const workDir = process.cwd();
+	printBanner();
 
 	// Resolve or create run
 	let store: RunStore;
@@ -50,8 +51,6 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 	}
 
 	const cost = store.loadCost();
-
-	printBanner();
 	log.info(`Pipeline: ${config.pipeline.join(" → ")}`);
 	if (config.cost.budget > 0) {
 		log.info(`Budget: $${config.cost.budget}`);

@@ -21,8 +21,11 @@ v0.3 is a complete rewrite. Same pipeline concept, 95% less code.
 ## Quick Start
 
 ```bash
-# Install
-npm install -g milhouse-cli
+# Install from source
+git clone https://github.com/eizorerad/milhouse.git
+cd milhouse
+pnpm install
+pnpm link --global    # makes `milhouse` available everywhere
 
 # Initialize project
 cd your-project

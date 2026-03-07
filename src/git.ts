@@ -91,9 +91,14 @@ export async function mergeCompletedBranches(
 			log.success(`Merged ${branch}`);
 			mergedBranches.push(branch);
 		} else {
-			log.warn(`Merge failed for ${branch}, aborting and skipping. Branch preserved for manual resolution.`);
+			log.warn(`Merge failed for ${branch}, aborting and skipping. Branch preserved.`);
 			await git(["merge", "--abort"], baseDir);
 		}
+	}
+
+	if (mergedBranches.length < branches.length) {
+		const failed = branches.length - mergedBranches.length;
+		log.warn(`${failed} branch(es) failed to merge. Run: milhouse --resolve`);
 	}
 
 	// Cleanup only successfully merged branches
@@ -146,4 +151,90 @@ export async function getCommittedTaskNumbers(
 export async function branchExists(branch: string, cwd: string): Promise<boolean> {
 	const result = await git(["rev-parse", "--verify", branch], cwd);
 	return result.ok;
+}
+
+// ─── Merge Resolver Helpers ─────────────────────────────────────────────────
+
+/**
+ * List mh/* branches that are NOT merged into HEAD.
+ */
+export async function listUnmergedBranches(baseDir: string): Promise<string[]> {
+	const result = await git(["branch", "--list", "mh/*", "--no-merged", "HEAD"], baseDir);
+	if (!result.ok || !result.stdout) return [];
+	return result.stdout
+		.split("\n")
+		.map((b) => b.replace(/^\*?\s+/, "").trim())
+		.filter(Boolean);
+}
+
+/**
+ * List files with merge conflicts in the working tree.
+ */
+export async function getConflictFiles(cwd: string): Promise<string[]> {
+	const result = await git(["diff", "--name-only", "--diff-filter=U"], cwd);
+	if (!result.ok || !result.stdout) return [];
+	return result.stdout.split("\n").filter(Boolean);
+}
+
+/**
+ * Create a clean integration worktree with a new branch based on HEAD.
+ * Returns the worktree path.
+ */
+export async function createIntegrationWorktree(
+	branchName: string,
+	baseDir: string,
+): Promise<string> {
+	const worktreePath = join(baseDir, ".milhouse", "work", "integration", branchName);
+
+	// Clean up if exists
+	if (existsSync(worktreePath)) {
+		await git(["worktree", "remove", "--force", worktreePath], baseDir);
+	}
+	await git(["worktree", "prune"], baseDir);
+
+	// Delete branch if leftover from previous resolve
+	await git(["branch", "-D", branchName], baseDir);
+
+	const result = await git(["worktree", "add", "-b", branchName, worktreePath, "HEAD"], baseDir);
+	if (!result.ok) {
+		throw new Error(`Failed to create integration worktree: ${result.stderr}`);
+	}
+	return worktreePath;
+}
+
+/**
+ * Try merging a branch. Returns { ok, conflictFiles }.
+ */
+export async function tryMerge(
+	branch: string,
+	cwd: string,
+): Promise<{ ok: boolean; conflictFiles: string[] }> {
+	const result = await git(["merge", "--no-ff", branch, "-m", `Merge ${branch}`], cwd);
+	if (result.ok) return { ok: true, conflictFiles: [] };
+	const files = await getConflictFiles(cwd);
+	return { ok: false, conflictFiles: files };
+}
+
+/**
+ * Complete a merge after conflicts have been resolved.
+ */
+export async function completeMerge(cwd: string): Promise<boolean> {
+	await git(["add", "-A"], cwd);
+	const result = await git(["commit", "--no-edit"], cwd);
+	return result.ok;
+}
+
+/**
+ * Abort an in-progress merge.
+ */
+export async function abortMerge(cwd: string): Promise<void> {
+	await git(["merge", "--abort"], cwd);
+}
+
+/**
+ * Check if working tree has uncommitted changes.
+ */
+export async function isWorkingTreeDirty(baseDir: string): Promise<boolean> {
+	const result = await git(["status", "--porcelain"], baseDir);
+	return result.ok && result.stdout.trim().length > 0;
 }

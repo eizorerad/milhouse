@@ -46,16 +46,19 @@ export const theme = {
 };
 
 
+const severityTextColor: Record<string, (t: string) => string> = {
+	CRITICAL: theme.error,
+	HIGH: theme.warning,
+	MEDIUM: theme.info,
+	LOW: pc.dim,
+};
+
+
 // ─── Severity colors ────────────────────────────────────────────────────────
 
 export function severityColor(severity: string, text: string): string {
-	switch (severity) {
-		case "CRITICAL": return theme.error(text);
-		case "HIGH": return theme.warning(text);
-		case "MEDIUM": return theme.info(text);
-		case "LOW": return pc.dim(text);
-		default: return text;
-	}
+	const color = severityTextColor[severity];
+	return color ? color(text) : text;
 }
 
 // ─── ANSI helpers ───────────────────────────────────────────────────────────
@@ -68,14 +71,41 @@ export function stripAnsi(str: string): string {
 // ─── Banner ─────────────────────────────────────────────────────────────────
 
 export function printBanner(): void {
-	const innerWidth = 41;
-	const border = theme.brand(`+${"-".repeat(innerWidth)}+`);
-	const content = `  ${pc.bold(theme.brand("MILHOUSE"))} ${pc.gray("-- Pipeline Orchestrator")}`;
-	const visibleLen = stripAnsi(content).length;
-	const padding = " ".repeat(Math.max(0, innerWidth - visibleLen));
+	const lines = [
+		{
+			raw: " __  __ ___ _     _   _  ___  _   _ ____  _____ ",
+			styled: pc.bold(theme.brand(" __  __ ___ _     _   _  ___  _   _ ____  _____ ")),
+		},
+		{
+			raw: "|  \\/  |_ _| |   | | | |/ _ \\| | | / ___|| ____|",
+			styled: pc.bold(theme.brand("|  \\/  |_ _| |   | | | |/ _ \\| | | / ___|| ____|")),
+		},
+		{
+			raw: "| |\\/| || || |   | |_| | | | | | | \\___ \\|  _|  ",
+			styled: pc.bold(theme.brand("| |\\/| || || |   | |_| | | | | | | \\___ \\|  _|  ")),
+		},
+		{
+			raw: "| |  | || || |___|  _  | |_| | |_| |___) | |___ ",
+			styled: pc.bold(theme.brand("| |  | || || |___|  _  | |_| | |_| |___) | |___ ")),
+		},
+		{
+			raw: "|_|  |_|___|_____|_| |_|\\___/ \\___/|____/|_____|",
+			styled: pc.bold(theme.brand("|_|  |_|___|_____|_| |_|\\___/ \\___/|____/|_____|")),
+		},
+		{
+			raw: "MILHOUSE // Correctness-first AI coding orchestrator",
+			styled: `${pc.bold(theme.brand("MILHOUSE"))}${pc.gray(" // Correctness-first AI coding orchestrator")}`,
+		},
+	];
+
+	const innerWidth = Math.max(...lines.map((line) => line.raw.length));
+	const border = theme.brand(`+${"-".repeat(innerWidth + 2)}+`);
 	console.log("");
 	console.log(border);
-	console.log(`${theme.brand("|")}${content}${padding}${theme.brand("|")}`);
+	for (const line of lines) {
+		const padding = " ".repeat(Math.max(0, innerWidth - line.raw.length));
+		console.log(`${theme.brand("|")} ${line.styled}${padding} ${theme.brand("|")}`);
+	}
 	console.log(border);
 	console.log("");
 }
@@ -91,7 +121,7 @@ const statusColor: Record<string, (t: string) => string> = {
 	MISDIAGNOSED: theme.accent,
 };
 
-const severityColor: Record<string, (t: string) => string> = {
+const issueSeverityColor: Record<string, (t: string) => string> = {
 	CRITICAL: theme.error,
 	HIGH: theme.error,
 	MEDIUM: theme.warning,
@@ -100,7 +130,7 @@ const severityColor: Record<string, (t: string) => string> = {
 export function printIssueList(issues: Issue[]): void {
 	for (const issue of issues) {
 		const sc = statusColor[issue.status] ?? pc.dim;
-		const vc = severityColor[issue.severity] ?? pc.dim;
+		const vc = issueSeverityColor[issue.severity] ?? pc.dim;
 		console.log(`  ${sc(`[${issue.status}]`)} ${vc(`[${issue.severity}]`)} ${issue.title} ${pc.dim(`(${issue.id})`)}`);
 	}
 }

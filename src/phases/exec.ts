@@ -74,7 +74,6 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 			const group = r.item as IssueGroup;
 			const sorted = [...group.tasks].sort((a, b) => a.parallel_group - b.parallel_group);
 
-			// Build a map from task number (1-indexed) to task id
 			const numberToId = new Map<number, string>();
 			for (let i = 0; i < sorted.length; i++) {
 				numberToId.set(i + 1, sorted[i].id);
@@ -83,10 +82,8 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 			let committedNumbers: Set<number>;
 
 			if (r.success) {
-				// Success path: commits are on HEAD after merge
 				committedNumbers = await getCommittedTaskNumbers(group.issueId, "HEAD", store.workDir);
 			} else {
-				// Failure path: check if branch still exists for partial commits
 				const branch = `mh/${group.issueId}`;
 				const exists = await branchExists(branch, store.workDir);
 				committedNumbers = exists
@@ -94,7 +91,6 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 					: new Set();
 			}
 
-			// Determine which task ids were committed
 			const committedIds = new Set<string>();
 			for (const [num, id] of numberToId) {
 				if (committedNumbers.has(num)) committedIds.add(id);
@@ -103,13 +99,11 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 			for (const groupTask of group.tasks) {
 				const task = taskMap.get(groupTask.id);
 				if (!task) continue;
-
 				if (committedIds.has(groupTask.id)) {
 					task.status = "done";
 					task.updated_at = timestamp;
 					completed++;
 				} else if (r.success) {
-					// Success but task wasn't committed — leave as pending
 					task.status = "pending";
 					task.updated_at = timestamp;
 				} else {

@@ -38,30 +38,37 @@ describe("printBanner", () => {
 		return lines;
 	}
 
-	it("renders box lines with equal visible length", () => {
-		const lines = captureBanner();
-		// Filter out empty lines
-		const boxLines = lines.filter((l) => stripAnsi(l).trim().length > 0);
-		expect(boxLines.length).toBe(3);
+	function getBoxLines(): string[] {
+		return captureBanner().filter((line) => stripAnsi(line).trim().length > 0);
+	}
+
+	it("renders a boxed ASCII intro with consistent visible width", () => {
+		const boxLines = getBoxLines();
+		expect(boxLines.length).toBeGreaterThan(3);
 
 		const widths = boxLines.map((l) => stripAnsi(l).length);
-		expect(widths[0]).toBe(widths[1]);
-		expect(widths[1]).toBe(widths[2]);
+		for (const width of widths) {
+			expect(width).toBe(widths[0]);
+		}
 	});
 
-	it("content line starts and ends with |", () => {
-		const lines = captureBanner();
-		const boxLines = lines.filter((l) => stripAnsi(l).trim().length > 0);
-		const contentLine = stripAnsi(boxLines[1]);
-		expect(contentLine.startsWith("|")).toBe(true);
-		expect(contentLine.endsWith("|")).toBe(true);
+	it("wraps every interior content line with vertical borders", () => {
+		const boxLines = getBoxLines();
+		for (const contentLine of boxLines.slice(1, -1).map((line) => stripAnsi(line))) {
+			expect(contentLine.startsWith("|")).toBe(true);
+			expect(contentLine.endsWith("|")).toBe(true);
+		}
 	});
 
-	it("border lines match +---+ pattern", () => {
-		const lines = captureBanner();
-		const boxLines = lines.filter((l) => stripAnsi(l).trim().length > 0);
+	it("uses matching top and bottom borders", () => {
+		const boxLines = getBoxLines();
 		const borderPattern = /^\+-+\+$/;
 		expect(borderPattern.test(stripAnsi(boxLines[0]))).toBe(true);
-		expect(borderPattern.test(stripAnsi(boxLines[2]))).toBe(true);
+		expect(borderPattern.test(stripAnsi(boxLines[boxLines.length - 1]))).toBe(true);
+	});
+
+	it("includes a MILHOUSE intro label", () => {
+		const boxText = getBoxLines().map((line) => stripAnsi(line)).join("\n");
+		expect(boxText.includes("MILHOUSE")).toBe(true);
 	});
 });
