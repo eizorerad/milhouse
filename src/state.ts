@@ -225,6 +225,7 @@ export class RunStore implements RunStoreInterface {
 			inputTokens: 0,
 			outputTokens: 0,
 			totalCost: 0,
+			byPhase: {},
 		});
 	}
 

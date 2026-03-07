@@ -158,8 +158,15 @@ export interface PhaseConfig<TItem = unknown, TResult = unknown> {
 
 // ─── Cost ────────────────────────────────────────────────────────────────────
 
+export interface PhaseCost {
+	inputTokens: number;
+	outputTokens: number;
+	cost: number;
+}
+
 export interface RunCost {
 	inputTokens: number;
 	outputTokens: number;
 	totalCost: number;
+	byPhase: Partial<Record<Phase, PhaseCost>>;
 }

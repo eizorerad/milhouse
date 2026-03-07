@@ -48,6 +48,10 @@ const mockReport: RunReport = {
 		failed: 2,
 		overall_pass: false,
 	},
+	cost: {
+		total: { inputTokens: 3_000_000, outputTokens: 300_000, totalCost: 13.50, byPhase: { scan: { inputTokens: 1_000_000, outputTokens: 100_000, cost: 4.50 }, exec: { inputTokens: 2_000_000, outputTokens: 200_000, cost: 9.00 } } },
+		byPhase: { scan: { inputTokens: 1_000_000, outputTokens: 100_000, cost: 4.50 }, exec: { inputTokens: 2_000_000, outputTokens: 200_000, cost: 9.00 } },
+	},
 	timeline: {
 		started: "2026-01-01T00:00:00Z",
 		finished: "2026-01-01T01:30:00Z",
@@ -98,6 +102,19 @@ describe("formatReportMarkdown", () => {
 	it("includes duration", () => {
 		const md = formatReportMarkdown(mockReport);
 		expect(md).toContain("1h 30m");
+	});
+
+	it("includes Cost section header", () => {
+		const md = formatReportMarkdown(mockReport);
+		expect(md).toContain("## Cost");
+	});
+
+	it("includes per-phase cost table", () => {
+		const md = formatReportMarkdown(mockReport);
+		expect(md).toContain("| scan |");
+		expect(md).toContain("| exec |");
+		expect(md).toContain("$4.50");
+		expect(md).toContain("$9.00");
 	});
 });
 
@@ -160,5 +177,11 @@ describe("formatReportTerminal", () => {
 	it("shows FAIL for non-passing", () => {
 		const out = formatReportTerminal(mockReport);
 		expect(out).toContain("FAIL");
+	});
+
+	it("includes cost summary line", () => {
+		const out = formatReportTerminal(mockReport);
+		expect(out).toContain("Cost:");
+		expect(out).toContain("$13.50");
 	});
 });

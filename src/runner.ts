@@ -106,7 +106,7 @@ export async function runPhase<TItem, TResult>(
 						lastProc = proc;
 
 						// Track cost
-						addTokens(runCost, aiResult.inputTokens, aiResult.outputTokens, config);
+						addTokens(runCost, aiResult.inputTokens, aiResult.outputTokens, config, phase.name);
 						store.saveCost(runCost);
 
 						if (parallel && slot != null) parallel.updateSlot(slot, "parsing");
