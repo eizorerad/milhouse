@@ -46,6 +46,18 @@ export const theme = {
 };
 
 
+// ─── Severity colors ────────────────────────────────────────────────────────
+
+export function severityColor(severity: string, text: string): string {
+	switch (severity) {
+		case "CRITICAL": return theme.error(text);
+		case "HIGH": return theme.warning(text);
+		case "MEDIUM": return theme.info(text);
+		case "LOW": return pc.dim(text);
+		default: return text;
+	}
+}
+
 // ─── ANSI helpers ───────────────────────────────────────────────────────────
 
 /** Strip ANSI escape codes from a string to get visible width. */
