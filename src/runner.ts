@@ -126,6 +126,7 @@ export async function runPhase<TItem, TResult>(
 						};
 					} catch (err) {
 						lastError = err instanceof Error ? err.message : String(err);
+						log.debug(`[${phase.name}] Full error: ${lastError}`);
 						const warnMsg = `${theme.warning("!")} [${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`;
 						if (spinner) spinner.writeLine(warnMsg);
 						else if (parallel) parallel.writeLine(warnMsg);
