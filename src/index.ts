@@ -43,6 +43,7 @@ async function main(): Promise<void> {
 			// Options
 			scope: { type: "string" },
 			workers: { type: "string" },
+			"exec-workers": { type: "string" },
 			model: { type: "string" },
 			engine: { type: "string" },
 			"run-id": { type: "string" },
@@ -88,8 +89,15 @@ async function main(): Promise<void> {
 	const overrides: Record<string, unknown> = {};
 	if (opts.engine && typeof opts.engine === "string") overrides.engine = opts.engine;
 	if (opts.model && typeof opts.model === "string") overrides.model = opts.model;
-	if (opts.workers && typeof opts.workers === "string") {
-		const w = Number.parseInt(opts.workers, 10);
+	// --exec-workers (preferred) or --workers (deprecated alias)
+	const execWorkersRaw = opts["exec-workers"] ?? undefined;
+	const workersRaw = opts.workers ?? undefined;
+	if (typeof workersRaw === "string" && typeof execWorkersRaw !== "string") {
+		log.warn("--workers is deprecated, use --exec-workers instead");
+	}
+	const effectiveExecWorkers = typeof execWorkersRaw === "string" ? execWorkersRaw : typeof workersRaw === "string" ? workersRaw : undefined;
+	if (effectiveExecWorkers) {
+		const w = Number.parseInt(effectiveExecWorkers, 10);
 		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
 	}
 
