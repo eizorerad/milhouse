@@ -2,10 +2,10 @@
  * Cost — token counting + budget checking.
  */
 
-import type { Config, RunCost } from "./types.ts";
+import type { Config, Phase, PhaseCost, RunCost } from "./types.ts";
 
 export function createRunCost(): RunCost {
-	return { inputTokens: 0, outputTokens: 0, totalCost: 0 };
+	return { inputTokens: 0, outputTokens: 0, totalCost: 0, byPhase: {} };
 }
 
 export function addTokens(
@@ -13,12 +13,23 @@ export function addTokens(
 	inputTokens: number,
 	outputTokens: number,
 	config: Config,
+	phase?: Phase,
 ): void {
 	cost.inputTokens += inputTokens;
 	cost.outputTokens += outputTokens;
 	cost.totalCost =
 		(cost.inputTokens / 1_000_000) * config.cost.inputPerMillion +
 		(cost.outputTokens / 1_000_000) * config.cost.outputPerMillion;
+
+	if (phase) {
+		const pc = cost.byPhase[phase] ?? { inputTokens: 0, outputTokens: 0, cost: 0 };
+		pc.inputTokens += inputTokens;
+		pc.outputTokens += outputTokens;
+		pc.cost =
+			(pc.inputTokens / 1_000_000) * config.cost.inputPerMillion +
+			(pc.outputTokens / 1_000_000) * config.cost.outputPerMillion;
+		cost.byPhase[phase] = pc;
+	}
 }
 
 export function isBudgetExceeded(cost: RunCost, config: Config): boolean {
@@ -27,6 +38,16 @@ export function isBudgetExceeded(cost: RunCost, config: Config): boolean {
 
 export function formatCost(cost: RunCost): string {
 	return `$${cost.totalCost.toFixed(2)} (${formatTokens(cost.inputTokens)} in / ${formatTokens(cost.outputTokens)} out)`;
+}
+
+export function formatPhaseCosts(cost: RunCost): string {
+	const entries = Object.entries(cost.byPhase) as [Phase, PhaseCost][];
+	if (entries.length === 0) return "";
+	const lines: string[] = [];
+	for (const [phase, pc] of entries) {
+		lines.push(`  ${phase}: $${pc.cost.toFixed(2)} (${formatTokens(pc.inputTokens)} in / ${formatTokens(pc.outputTokens)} out)`);
+	}
+	return lines.join("\n");
 }
 
 function formatTokens(n: number): string {

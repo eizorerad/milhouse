@@ -21,13 +21,14 @@ describe("RunStore cost persistence", () => {
 
 	it("persists cost for later resume", () => {
 		const store = RunStore.create(tmpDir, "scope");
-		store.saveCost({ inputTokens: 1234, outputTokens: 5678, totalCost: 0.15 });
+		store.saveCost({ inputTokens: 1234, outputTokens: 5678, totalCost: 0.15, byPhase: {} });
 
 		const resumed = RunStore.byId(tmpDir, store.runId);
 		expect(resumed.loadCost()).toEqual({
 			inputTokens: 1234,
 			outputTokens: 5678,
 			totalCost: 0.15,
+			byPhase: {},
 		});
 	});
 
@@ -37,6 +38,7 @@ describe("RunStore cost persistence", () => {
 			inputTokens: 0,
 			outputTokens: 0,
 			totalCost: 0,
+			byPhase: {},
 		});
 	});
 

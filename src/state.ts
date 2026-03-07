@@ -217,6 +217,7 @@ export class RunStore {
 			inputTokens: 0,
 			outputTokens: 0,
 			totalCost: 0,
+			byPhase: {},
 		});
 	}
 
