@@ -7,6 +7,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { KNOWN_ENGINES, PHASES } from "./types.ts";
 import type { Config, Phase } from "./types.ts";
 
 const DEFAULTS: Config = {
@@ -59,6 +60,52 @@ function deepMerge<T extends Record<string, unknown>>(...sources: Partial<T>[]):
 	return result as T;
 }
 
+export class ConfigError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ConfigError";
+	}
+}
+
+const KNOWN_TOP_LEVEL_KEYS = new Set(Object.keys(DEFAULTS));
+
+function validateConfig(config: Config): void {
+	if (!KNOWN_ENGINES.includes(config.engine as any)) {
+		throw new ConfigError(`Invalid engine "${config.engine}". Must be one of: ${KNOWN_ENGINES.join(", ")}`);
+	}
+
+	for (const entry of config.pipeline) {
+		if (!PHASES.includes(entry as any)) {
+			throw new ConfigError(`Invalid pipeline phase "${entry}". Must be one of: ${PHASES.join(", ")}`);
+		}
+	}
+
+	for (const [phase, opts] of Object.entries(config.phases)) {
+		if (opts.workers != null && opts.workers <= 0) {
+			console.warn(`Warning: phases.${phase}.workers is ${opts.workers}, expected > 0`);
+		}
+		if (opts.retries != null && opts.retries < 0) {
+			console.warn(`Warning: phases.${phase}.retries is ${opts.retries}, expected >= 0`);
+		}
+	}
+
+	if (config.cost.budget < 0) {
+		console.warn(`Warning: cost.budget is ${config.cost.budget}, expected >= 0`);
+	}
+	if (config.cost.inputPerMillion < 0) {
+		console.warn(`Warning: cost.inputPerMillion is ${config.cost.inputPerMillion}, expected >= 0`);
+	}
+	if (config.cost.outputPerMillion < 0) {
+		console.warn(`Warning: cost.outputPerMillion is ${config.cost.outputPerMillion}, expected >= 0`);
+	}
+
+	for (const key of Object.keys(config)) {
+		if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
+			console.warn(`Warning: Unknown config key "${key}"`);
+		}
+	}
+}
+
 /**
  * Load config from .milhouse/config.ts, merge with defaults and CLI overrides.
  */
@@ -78,7 +125,9 @@ export async function loadConfig(
 		}
 	}
 
-	return deepMerge(DEFAULTS as unknown as Record<string, unknown>, userConfig as Record<string, unknown>, (cliOverrides ?? {}) as Record<string, unknown>) as unknown as Config;
+	const merged = deepMerge(DEFAULTS as unknown as Record<string, unknown>, userConfig as Record<string, unknown>, (cliOverrides ?? {}) as Record<string, unknown>) as unknown as Config;
+	validateConfig(merged);
+	return merged;
 }
 
 /**

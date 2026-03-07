@@ -6,6 +6,7 @@
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 export const PHASES = ["scan", "validate", "plan", "consolidate", "exec", "verify"] as const;
+export const KNOWN_ENGINES = ["claude", "gemini", "aider"] as const;
 export type Phase = (typeof PHASES)[number];
 export type RunStatus = "running" | "completed" | "failed" | "stopped";
 
