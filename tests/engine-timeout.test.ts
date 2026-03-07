@@ -44,6 +44,31 @@ describe("engine timeout cleanup", () => {
 		expect(arg).toBeDefined();
 	});
 
+	it("logs full stderr via debugLog before throwing truncated error", async () => {
+		const longStderr = "E".repeat(800);
+		const fakeProc = makeFakeProc("", longStderr, 1);
+		spawnMock = spyOn(Bun, "spawn").mockReturnValue(fakeProc as never);
+
+		const origVerbose = process.env.VERBOSE;
+		process.env.VERBOSE = "1";
+		const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
+		try {
+			await expect(
+				execute("test prompt", "/tmp", config, { timeout: 60_000 }),
+			).rejects.toThrow(/E{500}/);
+
+			// debugLog should have been called with full stderr
+			const fullStderrCall = consoleSpy.mock.calls.find(
+				(args) => typeof args[0] === "string" && args[0].includes(longStderr),
+			);
+			expect(fullStderrCall).toBeDefined();
+		} finally {
+			consoleSpy.mockRestore();
+			if (origVerbose === undefined) delete process.env.VERBOSE;
+			else process.env.VERBOSE = origVerbose;
+		}
+	});
+
 	it("kills process and throws on timeout", async () => {
 		// Create a proc whose stdout never resolves
 		const neverResolve = new ReadableStream({ start() {} });
