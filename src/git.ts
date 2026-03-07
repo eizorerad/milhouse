@@ -38,12 +38,15 @@ export async function createWorktree(
 	}
 	await git(["worktree", "prune"], baseDir);
 
-	const result = await git(["worktree", "add", "-b", branch, worktreePath], baseDir);
+	const existingBranch = await branchExists(branch, baseDir);
+	const result = existingBranch
+		? await git(["worktree", "add", worktreePath, branch], baseDir)
+		: await git(["worktree", "add", "-b", branch, worktreePath], baseDir);
 	if (!result.ok) {
 		throw new Error(`Failed to create worktree for ${issueGroup.issueId}: ${result.stderr}`);
 	}
 
-	log.debug(`[git] Created worktree: ${worktreePath} (branch: ${branch})`);
+	log.debug(`[git] Created worktree: ${worktreePath} (branch: ${branch}, reused: ${existingBranch})`);
 	return worktreePath;
 }
 
