@@ -3,6 +3,7 @@
  */
 
 import { formatCost, isBudgetExceeded } from "./cost.ts";
+import { preflight } from "./preflight.ts";
 import { execPhase } from "./phases/exec.ts";
 import { planPhase } from "./phases/plan.ts";
 import { scanPhase } from "./phases/scan.ts";
@@ -39,6 +40,13 @@ function getPhasesToRun(pipeline: Phase[], lastCompletedPhase?: Phase): Phase[] 
 export async function runPipeline(config: Config, opts: PipelineOptions = {}): Promise<void> {
 	const workDir = process.cwd();
 	printBanner();
+
+	try {
+		await preflight(config, workDir);
+	} catch (err) {
+		log.error(err instanceof Error ? err.message : String(err));
+		process.exit(1);
+	}
 
 	let store: RunStore;
 	if (opts.resume) {
