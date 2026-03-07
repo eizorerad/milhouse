@@ -20,7 +20,7 @@ import { runPipeline } from "./pipeline.ts";
 import { formatReportMarkdown, formatReportTerminal, generateReport } from "./report.ts";
 import { runResolve } from "./resolve.ts";
 import { RunStore } from "./state.ts";
-import type { Phase } from "./types.ts";
+import { PHASES, type Phase } from "./types.ts";
 import { log, setVerbose } from "./ui.ts";
 
 async function main(): Promise<void> {
@@ -44,6 +44,7 @@ async function main(): Promise<void> {
 			scope: { type: "string" },
 			workers: { type: "string" },
 			"exec-workers": { type: "string" },
+			"phase-workers": { type: "string" },
 			model: { type: "string" },
 			engine: { type: "string" },
 			"run-id": { type: "string" },
@@ -99,6 +100,25 @@ async function main(): Promise<void> {
 	if (effectiveExecWorkers) {
 		const w = Number.parseInt(effectiveExecWorkers, 10);
 		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
+	}
+
+	// --phase-workers validate=8,exec=2,...
+	if (typeof opts["phase-workers"] === "string") {
+		const phasesOverride = (overrides.phases ?? {}) as Record<string, Record<string, unknown>>;
+		for (const pair of opts["phase-workers"].split(",")) {
+			const [name, countStr] = pair.split("=");
+			if (!PHASES.includes(name as Phase)) {
+				log.warn(`--phase-workers: unknown phase "${name}", skipping`);
+				continue;
+			}
+			const count = Number.parseInt(countStr, 10);
+			if (Number.isNaN(count)) {
+				log.warn(`--phase-workers: invalid count for "${name}", skipping`);
+				continue;
+			}
+			phasesOverride[name] = { ...phasesOverride[name], workers: count };
+		}
+		overrides.phases = phasesOverride;
 	}
 
 	const config = await loadConfig(workDir, overrides);
