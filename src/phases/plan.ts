@@ -3,7 +3,6 @@
  */
 
 import { buildPlanPrompt, PLAN_SCHEMA } from "../prompts/plan.ts";
-import type { RunStore } from "../state.ts";
 import type { Issue, PhaseConfig, Task } from "../types.ts";
 import { extractJson, generateId, now } from "../util.ts";
 

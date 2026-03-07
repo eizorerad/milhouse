@@ -3,7 +3,6 @@
  */
 
 import { buildConsolidatePrompt, CONSOLIDATE_SCHEMA } from "../prompts/consolidate.ts";
-import type { RunStore } from "../state.ts";
 import type { Config, Issue, PhaseConfig, Task } from "../types.ts";
 import { extractJson } from "../util.ts";
 
