@@ -208,6 +208,7 @@ export async function execute(
 		const exitCode = await proc.exited;
 
 		if (exitCode !== 0 && !stdout.trim()) {
+			debugLog(`[engine] full stderr:\n${stderr}`);
 			throw new Error(`Engine ${spec.command} failed (exit ${exitCode}): ${stderr.slice(0, 500)}`);
 		}
 

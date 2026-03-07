@@ -12,6 +12,7 @@ let verbose = false;
 
 export function setVerbose(v: boolean): void {
 	verbose = v;
+	if (v) process.env.VERBOSE = "1";
 }
 
 // ─── Hex color support ──────────────────────────────────────────────────────

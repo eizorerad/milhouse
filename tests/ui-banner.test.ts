@@ -2,8 +2,8 @@
  * Tests for printBanner alignment and stripAnsi helper.
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
-import { printBanner, stripAnsi } from "../src/ui.ts";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { printBanner, setVerbose, stripAnsi } from "../src/ui.ts";
 
 describe("stripAnsi", () => {
 	it("removes basic SGR escape codes", () => {
@@ -70,5 +70,18 @@ describe("printBanner", () => {
 	it("includes a MILHOUSE intro label", () => {
 		const boxText = getBoxLines().map((line) => stripAnsi(line)).join("\n");
 		expect(boxText.includes("MILHOUSE")).toBe(true);
+	});
+});
+
+describe("setVerbose", () => {
+	afterEach(() => {
+		delete process.env.VERBOSE;
+		setVerbose(false);
+	});
+
+	it("sets process.env.VERBOSE to '1' when enabled", () => {
+		delete process.env.VERBOSE;
+		setVerbose(true);
+		expect(process.env.VERBOSE).toBe("1");
 	});
 });
