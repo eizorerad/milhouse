@@ -110,6 +110,26 @@ export interface EngineResult {
 
 // ─── Phase Runner ────────────────────────────────────────────────────────────
 
+export interface RunStoreInterface {
+	readonly workDir: string;
+	readonly runId: string;
+	loadIssues(): Issue[];
+	saveIssues(issues: Issue[]): void;
+	updateIssue(id: string, update: Partial<Issue>): void;
+	loadTasks(): Task[];
+	saveTasks(tasks: Task[]): void;
+	updateTask(id: string, update: Partial<Task>): void;
+	loadMeta(): RunMeta;
+	saveMeta(meta: RunMeta): void;
+	refreshStats(): void;
+	savePlan(issueId: string, content: string): void;
+	loadPlan(issueId: string): string | null;
+	loadCost(): RunCost;
+	saveCost(cost: RunCost): void;
+	saveVerification(data: unknown): void;
+	loadVerification(): unknown;
+}
+
 export interface PhaseResult<T = unknown> {
 	item: unknown;
 	result: T;
@@ -118,17 +138,16 @@ export interface PhaseResult<T = unknown> {
 	tokens: EngineResult;
 }
 
-/** RunStore is passed by reference to avoid circular imports */
 export interface PhaseConfig<TItem = unknown, TResult = unknown> {
 	name: Phase;
 	schema?: Record<string, unknown>;
 	maxTurns?: number;
 	/** Timeout per item in milliseconds */
 	timeout?: number;
-	loadItems(store: any, config: Config): TItem[] | Promise<TItem[]>;
-	buildPrompt(item: TItem, store: any, config: Config): string;
+	loadItems(store: RunStoreInterface, config: Config): TItem[] | Promise<TItem[]>;
+	buildPrompt(item: TItem, store: RunStoreInterface, config: Config): string;
 	parseResponse(response: string, item: TItem): TResult;
-	saveResults(results: PhaseResult<TResult>[], store: any): void | Promise<void>;
+	saveResults(results: PhaseResult<TResult>[], store: RunStoreInterface): void | Promise<void>;
 }
 
 // ─── Cost ────────────────────────────────────────────────────────────────────
