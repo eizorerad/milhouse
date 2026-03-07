@@ -232,3 +232,72 @@ describe("RunStore.cleanRuns", () => {
 		expect(existsSync(runDir)).toBe(false);
 	});
 });
+
+describe("listRuns and cleanRuns edge cases", () => {
+	let tmpDir: string;
+
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-edge-test-"));
+	});
+
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	function setRunCreatedAt(workDir: string, runId: string, dateIso: string): void {
+		const indexPath = join(workDir, ".milhouse", "runs-index.json");
+		const index = JSON.parse(readFileSync(indexPath, "utf-8")) as RunsIndex;
+		const entry = index.runs.find((r) => r.id === runId);
+		if (entry) entry.created_at = dateIso;
+		writeFileSync(indexPath, JSON.stringify(index, null, 2));
+	}
+
+	it("clean with 0 days removes all eligible completed/failed runs", () => {
+		const a = RunStore.create(tmpDir, "a");
+		a.completeRun();
+		const b = RunStore.create(tmpDir, "b");
+		b.stopRun("exec", "failed");
+
+		const result = RunStore.cleanRuns(tmpDir, 0);
+		expect(result.removed).toHaveLength(2);
+		expect(result.kept).toBe(0);
+	});
+
+	it("clean with very large days removes none", () => {
+		const a = RunStore.create(tmpDir, "a");
+		a.completeRun();
+		setRunCreatedAt(tmpDir, a.runId, "2020-01-01T00:00:00Z");
+
+		const result = RunStore.cleanRuns(tmpDir, 999999);
+		expect(result.removed).toHaveLength(0);
+		expect(result.kept).toBe(1);
+	});
+
+	it("list-runs with mixed statuses shows all", () => {
+		const a = RunStore.create(tmpDir, "running-scope");
+		const b = RunStore.create(tmpDir, "completed-scope");
+		b.completeRun();
+		const c = RunStore.create(tmpDir, "failed-scope");
+		c.stopRun("exec", "failed");
+
+		const runs = RunStore.listRuns(tmpDir);
+		expect(runs).toHaveLength(3);
+
+		const statuses = runs.map((r) => r.status);
+		expect(statuses).toContain("running");
+		expect(statuses).toContain("completed");
+		expect(statuses).toContain("failed");
+	});
+
+	it("clean does not affect runs-index.json when no runs to clean", () => {
+		const a = RunStore.create(tmpDir, "active");
+
+		const result = RunStore.cleanRuns(tmpDir, 30);
+		expect(result.removed).toHaveLength(0);
+		expect(result.kept).toBe(1);
+
+		const runs = RunStore.listRuns(tmpDir);
+		expect(runs).toHaveLength(1);
+		expect(runs[0].id).toBe(a.runId);
+	});
+});
