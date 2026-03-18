@@ -1,6 +1,6 @@
 /**
  * Engine — spawn AI CLI tool, parse output. No middleware. No adapters.
- * 
+ *
  * One function: execute(prompt, workDir, config, opts)
  */
 
@@ -31,7 +31,7 @@ interface EngineSpec {
 
 /**
  * Parse Claude stream-json format to extract response and tokens.
- * 
+ *
  * When --json-schema is used, Claude puts the validated JSON in the
  * `structured_output` field of the result message. The `result` field
  * contains narrative text. We prefer structured_output.
@@ -64,16 +64,15 @@ function parseClaudeStreamJson(raw: string): EngineResult {
 			if (obj.type === "result") {
 				// Prefer structured_output (from --json-schema)
 				if (obj.structured_output !== undefined && obj.structured_output !== null) {
-					structuredOutput = typeof obj.structured_output === "string"
-						? obj.structured_output
-						: JSON.stringify(obj.structured_output);
+					structuredOutput =
+						typeof obj.structured_output === "string"
+							? obj.structured_output
+							: JSON.stringify(obj.structured_output);
 				}
 
 				// Also capture result text as fallback
 				if (obj.result) {
-					response = typeof obj.result === "string"
-						? obj.result
-						: JSON.stringify(obj.result);
+					response = typeof obj.result === "string" ? obj.result : JSON.stringify(obj.result);
 				}
 			}
 
@@ -121,12 +120,12 @@ export function parseGeminiOutput(raw: string): EngineResult {
 	for (const line of raw.split("\n")) {
 		const promptMatch = line.match(/prompt_token_count\s*[:=]\s*(\d+)/);
 		if (promptMatch) {
-			inputTokens = parseInt(promptMatch[1], 10);
+			inputTokens = Number.parseInt(promptMatch[1], 10);
 			foundUsage = true;
 		}
 		const candidatesMatch = line.match(/candidates_token_count\s*[:=]\s*(\d+)/);
 		if (candidatesMatch) {
-			outputTokens = parseInt(candidatesMatch[1], 10);
+			outputTokens = Number.parseInt(candidatesMatch[1], 10);
 			foundUsage = true;
 		}
 	}
@@ -156,7 +155,8 @@ const engines: Record<string, EngineSpec> = {
 		usesStdin: (prompt) => prompt.length > MAX_ARG_PROMPT,
 		buildArgs(prompt, opts) {
 			const args = [
-				"--output-format", "stream-json",
+				"--output-format",
+				"stream-json",
 				"--verbose",
 				"--dangerously-skip-permissions",
 			];
@@ -167,7 +167,10 @@ const engines: Record<string, EngineSpec> = {
 			if (prompt.length <= MAX_ARG_PROMPT) {
 				args.push("-p", prompt);
 			} else {
-				args.push("-p", "Process the instructions provided via standard input exactly as described.");
+				args.push(
+					"-p",
+					"Process the instructions provided via standard input exactly as described.",
+				);
 			}
 			return args;
 		},
@@ -209,7 +212,9 @@ export async function execute(
 ): Promise<ExecuteResult> {
 	const spec = engines[config.engine];
 	if (!spec) {
-		throw new Error(`Unknown engine: ${config.engine}. Available: ${Object.keys(engines).join(", ")}`);
+		throw new Error(
+			`Unknown engine: ${config.engine}. Available: ${Object.keys(engines).join(", ")}`,
+		);
 	}
 
 	const model = opts?.model ?? config.model;
@@ -218,7 +223,9 @@ export async function execute(
 
 	const timeout = opts?.timeout ?? 10 * 60 * 1000; // Default: 10 minutes
 
-	debugLog(`[engine] ${spec.command} ${args.slice(0, 3).join(" ")}... (timeout: ${Math.round(timeout / 1000)}s)`);
+	debugLog(
+		`[engine] ${spec.command} ${args.slice(0, 3).join(" ")}... (timeout: ${Math.round(timeout / 1000)}s)`,
+	);
 
 	const proc = Bun.spawn([spec.command, ...args], {
 		cwd: workDir,
@@ -238,7 +245,9 @@ export async function execute(
 	let timerId: ReturnType<typeof setTimeout> | undefined;
 	const timeoutPromise = new Promise<never>((_, reject) => {
 		timerId = setTimeout(() => {
-			try { proc.kill(); } catch {}
+			try {
+				proc.kill();
+			} catch {}
 			reject(new Error(`Engine ${spec.command} timed out after ${Math.round(timeout / 1000)}s`));
 		}, timeout);
 	});
@@ -250,7 +259,7 @@ export async function execute(
 		]);
 		const exitCode = await proc.exited;
 
-		if (exitCode !== 0 && !stdout.trim()) {
+		if (exitCode !== 0) {
 			debugLog(`[engine] full stderr:\n${stderr}`);
 			throw new Error(`Engine ${spec.command} failed (exit ${exitCode}): ${stderr.slice(0, 500)}`);
 		}

@@ -5,7 +5,15 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Issue, Phase, RunCost, RunMeta, RunStatus, RunStoreInterface, Task } from "./types.ts";
+import type {
+	Issue,
+	Phase,
+	RunCost,
+	RunMeta,
+	RunStatus,
+	RunStoreInterface,
+	Task,
+} from "./types.ts";
 
 function now(): string {
 	return new Date().toISOString();
@@ -44,7 +52,13 @@ function datestamp(): string {
 }
 
 export interface RunsIndex {
-	runs: Array<{ id: string; scope?: string; created_at: string; phase: string; status?: RunStatus }>;
+	runs: Array<{
+		id: string;
+		scope?: string;
+		created_at: string;
+		phase: string;
+		status?: RunStatus;
+	}>;
 }
 
 function makeDefaultMeta(runId: string, scope?: string): RunMeta {
@@ -282,6 +296,10 @@ export class RunStore implements RunStoreInterface {
 	}
 
 	static byId(workDir: string, runId: string): RunStore {
+		const runDir = join(workDir, ".milhouse", "runs", runId);
+		if (!existsSync(runDir)) {
+			throw new Error(`Run "${runId}" not found. Use --list-runs to see available runs.`);
+		}
 		return new RunStore(workDir, runId);
 	}
 

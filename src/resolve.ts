@@ -39,7 +39,7 @@ export interface ResolveResult {
 /**
  * Run the AI merge resolver for all unmerged mh/* branches.
  */
-export async function runResolve(config: Config): Promise<void> {
+export async function runResolve(config: Config, executeFn = execute): Promise<void> {
 	const baseDir = process.cwd();
 
 	// 1. Check for dirty working tree
@@ -66,7 +66,9 @@ export async function runResolve(config: Config): Promise<void> {
 		worktreePath = await createIntegrationWorktree(integrationBranch, baseDir);
 		spinner.success("Integration worktree ready");
 	} catch (err) {
-		spinner.fail(`Failed to create integration worktree: ${err instanceof Error ? err.message : err}`);
+		spinner.fail(
+			`Failed to create integration worktree: ${err instanceof Error ? err.message : err}`,
+		);
 		return;
 	}
 
@@ -89,11 +91,13 @@ export async function runResolve(config: Config): Promise<void> {
 		}
 
 		// Conflicts detected — call AI to resolve
-		branchSpinner.update(`${branch} — ${merge.conflictFiles.length} conflict(s), resolving with AI...`);
+		branchSpinner.update(
+			`${branch} — ${merge.conflictFiles.length} conflict(s), resolving with AI...`,
+		);
 
 		try {
 			const prompt = buildResolvePrompt(branch, merge.conflictFiles);
-			const aiResult = await execute(prompt, worktreePath, config, {
+			const { result: aiResult } = await executeFn(prompt, worktreePath, config, {
 				maxTurns: 20,
 				timeout: 5 * 60 * 1000,
 			});

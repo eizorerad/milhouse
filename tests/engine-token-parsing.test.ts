@@ -84,8 +84,8 @@ describe("engine integration with token parsing", () => {
 		const config = { engine: "gemini", model: "test" } as Config;
 		const result = await execute("test", "/tmp", config, { timeout: 5000 });
 
-		expect(result.inputTokens).toBe(100);
-		expect(result.outputTokens).toBe(200);
+		expect(result.result.inputTokens).toBe(100);
+		expect(result.result.outputTokens).toBe(200);
 	});
 
 	it("aider engine uses parseAiderOutput", async () => {
@@ -96,7 +96,7 @@ describe("engine integration with token parsing", () => {
 		const config = { engine: "aider", model: "test" } as Config;
 		const result = await execute("test", "/tmp", config, { timeout: 5000 });
 
-		expect(result.inputTokens).toBe(0);
-		expect(result.outputTokens).toBe(Math.ceil(stdout.length / 4));
+		expect(result.result.inputTokens).toBe(0);
+		expect(result.result.outputTokens).toBe(Math.ceil(stdout.length / 4));
 	});
 });
