@@ -4,13 +4,13 @@
 	"description": "Correctness-first AI coding orchestrator - Evidence-based diagnostics, WBS planning, and iterative execution",
 	"type": "module",
 	"packageManager": "pnpm@9.15.0",
-	"main": "dist/index.js",
+	"main": "./bin.js",
 	"bin": {
-		"milhouse": "./bin.js",
-		"milhouse-dev": "./bin-dev.js"
+		"milhouse": "./bin.js"
 	},
 	"files": [
 		"dist",
+		"src",
 		"bin.js",
 		"README.md"
 	],
@@ -31,6 +31,7 @@
 		"clean": "rm -rf dist node_modules .bun-build*",
 		"clean:state": "node scripts/clean-state.mjs",
 		"prepare": "echo 'Ready to build'",
+		"prepublishOnly": "bun run build",
 		"check:byte-identical": "node scripts/byte-identical-check.mjs",
 		"check:similarity": "node scripts/similarity-check.mjs",
 		"check:tokens": "node scripts/forbidden-tokens-check.mjs",

@@ -3,7 +3,8 @@
  */
 
 import { createRunCost, isBudgetExceeded } from "./cost.ts";
-import { PHASES, type Config } from "./types.ts";
+import { isWorkingTreeDirty } from "./git.ts";
+import { type Config, PHASES } from "./types.ts";
 
 export const KNOWN_ENGINES = ["claude", "gemini", "aider"] as const;
 
@@ -46,9 +47,7 @@ export function checkConfig(config: Config): void {
 
 	for (const phase of config.pipeline) {
 		if (!PHASES.includes(phase)) {
-			throw new Error(
-				`Unknown pipeline phase "${phase}". Valid phases: ${PHASES.join(", ")}`,
-			);
+			throw new Error(`Unknown pipeline phase "${phase}". Valid phases: ${PHASES.join(", ")}`);
 		}
 	}
 }
@@ -65,4 +64,10 @@ export async function preflight(config: Config, workDir: string): Promise<void> 
 	await checkGitRepo(workDir);
 	checkConfig(config);
 	checkBudget(config);
+
+	if (await isWorkingTreeDirty(workDir)) {
+		throw new Error(
+			"Working tree has uncommitted changes. Commit or stash them before running milhouse.",
+		);
+	}
 }

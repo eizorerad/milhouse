@@ -7,7 +7,13 @@
 import pLimit from "p-limit";
 import { addTokens } from "./cost.ts";
 import { execute } from "./engine.ts";
-import { cleanupDeferredWorktrees, cleanupWorktree, createWorktree, mergeCompletedBranches } from "./git.ts";
+import {
+	cleanupDeferredWorktrees,
+	cleanupWorktree,
+	createWorktree,
+	mergeCompletedBranches,
+} from "./git.ts";
+import { hasCrossIssueDeps } from "./phases/exec.ts";
 import type { RunStore } from "./state.ts";
 import type { Config, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
 import { ParallelSpinner, Spinner, log, theme } from "./ui.ts";
@@ -23,28 +29,31 @@ export async function runPhase<TItem, TResult>(
 ): Promise<PhaseResult<TResult>[]> {
 	const startTime = Date.now();
 	const phaseOpts = config.phases[phase.name];
-	const workers = phaseOpts?.workers ?? 1;
+	let workers = phaseOpts?.workers ?? 1;
 	const maxRetries = phaseOpts?.retries ?? 2;
 	const model = phaseOpts?.model ?? config.model;
 
 	// 1. Load items
+	const isExec = phase.name === "exec";
 	const items = await phase.loadItems(store, config);
 	if (items.length === 0) {
 		log.warn(`[${phase.name}] No items to process`);
 		return [];
 	}
 
+	if (isExec && workers > 1 && hasCrossIssueDeps(items as unknown as IssueGroup[])) {
+		log.warn("[exec] Cross-issue dependencies detected — serializing to enforce ordering.");
+		workers = 1;
+	}
+
 	log.info(`[${phase.name}] ${items.length} item(s), ${workers} worker(s)`);
 
 	// 2. Execute with live UI
 	const limit = pLimit(workers);
-	const isExec = phase.name === "exec";
 	const isSingle = items.length === 1;
 
 	// Choose spinner type based on item count
-	const spinner = isSingle
-		? new Spinner(`${phase.name} -- processing...`)
-		: null;
+	const spinner = isSingle ? new Spinner(`${phase.name} -- processing...`) : null;
 	const parallel = !isSingle
 		? new ParallelSpinner(Math.min(workers, items.length), items.length, phase.name)
 		: null;
@@ -116,7 +125,9 @@ export async function runPhase<TItem, TResult>(
 
 						// Kill subprocess and cleanup worktree on success
 						if (isExec) {
-							try { proc.kill(); } catch {}
+							try {
+								proc.kill();
+							} catch {}
 							await proc.exited.catch(() => {});
 							if (parallel && slot != null) parallel.updateSlot(slot, "cleanup");
 							const cleaned = await cleanupWorktree(workDir, store.workDir);
@@ -139,7 +150,10 @@ export async function runPhase<TItem, TResult>(
 						const warnMsg = `${theme.warning("!")} [${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`;
 						if (spinner) spinner.writeLine(warnMsg);
 						else if (parallel) parallel.writeLine(warnMsg);
-						else log.warn(`[${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`);
+						else
+							log.warn(
+								`[${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`,
+							);
 						if (attempt < maxRetries) {
 							await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
 						}
@@ -149,7 +163,9 @@ export async function runPhase<TItem, TResult>(
 				// All retries failed — kill subprocess and cleanup worktree
 				if (isExec) {
 					if (lastProc) {
-						try { lastProc.kill(); } catch {}
+						try {
+							lastProc.kill();
+						} catch {}
 						await lastProc.exited.catch(() => {});
 					}
 					const cleaned = await cleanupWorktree(workDir, store.workDir);

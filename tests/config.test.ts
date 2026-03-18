@@ -4,8 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ConfigError, loadConfig } from "../src/config.ts";
 
 describe("loadConfig", () => {
@@ -76,52 +76,51 @@ describe("loadConfig", () => {
 		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
 	});
 
-	it("warns for negative workers but returns config", async () => {
+	it("throws ConfigError for negative workers", async () => {
 		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { phases: { scan: { workers: -1, retries: 2 } } };`);
+		writeFileSync(configPath, "export default { phases: { scan: { workers: -1, retries: 2 } } };");
 
-		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const config = await loadConfig(tempDir);
-			expect(config.phases.scan.workers).toBe(-1);
-			expect(warnSpy).toHaveBeenCalled();
-			const msgs = warnSpy.mock.calls.map(c => c[0] as string);
-			expect(msgs.some(m => m.includes("workers"))).toBe(true);
-		} finally {
-			warnSpy.mockRestore();
-		}
+		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
 	});
 
-	it("warns for negative budget but returns config", async () => {
+	it("throws ConfigError for negative budget", async () => {
 		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { cost: { inputPerMillion: 5, outputPerMillion: 25, budget: -5 } };`);
+		writeFileSync(
+			configPath,
+			"export default { cost: { inputPerMillion: 5, outputPerMillion: 25, budget: -5 } };",
+		);
 
-		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const config = await loadConfig(tempDir);
-			expect(config.cost.budget).toBe(-5);
-			expect(warnSpy).toHaveBeenCalled();
-			const msgs = warnSpy.mock.calls.map(c => c[0] as string);
-			expect(msgs.some(m => m.includes("budget"))).toBe(true);
-		} finally {
-			warnSpy.mockRestore();
-		}
+		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
 	});
 
-	it("warns for negative retries but returns config", async () => {
+	it("throws ConfigError for negative retries", async () => {
 		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { phases: { validate: { workers: 5, retries: -1 } } };`);
+		writeFileSync(
+			configPath,
+			"export default { phases: { validate: { workers: 5, retries: -1 } } };",
+		);
 
-		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const config = await loadConfig(tempDir);
-			expect(config.phases.validate.retries).toBe(-1);
-			expect(warnSpy).toHaveBeenCalled();
-			const msgs = warnSpy.mock.calls.map(c => c[0] as string);
-			expect(msgs.some(m => m.includes("retries"))).toBe(true);
-		} finally {
-			warnSpy.mockRestore();
-		}
+		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
+	});
+
+	it("throws ConfigError for negative budget", async () => {
+		const configPath = join(tempDir, ".milhouse", "config.ts");
+		writeFileSync(
+			configPath,
+			`export default { cost: { inputPerMillion: 5, outputPerMillion: 25, budget: -5 } };`,
+		);
+
+		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
+	});
+
+	it("throws ConfigError for negative retries", async () => {
+		const configPath = join(tempDir, ".milhouse", "config.ts");
+		writeFileSync(
+			configPath,
+			`export default { phases: { validate: { workers: 5, retries: -1 } } };`,
+		);
+
+		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
 	});
 
 	it("warns on unknown top-level key", async () => {
@@ -133,8 +132,8 @@ describe("loadConfig", () => {
 			const config = await loadConfig(tempDir);
 			expect(config.engine).toBe("claude");
 			expect(warnSpy).toHaveBeenCalled();
-			const msgs = warnSpy.mock.calls.map(c => c[0] as string);
-			expect(msgs.some(m => m.includes("unknownKey"))).toBe(true);
+			const msgs = warnSpy.mock.calls.map((c) => c[0] as string);
+			expect(msgs.some((m) => m.includes("unknownKey"))).toBe(true);
 		} finally {
 			warnSpy.mockRestore();
 		}

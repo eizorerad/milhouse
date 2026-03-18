@@ -195,7 +195,14 @@ async function main(): Promise<void> {
 
 async function showReport(runId?: string, format?: string): Promise<void> {
 	const workDir = process.cwd();
-	const store = runId ? RunStore.byId(workDir, runId) : RunStore.latest(workDir);
+
+	let store: RunStore | null;
+	try {
+		store = runId ? RunStore.byId(workDir, runId) : RunStore.latest(workDir);
+	} catch (err) {
+		log.error(err instanceof Error ? err.message : String(err));
+		return;
+	}
 
 	if (!store) {
 		log.error("No runs found. Start with: milhouse --run");

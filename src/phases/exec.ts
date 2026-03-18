@@ -6,7 +6,8 @@
 
 import { branchExists, getCommittedTaskNumbers } from "../git.ts";
 import { buildExecPrompt } from "../prompts/exec.ts";
-import type { Config, Issue, IssueGroup, PhaseConfig, Task } from "../types.ts";
+import type { Issue, IssueGroup, PhaseConfig, Task } from "../types.ts";
+import { log } from "../ui.ts";
 
 interface ExecResult {
 	issueId: string;
@@ -17,7 +18,7 @@ interface ExecResult {
  * Group tasks by issue_id.
  */
 function groupTasksByIssue(tasks: Task[], issues: Issue[]): IssueGroup[] {
-	const issueMap = new Map(issues.map(i => [i.id, i]));
+	const issueMap = new Map(issues.map((i) => [i.id, i]));
 	const groups = new Map<string, Task[]>();
 
 	for (const task of tasks) {
@@ -29,10 +30,15 @@ function groupTasksByIssue(tasks: Task[], issues: Issue[]): IssueGroup[] {
 	const result: IssueGroup[] = [];
 	for (const [issueId, issueTasks] of groups) {
 		const issue = issueMap.get(issueId) ?? {
-			id: issueId, type: "task" as const, title: `Work item ${issueId}`,
-			rationale: "Derived from tasks", severity: "MEDIUM" as const,
-			status: "CONFIRMED" as const, evidence: [],
-			created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+			id: issueId,
+			type: "task" as const,
+			title: `Work item ${issueId}`,
+			rationale: "Derived from tasks",
+			severity: "MEDIUM" as const,
+			status: "CONFIRMED" as const,
+			evidence: [],
+			created_at: new Date().toISOString(),
+			updated_at: new Date().toISOString(),
 		};
 		result.push({ issueId, issue, tasks: issueTasks });
 	}
@@ -42,14 +48,102 @@ function groupTasksByIssue(tasks: Task[], issues: Issue[]): IssueGroup[] {
 	return result.sort((a, b) => (order[a.issue.severity] ?? 4) - (order[b.issue.severity] ?? 4));
 }
 
+export function hasCrossIssueDeps(groups: IssueGroup[]): boolean {
+	const taskToIssue = new Map<string, string>();
+	for (const group of groups) {
+		for (const task of group.tasks) {
+			taskToIssue.set(task.id, group.issueId);
+		}
+	}
+	for (const group of groups) {
+		for (const task of group.tasks) {
+			for (const depId of task.depends_on) {
+				const depIssue = taskToIssue.get(depId);
+				if (depIssue && depIssue !== group.issueId) return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * Topological sort of issue groups based on cross-issue task dependencies.
+ * Falls back to original order for groups without cross-issue deps.
+ */
+function topoSortGroups(groups: IssueGroup[]): IssueGroup[] {
+	if (!hasCrossIssueDeps(groups)) return groups;
+
+	const taskToIssue = new Map<string, string>();
+	for (const group of groups) {
+		for (const task of group.tasks) {
+			taskToIssue.set(task.id, group.issueId);
+		}
+	}
+
+	const deps = new Map<string, Set<string>>();
+	for (const group of groups) {
+		for (const task of group.tasks) {
+			for (const depId of task.depends_on) {
+				const depIssue = taskToIssue.get(depId);
+				if (depIssue && depIssue !== group.issueId) {
+					if (!deps.has(group.issueId)) deps.set(group.issueId, new Set());
+					deps.get(group.issueId)?.add(depIssue);
+				}
+			}
+		}
+	}
+
+	// Kahn's algorithm
+	const inDegree = new Map<string, number>();
+	const adj = new Map<string, string[]>();
+	for (const g of groups) {
+		inDegree.set(g.issueId, 0);
+		adj.set(g.issueId, []);
+	}
+	for (const [issueId, depSet] of deps) {
+		inDegree.set(issueId, (inDegree.get(issueId) ?? 0) + depSet.size);
+		for (const dep of depSet) {
+			adj.get(dep)?.push(issueId);
+		}
+	}
+
+	const queue: string[] = [];
+	for (const [id, deg] of inDegree) {
+		if (deg === 0) queue.push(id);
+	}
+
+	const sorted: string[] = [];
+	while (queue.length > 0) {
+		const current = queue.shift() as string;
+		sorted.push(current);
+		for (const next of adj.get(current) ?? []) {
+			const newDeg = (inDegree.get(next) ?? 1) - 1;
+			inDegree.set(next, newDeg);
+			if (newDeg === 0) queue.push(next);
+		}
+	}
+
+	if (sorted.length < groups.length) {
+		log.warn("Circular cross-issue dependencies detected — using severity-based order.");
+		return groups;
+	}
+
+	const orderMap = new Map(sorted.map((id, idx) => [id, idx]));
+	return [...groups].sort(
+		(a, b) => (orderMap.get(a.issueId) ?? 0) - (orderMap.get(b.issueId) ?? 0),
+	);
+}
+
 export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 	name: "exec",
 	timeout: 20 * 60 * 1000, // 20 min per issue — kill hung processes
 
 	loadItems(store) {
 		const tasks = store.loadTasks().filter((t: Task) => t.status === "pending");
-		const issues = store.loadIssues().filter((i: Issue) => i.status === "CONFIRMED" || i.status === "PARTIAL");
-		return groupTasksByIssue(tasks, issues);
+		const issues = store
+			.loadIssues()
+			.filter((i: Issue) => i.status === "CONFIRMED" || i.status === "PARTIAL");
+		return topoSortGroups(groupTasksByIssue(tasks, issues));
 	},
 
 	buildPrompt(item, _store, config) {
@@ -58,7 +152,7 @@ export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
 
 	parseResponse(_response, item) {
 		// Exec doesn't parse AI response — success is determined by process exit code
-		return { issueId: item.issueId, taskIds: item.tasks.map(t => t.id) };
+		return { issueId: item.issueId, taskIds: item.tasks.map((t) => t.id) };
 	},
 
 	async saveResults(results, store) {
