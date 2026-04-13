@@ -107,7 +107,7 @@ describe("loadConfig", () => {
 		const configPath = join(tempDir, ".milhouse", "config.ts");
 		writeFileSync(
 			configPath,
-			`export default { cost: { inputPerMillion: 5, outputPerMillion: 25, budget: -5 } };`,
+			"export default { cost: { inputPerMillion: 5, outputPerMillion: 25, budget: -5 } };",
 		);
 
 		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
@@ -117,7 +117,7 @@ describe("loadConfig", () => {
 		const configPath = join(tempDir, ".milhouse", "config.ts");
 		writeFileSync(
 			configPath,
-			`export default { phases: { validate: { workers: 5, retries: -1 } } };`,
+			"export default { phases: { validate: { workers: 5, retries: -1 } } };",
 		);
 
 		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
@@ -149,7 +149,7 @@ describe("loadConfig", () => {
 
 	it("accepts empty pipeline array", async () => {
 		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { pipeline: [] };`);
+		writeFileSync(configPath, "export default { pipeline: [] };");
 
 		const config = await loadConfig(tempDir);
 		expect(config.pipeline).toEqual([]);

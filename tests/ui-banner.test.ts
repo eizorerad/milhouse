@@ -68,19 +68,21 @@ describe("printBanner", () => {
 	});
 
 	it("includes a MILHOUSE intro label", () => {
-		const boxText = getBoxLines().map((line) => stripAnsi(line)).join("\n");
+		const boxText = getBoxLines()
+			.map((line) => stripAnsi(line))
+			.join("\n");
 		expect(boxText.includes("MILHOUSE")).toBe(true);
 	});
 });
 
 describe("setVerbose", () => {
 	afterEach(() => {
-		delete process.env.VERBOSE;
+		process.env.VERBOSE = undefined;
 		setVerbose(false);
 	});
 
 	it("sets process.env.VERBOSE to '1' when enabled", () => {
-		delete process.env.VERBOSE;
+		process.env.VERBOSE = undefined;
 		setVerbose(true);
 		expect(process.env.VERBOSE as string | undefined).toBe("1");
 	});

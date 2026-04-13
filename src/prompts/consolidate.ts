@@ -6,10 +6,15 @@ import type { Issue, Task } from "../types.ts";
 import { PromptBuilder } from "./base.ts";
 
 export function buildConsolidatePrompt(tasks: Task[], issues: Issue[]): string {
-	const issueList = issues.map(i => `- **${i.id}** [${i.status}]: ${i.title} (${i.severity})`).join("\n");
-	const taskList = tasks.map(t =>
-		`### ${t.id}: ${t.title}\n- Issue: ${t.issue_id} | Files: ${t.files.join(", ") || "none"} | Deps: ${t.depends_on.join(", ") || "none"} | Group: ${t.parallel_group}`,
-	).join("\n\n");
+	const issueList = issues
+		.map((i) => `- **${i.id}** [${i.status}]: ${i.title} (${i.severity})`)
+		.join("\n");
+	const taskList = tasks
+		.map(
+			(t) =>
+				`### ${t.id}: ${t.title}\n- Issue: ${t.issue_id} | Files: ${t.files.join(", ") || "none"} | Deps: ${t.depends_on.join(", ") || "none"} | Group: ${t.parallel_group}`,
+		)
+		.join("\n\n");
 
 	return new PromptBuilder()
 		.role(

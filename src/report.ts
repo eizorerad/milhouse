@@ -2,9 +2,9 @@
  * Report — generate a summary report for a completed run.
  */
 
-import { formatCost, formatPhaseCosts } from "./cost.ts";
+import { formatCost } from "./cost.ts";
 import type { RunStore } from "./state.ts";
-import type { PhaseCost, Phase, RunCost, RunMeta } from "./types.ts";
+import type { Phase, PhaseCost, RunCost, RunMeta } from "./types.ts";
 import { formatDuration } from "./ui.ts";
 
 export interface RunReport {
@@ -107,7 +107,7 @@ export function formatReportMarkdown(report: RunReport): string {
 	const lines: string[] = [];
 	const dur = formatDuration(report.timeline.durationMs);
 
-	lines.push(`# Milhouse Run Report`);
+	lines.push("# Milhouse Run Report");
 	lines.push("");
 	lines.push(`**Run ID**: ${report.meta.id}`);
 	if (report.meta.scope) lines.push(`**Scope**: ${report.meta.scope}`);
@@ -120,8 +120,8 @@ export function formatReportMarkdown(report: RunReport): string {
 	lines.push("");
 	lines.push("## Issues");
 	lines.push("");
-	lines.push(`| Status | Count |`);
-	lines.push(`|--------|-------|`);
+	lines.push("| Status | Count |");
+	lines.push("|--------|-------|");
 	lines.push(`| Total | ${report.issues.total} |`);
 	lines.push(`| ✅ Confirmed | ${report.issues.confirmed} |`);
 	lines.push(`| ❌ False Positive | ${report.issues.false_positive} |`);
@@ -133,8 +133,8 @@ export function formatReportMarkdown(report: RunReport): string {
 		lines.push("");
 		lines.push("### By Severity");
 		lines.push("");
-		lines.push(`| Severity | Count |`);
-		lines.push(`|----------|-------|`);
+		lines.push("| Severity | Count |");
+		lines.push("|----------|-------|");
 		for (const [sev, count] of Object.entries(report.issues.bySeverity)) {
 			lines.push(`| ${sev} | ${count} |`);
 		}
@@ -144,8 +144,8 @@ export function formatReportMarkdown(report: RunReport): string {
 	lines.push("");
 	lines.push("## Tasks");
 	lines.push("");
-	lines.push(`| Status | Count |`);
-	lines.push(`|--------|-------|`);
+	lines.push("| Status | Count |");
+	lines.push("|--------|-------|");
 	lines.push(`| Total | ${report.tasks.total} |`);
 	lines.push(`| ✅ Done | ${report.tasks.done} |`);
 	lines.push(`| ❌ Failed | ${report.tasks.failed} |`);
@@ -158,7 +158,9 @@ export function formatReportMarkdown(report: RunReport): string {
 	lines.push("");
 	const passIcon = report.verification.overall_pass ? "✅" : "❌";
 	lines.push(`**Overall**: ${passIcon} ${report.verification.overall_pass ? "PASSED" : "FAILED"}`);
-	lines.push(`**Passed**: ${report.verification.passed} | **Failed**: ${report.verification.failed}`);
+	lines.push(
+		`**Passed**: ${report.verification.passed} | **Failed**: ${report.verification.failed}`,
+	);
 
 	// Cost
 	lines.push("");
@@ -168,10 +170,12 @@ export function formatReportMarkdown(report: RunReport): string {
 	const phaseEntries = Object.entries(report.cost.byPhase) as [Phase, PhaseCost][];
 	if (phaseEntries.length > 0) {
 		lines.push("");
-		lines.push(`| Phase | Input Tokens | Output Tokens | Cost |`);
-		lines.push(`|-------|-------------|---------------|------|`);
+		lines.push("| Phase | Input Tokens | Output Tokens | Cost |");
+		lines.push("|-------|-------------|---------------|------|");
 		for (const [phase, pc] of phaseEntries) {
-			lines.push(`| ${phase} | ${pc.inputTokens.toLocaleString()} | ${pc.outputTokens.toLocaleString()} | $${pc.cost.toFixed(2)} |`);
+			lines.push(
+				`| ${phase} | ${pc.inputTokens.toLocaleString()} | ${pc.outputTokens.toLocaleString()} | $${pc.cost.toFixed(2)} |`,
+			);
 		}
 	}
 
@@ -213,4 +217,3 @@ function countBy<T>(items: T[], key: (item: T) => string): Record<string, number
 	}
 	return result;
 }
-

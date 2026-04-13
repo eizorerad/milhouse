@@ -2,8 +2,8 @@
  * Validate phase — validate each issue with evidence.
  */
 
-import { buildValidatePrompt, VALIDATE_SCHEMA } from "../prompts/validate.ts";
-import type { Issue, IssueStatus, PhaseConfig, PhaseResult } from "../types.ts";
+import { VALIDATE_SCHEMA, buildValidatePrompt } from "../prompts/validate.ts";
+import type { Issue, IssueStatus, PhaseConfig } from "../types.ts";
 import { printIssueList } from "../ui.ts";
 import { extractJson } from "../util.ts";
 
@@ -13,7 +13,13 @@ interface ValidateResult {
 	confidence?: string;
 	summary?: string;
 	corrected_description?: string;
-	evidence?: Array<{ type: string; file?: string; line_start?: number; line_end?: number; output?: string }>;
+	evidence?: Array<{
+		type: string;
+		file?: string;
+		line_start?: number;
+		line_end?: number;
+		output?: string;
+	}>;
 }
 
 export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
@@ -39,7 +45,8 @@ export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
 		} catch {
 			// Fallback: extract JSON from markdown/text response
 			const jsonStr = extractJson(response);
-			if (!jsonStr) return { issue_id: item.id, status: "UNVALIDATED" as IssueStatus, summary: "No JSON" };
+			if (!jsonStr)
+				return { issue_id: item.id, status: "UNVALIDATED" as IssueStatus, summary: "No JSON" };
 			parsed = JSON.parse(jsonStr);
 		}
 		const validStatuses: IssueStatus[] = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"];
@@ -70,7 +77,7 @@ export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
 			const issue = issueMap.get(originalIssue.id);
 			if (!issue) continue;
 
-			const newEvidence = (v.evidence ?? []).map(e => ({
+			const newEvidence = (v.evidence ?? []).map((e) => ({
 				type: e.type as "file" | "log" | "command",
 				file: e.file,
 				line_start: e.line_start,

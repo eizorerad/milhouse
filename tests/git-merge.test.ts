@@ -1,5 +1,5 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
-import type { PhaseResult, IssueGroup, Issue, EngineResult } from "../src/types.ts";
+import { beforeEach, describe, expect, it } from "bun:test";
+import type { EngineResult, Issue, IssueGroup, PhaseResult } from "../src/types.ts";
 
 function makeIssueGroup(issueId: string): IssueGroup {
 	return {
@@ -39,7 +39,7 @@ describe("mergeCompletedBranches", () => {
 		originalSpawn = Bun.spawn;
 
 		// @ts-expect-error — mocking Bun.spawn
-		Bun.spawn = (cmd: string[], _opts?: any) => {
+		Bun.spawn = (cmd: string[], _opts?: unknown) => {
 			const args = cmd.slice(1); // strip "git"
 			gitCalls.push(args);
 
@@ -63,10 +63,7 @@ describe("mergeCompletedBranches", () => {
 
 	it("deletes all branches when all merges succeed", async () => {
 		const { mergeCompletedBranches } = await import("../src/git.ts");
-		const results = [
-			makePhaseResult("issue-1", true),
-			makePhaseResult("issue-2", true),
-		];
+		const results = [makePhaseResult("issue-1", true), makePhaseResult("issue-2", true)];
 
 		await mergeCompletedBranches(results, "/fake/dir");
 		restore();
@@ -110,10 +107,7 @@ describe("mergeCompletedBranches", () => {
 		spawnResults.set("merge --no-ff mh/issue-2 -m Merge mh/issue-2", { exitCode: 1 });
 
 		const { mergeCompletedBranches } = await import("../src/git.ts");
-		const results = [
-			makePhaseResult("issue-1", true),
-			makePhaseResult("issue-2", true),
-		];
+		const results = [makePhaseResult("issue-1", true), makePhaseResult("issue-2", true)];
 
 		await mergeCompletedBranches(results, "/fake/dir");
 		restore();

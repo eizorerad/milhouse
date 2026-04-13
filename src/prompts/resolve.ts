@@ -4,20 +4,14 @@
 
 import { PromptBuilder } from "./base.ts";
 
-export function buildResolvePrompt(
-	branch: string,
-	conflictFiles: string[],
-): string {
+export function buildResolvePrompt(branch: string, conflictFiles: string[]): string {
 	return new PromptBuilder()
 		.role(
 			"Merge Resolver (MR)",
 			"You are resolving git merge conflicts in an integration branch. Your job is to produce a clean, correct merge that preserves the intent of BOTH sides.",
 		)
 		.section("Branch Being Merged", `\`${branch}\``)
-		.section(
-			"Conflicted Files",
-			conflictFiles.map((f) => `- \`${f}\``).join("\n"),
-		)
+		.section("Conflicted Files", conflictFiles.map((f) => `- \`${f}\``).join("\n"))
 		.raw(`## Protocol
 
 1. Run \`git diff\` to understand the conflict markers in each file

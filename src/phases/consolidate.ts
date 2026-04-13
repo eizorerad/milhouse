@@ -2,11 +2,14 @@
  * Consolidate phase — deduplicate tasks, add cross-dependencies.
  */
 
-import { buildConsolidatePrompt, CONSOLIDATE_SCHEMA } from "../prompts/consolidate.ts";
-import type { Config, Issue, PhaseConfig, Task } from "../types.ts";
+import { CONSOLIDATE_SCHEMA, buildConsolidatePrompt } from "../prompts/consolidate.ts";
+import type { Issue, PhaseConfig, Task } from "../types.ts";
 import { extractJson } from "../util.ts";
 
-interface ConsolidateInput { tasks: Task[]; issues: Issue[] }
+interface ConsolidateInput {
+	tasks: Task[];
+	issues: Issue[];
+}
 
 interface ConsolidateResult {
 	duplicates: Array<{ keep: string; remove: string[]; reason: string }>;
@@ -23,7 +26,9 @@ export const consolidatePhase: PhaseConfig<ConsolidateInput, ConsolidateResult> 
 
 	loadItems(store) {
 		const tasks = store.loadTasks();
-		const issues = store.loadIssues().filter((i: Issue) => i.status === "CONFIRMED" || i.status === "PARTIAL");
+		const issues = store
+			.loadIssues()
+			.filter((i: Issue) => i.status === "CONFIRMED" || i.status === "PARTIAL");
 		if (tasks.length === 0) return [];
 		return [{ tasks, issues }];
 	},

@@ -1,6 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 const SRC_DIR = join(import.meta.dir, "..", "src");
 
@@ -26,9 +26,11 @@ describe("state safety", () => {
 		for (const file of files) {
 			const content = readFileSync(file, "utf-8");
 			let match: RegExpExecArray | null;
-			while ((match = pattern.exec(content)) !== null) {
+			match = pattern.exec(content);
+			while (match !== null) {
 				const rel = file.replace(SRC_DIR, "src");
 				violations.push(`${rel}: ${match[0].trim()}`);
+				match = pattern.exec(content);
 			}
 		}
 

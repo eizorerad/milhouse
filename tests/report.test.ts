@@ -2,10 +2,10 @@
  * Tests for report generation.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	type RunReport,
 	formatReportMarkdown,
@@ -49,8 +49,19 @@ const mockReport: RunReport = {
 		overall_pass: false,
 	},
 	cost: {
-		total: { inputTokens: 3_000_000, outputTokens: 300_000, totalCost: 13.50, byPhase: { scan: { inputTokens: 1_000_000, outputTokens: 100_000, cost: 4.50 }, exec: { inputTokens: 2_000_000, outputTokens: 200_000, cost: 9.00 } } },
-		byPhase: { scan: { inputTokens: 1_000_000, outputTokens: 100_000, cost: 4.50 }, exec: { inputTokens: 2_000_000, outputTokens: 200_000, cost: 9.00 } },
+		total: {
+			inputTokens: 3_000_000,
+			outputTokens: 300_000,
+			totalCost: 13.5,
+			byPhase: {
+				scan: { inputTokens: 1_000_000, outputTokens: 100_000, cost: 4.5 },
+				exec: { inputTokens: 2_000_000, outputTokens: 200_000, cost: 9.0 },
+			},
+		},
+		byPhase: {
+			scan: { inputTokens: 1_000_000, outputTokens: 100_000, cost: 4.5 },
+			exec: { inputTokens: 2_000_000, outputTokens: 200_000, cost: 9.0 },
+		},
 	},
 	timeline: {
 		started: "2026-01-01T00:00:00Z",
@@ -94,7 +105,10 @@ describe("formatReportMarkdown", () => {
 	});
 
 	it("shows PASSED when overall_pass is true", () => {
-		const passing = { ...mockReport, verification: { ...mockReport.verification, overall_pass: true } };
+		const passing = {
+			...mockReport,
+			verification: { ...mockReport.verification, overall_pass: true },
+		};
 		const md = formatReportMarkdown(passing);
 		expect(md).toContain("PASSED");
 	});
@@ -133,11 +147,7 @@ describe("generateReport", () => {
 		const store = RunStore.create(tmpDir);
 		store.saveVerification({
 			overall_pass: true,
-			tasks: [
-				{ overall_pass: true },
-				{ overall_pass: true },
-				{ overall_pass: false },
-			],
+			tasks: [{ overall_pass: true }, { overall_pass: true }, { overall_pass: false }],
 		});
 
 		const report = generateReport(store);

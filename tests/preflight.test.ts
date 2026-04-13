@@ -5,14 +5,13 @@
  * even when other test files (e.g. pipeline.test.ts) mock preflight.ts.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { execSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { Config, Phase } from "../src/types.ts";
 import { PHASES } from "../src/types.ts";
-import { createRunCost, isBudgetExceeded } from "../src/cost.ts";
 
 /**
  * Re-implement the check functions here so that tests are not affected
@@ -57,9 +56,7 @@ function checkConfig(config: Config): void {
 	}
 	for (const phase of config.pipeline) {
 		if (!PHASES.includes(phase)) {
-			throw new Error(
-				`Unknown pipeline phase "${phase}". Valid phases: ${PHASES.join(", ")}`,
-			);
+			throw new Error(`Unknown pipeline phase "${phase}". Valid phases: ${PHASES.join(", ")}`);
 		}
 	}
 }
@@ -124,9 +121,7 @@ describe("preflight", () => {
 		});
 
 		it("throws when not in a git repository", async () => {
-			await expect(checkGitRepo(tmpDir)).rejects.toThrow(
-				"Not a git repository",
-			);
+			await expect(checkGitRepo(tmpDir)).rejects.toThrow("Not a git repository");
 		});
 	});
 

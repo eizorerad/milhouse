@@ -88,7 +88,7 @@ function parseClaudeStreamJson(raw: string): EngineResult {
 		} catch {
 			// Not JSON, might be plain text output
 			if (!response && trimmed.length > 0) {
-				response += trimmed + "\n";
+				response += `${trimmed}\n`;
 			}
 		}
 	}
@@ -97,13 +97,6 @@ function parseClaudeStreamJson(raw: string): EngineResult {
 	const finalResponse = structuredOutput || response;
 
 	return { response: finalResponse.trim(), inputTokens, outputTokens };
-}
-
-/**
- * Simple text-based output parser (unused engines fallback).
- */
-function parseTextOutput(raw: string): EngineResult {
-	return { response: raw.trim(), inputTokens: 0, outputTokens: 0 };
 }
 
 /**

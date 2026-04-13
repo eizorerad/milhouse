@@ -7,7 +7,10 @@ import { join } from "node:path";
 import type { IssueGroup, PhaseResult } from "./types.ts";
 import { log } from "./ui.ts";
 
-async function git(args: string[], cwd: string): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+async function git(
+	args: string[],
+	cwd: string,
+): Promise<{ ok: boolean; stdout: string; stderr: string }> {
 	const proc = Bun.spawn(["git", ...args], {
 		cwd,
 		stdout: "pipe",
@@ -25,10 +28,7 @@ async function git(args: string[], cwd: string): Promise<{ ok: boolean; stdout: 
  * Create an isolated worktree for an issue group.
  * Returns the worktree path.
  */
-export async function createWorktree(
-	issueGroup: IssueGroup,
-	baseDir: string,
-): Promise<string> {
+export async function createWorktree(issueGroup: IssueGroup, baseDir: string): Promise<string> {
 	const branch = `mh/${issueGroup.issueId}`;
 	const worktreePath = join(baseDir, ".milhouse", "work", "worktrees", issueGroup.issueId);
 
@@ -46,7 +46,9 @@ export async function createWorktree(
 		throw new Error(`Failed to create worktree for ${issueGroup.issueId}: ${result.stderr}`);
 	}
 
-	log.debug(`[git] Created worktree: ${worktreePath} (branch: ${branch}, reused: ${existingBranch})`);
+	log.debug(
+		`[git] Created worktree: ${worktreePath} (branch: ${branch}, reused: ${existingBranch})`,
+	);
 	return worktreePath;
 }
 
@@ -66,10 +68,7 @@ function sleep(ms: number): Promise<void> {
  * Returns true if cleanup succeeded, false otherwise.
  * On Windows, retries with delay on EBUSY and uses rename-then-delete fallback.
  */
-export async function cleanupWorktree(
-	worktreePath: string,
-	baseDir: string,
-): Promise<boolean> {
+export async function cleanupWorktree(worktreePath: string, baseDir: string): Promise<boolean> {
 	const isWindows = process.platform === "win32";
 
 	for (let attempt = 0; attempt < CLEANUP_MAX_RETRIES; attempt++) {
@@ -93,13 +92,17 @@ export async function cleanupWorktree(
 			return true;
 		} catch (err) {
 			if (isEBUSY(err) && attempt < CLEANUP_MAX_RETRIES - 1) {
-				log.debug(`[git] EBUSY on worktree cleanup, retrying in ${CLEANUP_RETRY_DELAY_MS}ms (attempt ${attempt + 1}/${CLEANUP_MAX_RETRIES})`);
+				log.debug(
+					`[git] EBUSY on worktree cleanup, retrying in ${CLEANUP_RETRY_DELAY_MS}ms (attempt ${attempt + 1}/${CLEANUP_MAX_RETRIES})`,
+				);
 				await sleep(CLEANUP_RETRY_DELAY_MS);
 				continue;
 			}
 			// Non-EBUSY error or final attempt
 			if (attempt === CLEANUP_MAX_RETRIES - 1) {
-				log.warn(`Failed to remove worktree after ${CLEANUP_MAX_RETRIES} attempts: ${worktreePath}`);
+				log.warn(
+					`Failed to remove worktree after ${CLEANUP_MAX_RETRIES} attempts: ${worktreePath}`,
+				);
 			}
 		}
 	}
@@ -111,10 +114,7 @@ export async function cleanupWorktree(
  * Retry cleanup of worktree paths that failed during the run.
  * Called after merge phase to give file locks more time to release.
  */
-export async function cleanupDeferredWorktrees(
-	paths: string[],
-	baseDir: string,
-): Promise<void> {
+export async function cleanupDeferredWorktrees(paths: string[], baseDir: string): Promise<void> {
 	if (paths.length === 0) return;
 
 	log.info(`Retrying cleanup of ${paths.length} deferred worktree(s)...`);
@@ -145,10 +145,7 @@ export async function mergeCompletedBranches(
 
 	const mergedBranches: string[] = [];
 	for (const branch of branches) {
-		const result = await git(
-			["merge", "--no-ff", branch, "-m", `Merge ${branch}`],
-			baseDir,
-		);
+		const result = await git(["merge", "--no-ff", branch, "-m", `Merge ${branch}`], baseDir);
 		if (result.ok) {
 			log.success(`Merged ${branch}`);
 			mergedBranches.push(branch);
@@ -185,8 +182,10 @@ export function parseTaskNumbersFromLog(logOutput: string): Set<number> {
 	const result = new Set<number>();
 	const regex = /\[.+?\]\s+Task\s+(\d+):/g;
 	let match: RegExpExecArray | null;
-	while ((match = regex.exec(logOutput)) !== null) {
+	match = regex.exec(logOutput);
+	while (match !== null) {
 		result.add(Number(match[1]));
+		match = regex.exec(logOutput);
 	}
 	return result;
 }
@@ -199,10 +198,7 @@ export async function getCommittedTaskNumbers(
 	branch: string,
 	cwd: string,
 ): Promise<Set<number>> {
-	const result = await git(
-		["log", branch, "--oneline", `--grep=[${issueId}]`],
-		cwd,
-	);
+	const result = await git(["log", branch, "--oneline", `--grep=[${issueId}]`], cwd);
 	if (!result.ok) return new Set();
 	return parseTaskNumbersFromLog(result.stdout);
 }

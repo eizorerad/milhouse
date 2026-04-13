@@ -3,13 +3,13 @@
  */
 
 import { formatCost, isBudgetExceeded } from "./cost.ts";
-import { preflight } from "./preflight.ts";
+import { consolidatePhase } from "./phases/consolidate.ts";
 import { execPhase } from "./phases/exec.ts";
 import { planPhase } from "./phases/plan.ts";
 import { scanPhase } from "./phases/scan.ts";
-import { consolidatePhase } from "./phases/consolidate.ts";
 import { validatePhase } from "./phases/validate.ts";
 import { verifyPhase } from "./phases/verify.ts";
+import { preflight } from "./preflight.ts";
 import { runPhase } from "./runner.ts";
 import { RunStore } from "./state.ts";
 import type { Config, Phase, PhaseConfig } from "./types.ts";

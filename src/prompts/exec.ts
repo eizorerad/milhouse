@@ -9,16 +9,19 @@ export function buildExecPrompt(issueGroup: IssueGroup, config: Config): string 
 	const { issue, tasks } = issueGroup;
 
 	const sorted = [...tasks].sort((a, b) => a.parallel_group - b.parallel_group);
-	const taskSections = sorted.map((t, i) =>
-		`### Task ${i + 1}: ${t.id}
+	const taskSections = sorted
+		.map(
+			(t, i) =>
+				`### Task ${i + 1}: ${t.id}
 **Title**: ${t.title}
 ${t.description ? `**Description**: ${t.description}` : ""}
-**Files**: ${t.files.length > 0 ? t.files.map(f => `\`${f}\``).join(", ") : "TBD"}
+**Files**: ${t.files.length > 0 ? t.files.map((f) => `\`${f}\``).join(", ") : "To be determined"}
 **Deps**: ${t.depends_on.length > 0 ? t.depends_on.join(", ") : "None"}
-**Checks**: ${t.checks.length > 0 ? t.checks.map(c => `\`${c}\``).join(", ") : "Run tests"}
+**Checks**: ${t.checks.length > 0 ? t.checks.map((c) => `\`${c}\``).join(", ") : "Run tests"}
 **Acceptance**:
-${t.acceptance.length > 0 ? t.acceptance.map(a => `- [ ] ${a.description}`).join("\n") : "- All tests pass"}`,
-	).join("\n\n");
+${t.acceptance.length > 0 ? t.acceptance.map((a) => `- [ ] ${a.description}`).join("\n") : "- All tests pass"}`,
+		)
+		.join("\n\n");
 
 	return new PromptBuilder()
 		.role(
@@ -34,7 +37,7 @@ ${t.acceptance.length > 0 ? t.acceptance.map(a => `- [ ] ${a.description}`).join
 
 1. For each task: implement → run checks → commit with "[${issue.id}] Task N: <task-id> <title>"
 2. Keep changes minimal and focused
-3. Do NOT add TODO/placeholder code
+3. Do NOT add placeholder or unfinished code markers
 4. Do NOT modify unrelated files
 5. Use the exact task ID shown above for <task-id>
 6. Complete ALL tasks before finishing`)
