@@ -29,8 +29,8 @@ export async function runPhase<TItem, TResult>(
 ): Promise<PhaseResult<TResult>[]> {
 	const startTime = Date.now();
 	const phaseOpts = config.phases[phase.name];
-	let workers = phaseOpts?.workers ?? 1;
-	const maxRetries = phaseOpts?.retries ?? 2;
+	let workers = Math.max(1, phaseOpts?.workers ?? 1);
+	const maxRetries = Math.max(0, phaseOpts?.retries ?? 2);
 	const model = phaseOpts?.model ?? config.model;
 
 	// 1. Load items

@@ -195,6 +195,10 @@ async function main(): Promise<void> {
 
 async function showReport(runId?: string, format?: string): Promise<void> {
 	const workDir = process.cwd();
+	if (runId && !RunStore.exists(workDir, runId)) {
+		log.error(`Run not found: ${runId}`);
+		return;
+	}
 
 	let store: RunStore | null;
 	try {
@@ -267,7 +271,9 @@ Options:
 `);
 }
 
-main().catch((err) => {
-	log.error(err instanceof Error ? err.message : String(err));
-	process.exit(1);
-});
+if (import.meta.main) {
+	main().catch((err) => {
+		log.error(err instanceof Error ? err.message : String(err));
+		process.exit(1);
+	});
+}

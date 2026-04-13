@@ -29,8 +29,8 @@ describe("buildWorkerOverrides", () => {
 	it("--workers (deprecated) sets exec phase workers and warns", () => {
 		const overrides = buildWorkerOverrides({ workers: "5" });
 		expect(overrides.phases).toEqual({ exec: { workers: 5 } });
-		const calls = logSpy.mock.calls.map((c) => String(c[0]));
-		expect(calls.some((c) => c.includes("--workers is deprecated"))).toBe(true);
+		const calls = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(calls.some((c: string) => c.includes("--workers is deprecated"))).toBe(true);
 	});
 
 	it("--exec-workers takes precedence over --workers", () => {
@@ -50,8 +50,8 @@ describe("buildWorkerOverrides", () => {
 		const phases = overrides.phases as Record<string, { workers: number }>;
 		expect(phases.exec).toEqual({ workers: 2 });
 		expect(phases.bogus).toBeUndefined();
-		const calls = logSpy.mock.calls.map((c) => String(c[0]));
-		expect(calls.some((c) => c.includes('unknown phase "bogus"'))).toBe(true);
+		const calls = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(calls.some((c: string) => c.includes('unknown phase "bogus"'))).toBe(true);
 	});
 
 	it("--phase-workers warns and skips non-numeric counts", () => {
@@ -59,8 +59,8 @@ describe("buildWorkerOverrides", () => {
 		const phases = overrides.phases as Record<string, { workers: number }>;
 		expect(phases.validate).toEqual({ workers: 4 });
 		expect(phases.exec).toBeUndefined();
-		const calls = logSpy.mock.calls.map((c) => String(c[0]));
-		expect(calls.some((c) => c.includes('invalid count for "exec"'))).toBe(true);
+		const calls = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(calls.some((c: string) => c.includes('invalid count for "exec"'))).toBe(true);
 	});
 
 	it("--phase-workers exec=N overrides --exec-workers", () => {

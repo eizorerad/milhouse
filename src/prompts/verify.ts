@@ -38,11 +38,12 @@ export function buildVerifyPrompt(task: Task): string {
 	return builder
 		.raw(`## Steps
 
-1. Run \`git log --oneline --all --grep="${task.id}"\` to find commits
-2. \`git show <commit>\` to review changes
-3. Run verification commands
-4. Check for TODO/FIXME/placeholder in modified files
-5. Confirm acceptance criteria`)
+1. Run \`git log --oneline --all --grep="${task.id}"\` to find the task commit
+2. If nothing matches, run \`git log --oneline --all --grep="[${task.issue_id}] Task"\` and identify the right commit by task title "${task.title}"
+3. \`git show <commit>\` to review changes
+4. Run verification commands
+5. Check for TODO/FIXME/placeholder in modified files
+6. Confirm acceptance criteria`)
 		.jsonOutput(`{
   "overall_pass": true,
   "gates": [

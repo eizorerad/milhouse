@@ -303,6 +303,10 @@ export class RunStore implements RunStoreInterface {
 		return new RunStore(workDir, runId);
 	}
 
+	static exists(workDir: string, runId: string): boolean {
+		return existsSync(join(workDir, ".milhouse", "runs", runId, "meta.json"));
+	}
+
 	static listRuns(workDir: string): RunsIndex["runs"] {
 		const indexPath = join(workDir, ".milhouse", "runs-index.json");
 		const index = readJson<RunsIndex>(indexPath, { runs: [] });

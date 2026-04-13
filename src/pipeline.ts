@@ -50,7 +50,12 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 
 	let store: RunStore;
 	if (opts.resume) {
-		const existing = opts.runId ? RunStore.byId(workDir, opts.runId) : RunStore.latest(workDir);
+		const existing =
+			opts.runId && !RunStore.exists(workDir, opts.runId)
+				? null
+				: opts.runId
+					? RunStore.byId(workDir, opts.runId)
+					: RunStore.latest(workDir);
 		if (!existing) {
 			log.error("No runs found to resume. Start with: milhouse --run");
 			process.exit(1);

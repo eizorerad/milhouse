@@ -82,6 +82,6 @@ describe("setVerbose", () => {
 	it("sets process.env.VERBOSE to '1' when enabled", () => {
 		delete process.env.VERBOSE;
 		setVerbose(true);
-		expect(process.env.VERBOSE).toBe("1");
+		expect(process.env.VERBOSE as string | undefined).toBe("1");
 	});
 });
