@@ -238,7 +238,7 @@ async function initProject(): Promise<void> {
 
 function printHelp(): void {
 	console.log(`
-milhouse v0.3 — Correctness-first AI coding orchestrator
+milhouse v0.3 - Correctness-first AI coding orchestrator
 
 Usage:
   milhouse "fix auth bugs"              Full pipeline with scope
@@ -254,7 +254,7 @@ Usage:
   milhouse --init                       Initialize project
 
 Pipeline:
-  scan → validate → plan → consolidate → exec → verify
+  scan -> validate -> plan -> consolidate -> exec -> verify
 
 Options:
   --scope <text>      Focus area for scan

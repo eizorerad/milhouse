@@ -123,11 +123,11 @@ export function formatReportMarkdown(report: RunReport): string {
 	lines.push("| Status | Count |");
 	lines.push("|--------|-------|");
 	lines.push(`| Total | ${report.issues.total} |`);
-	lines.push(`| ✅ Confirmed | ${report.issues.confirmed} |`);
-	lines.push(`| ❌ False Positive | ${report.issues.false_positive} |`);
-	lines.push(`| ⚠️ Partial | ${report.issues.partial} |`);
-	lines.push(`| 🔄 Misdiagnosed | ${report.issues.misdiagnosed} |`);
-	lines.push(`| ❓ Unvalidated | ${report.issues.unvalidated} |`);
+	lines.push(`| Confirmed | ${report.issues.confirmed} |`);
+	lines.push(`| False Positive | ${report.issues.false_positive} |`);
+	lines.push(`| Partial | ${report.issues.partial} |`);
+	lines.push(`| Misdiagnosed | ${report.issues.misdiagnosed} |`);
+	lines.push(`| Unvalidated | ${report.issues.unvalidated} |`);
 
 	if (Object.keys(report.issues.bySeverity).length > 0) {
 		lines.push("");
@@ -147,17 +147,16 @@ export function formatReportMarkdown(report: RunReport): string {
 	lines.push("| Status | Count |");
 	lines.push("|--------|-------|");
 	lines.push(`| Total | ${report.tasks.total} |`);
-	lines.push(`| ✅ Done | ${report.tasks.done} |`);
-	lines.push(`| ❌ Failed | ${report.tasks.failed} |`);
-	lines.push(`| ⏳ Pending | ${report.tasks.pending} |`);
-	lines.push(`| ⏭️ Skipped | ${report.tasks.skipped} |`);
+	lines.push(`| Done | ${report.tasks.done} |`);
+	lines.push(`| Failed | ${report.tasks.failed} |`);
+	lines.push(`| Pending | ${report.tasks.pending} |`);
+	lines.push(`| Skipped | ${report.tasks.skipped} |`);
 
 	// Verification
 	lines.push("");
 	lines.push("## Verification");
 	lines.push("");
-	const passIcon = report.verification.overall_pass ? "✅" : "❌";
-	lines.push(`**Overall**: ${passIcon} ${report.verification.overall_pass ? "PASSED" : "FAILED"}`);
+	lines.push(`**Overall**: ${report.verification.overall_pass ? "PASSED" : "FAILED"}`);
 	lines.push(
 		`**Passed**: ${report.verification.passed} | **Failed**: ${report.verification.failed}`,
 	);
@@ -194,10 +193,10 @@ export function formatReportTerminal(report: RunReport): string {
 	lines.push(`Duration: ${dur}`);
 	lines.push("");
 	lines.push(
-		`Issues: ${report.issues.total} found → ${report.issues.confirmed} confirmed, ${report.issues.false_positive} false`,
+		`Issues: ${report.issues.total} found -> ${report.issues.confirmed} confirmed, ${report.issues.false_positive} false`,
 	);
 	lines.push(
-		`Tasks:  ${report.tasks.total} total → ${report.tasks.done} done, ${report.tasks.failed} failed, ${report.tasks.pending} pending`,
+		`Tasks:  ${report.tasks.total} total -> ${report.tasks.done} done, ${report.tasks.failed} failed, ${report.tasks.pending} pending`,
 	);
 	lines.push(
 		`Verify: ${report.verification.overall_pass ? "PASS" : "FAIL"} (${report.verification.passed}/${report.verification.passed + report.verification.failed})`,
