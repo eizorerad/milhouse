@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { KNOWN_ENGINES, PHASES } from "./types.ts";
-import type { Config } from "./types.ts";
+import type { Config, DeepPartial, Phase } from "./types.ts";
 
 const DEFAULTS: Config = {
 	engine: "claude",
@@ -34,7 +34,7 @@ const DEFAULTS: Config = {
 /**
  * Deep merge objects. Later values win. Only merges plain objects, not arrays.
  */
-function deepMerge<T extends Record<string, unknown>>(...sources: Partial<T>[]): T {
+function deepMerge<T extends Record<string, unknown>>(...sources: DeepPartial<T>[]): T {
 	const result: Record<string, unknown> = {};
 	for (const source of sources) {
 		if (!source) continue;
@@ -68,16 +68,26 @@ export class ConfigError extends Error {
 }
 
 const KNOWN_TOP_LEVEL_KEYS = new Set(Object.keys(DEFAULTS));
+const KNOWN_ENGINE_SET = new Set<string>(KNOWN_ENGINES);
+const PHASE_SET = new Set<string>(PHASES);
+
+function isKnownEngine(engine: string): boolean {
+	return KNOWN_ENGINE_SET.has(engine);
+}
+
+function isPhase(entry: string): entry is Phase {
+	return PHASE_SET.has(entry);
+}
 
 function validateConfig(config: Config): void {
-	if (!KNOWN_ENGINES.includes(config.engine as any)) {
+	if (!isKnownEngine(config.engine)) {
 		throw new ConfigError(
 			`Invalid engine "${config.engine}". Must be one of: ${KNOWN_ENGINES.join(", ")}`,
 		);
 	}
 
 	for (const entry of config.pipeline) {
-		if (!PHASES.includes(entry as any)) {
+		if (!isPhase(entry)) {
 			throw new ConfigError(
 				`Invalid pipeline phase "${entry}". Must be one of: ${PHASES.join(", ")}`,
 			);
@@ -113,14 +123,17 @@ function validateConfig(config: Config): void {
 /**
  * Load config from .milhouse/config.ts, merge with defaults and CLI overrides.
  */
-export async function loadConfig(workDir: string, cliOverrides?: Partial<Config>): Promise<Config> {
+export async function loadConfig(
+	workDir: string,
+	cliOverrides?: DeepPartial<Config>,
+): Promise<Config> {
 	const configPath = join(workDir, ".milhouse", "config.ts");
-	let userConfig: Partial<Config> = {};
+	let userConfig: DeepPartial<Config> = {};
 
 	if (existsSync(configPath)) {
 		try {
 			const mod = await import(pathToFileURL(configPath).href);
-			userConfig = (mod.default ?? mod) as Partial<Config>;
+			userConfig = (mod.default ?? mod) as DeepPartial<Config>;
 		} catch (err) {
 			console.warn(
 				`Warning: Failed to load config from ${configPath}: ${err instanceof Error ? err.message : err}. Using defaults.`,

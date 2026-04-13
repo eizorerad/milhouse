@@ -4,10 +4,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildWorkerOverrides } from "../src/index.ts";
+import { join } from "node:path";
 import { loadConfig } from "../src/config.ts";
+import { buildWorkerOverrides } from "../src/index.ts";
+import type { Config, DeepPartial } from "../src/types.ts";
 
 describe("buildWorkerOverrides", () => {
 	let logSpy: ReturnType<typeof jest.spyOn>;
@@ -83,16 +84,18 @@ describe("loadConfig with worker overrides", () => {
 	});
 
 	it("--exec-workers override merges into config phases", async () => {
-		const config = await loadConfig(tempDir, { phases: { exec: { workers: 10 } } } as any);
+		const overrides: DeepPartial<Config> = { phases: { exec: { workers: 10 } } };
+		const config = await loadConfig(tempDir, overrides);
 		expect(config.phases.exec.workers).toBe(10);
 		// Other phases keep defaults
 		expect(config.phases.validate.workers).toBe(5);
 	});
 
 	it("--phase-workers overrides merge into config phases", async () => {
-		const config = await loadConfig(tempDir, {
+		const overrides: DeepPartial<Config> = {
 			phases: { validate: { workers: 8 }, exec: { workers: 2 } },
-		} as any);
+		};
+		const config = await loadConfig(tempDir, overrides);
 		expect(config.phases.validate.workers).toBe(8);
 		expect(config.phases.exec.workers).toBe(2);
 		// Retries preserved from defaults

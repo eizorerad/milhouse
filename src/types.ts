@@ -9,6 +9,13 @@ export const PHASES = ["scan", "validate", "plan", "consolidate", "exec", "verif
 export const KNOWN_ENGINES = ["claude", "gemini", "aider"] as const;
 export type Phase = (typeof PHASES)[number];
 export type RunStatus = "running" | "completed" | "failed" | "stopped";
+export type DeepPartial<T> = {
+	[K in keyof T]?: T[K] extends Array<unknown>
+		? T[K]
+		: T[K] extends object
+			? DeepPartial<T[K]>
+			: T[K];
+};
 
 export interface PhaseOptions {
 	workers: number;

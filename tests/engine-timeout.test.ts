@@ -53,9 +53,9 @@ describe("engine timeout cleanup", () => {
 		process.env.VERBOSE = "1";
 		const consoleSpy = spyOn(console, "log").mockImplementation(() => {});
 		try {
-			await expect(
-				execute("test prompt", "/tmp", config, { timeout: 60_000 }),
-			).rejects.toThrow(/E{500}/);
+			await expect(execute("test prompt", "/tmp", config, { timeout: 60_000 })).rejects.toThrow(
+				/E{500}/,
+			);
 
 			// debugLog should have been called with full stderr
 			const fullStderrCall = consoleSpy.mock.calls.find(
@@ -64,7 +64,7 @@ describe("engine timeout cleanup", () => {
 			expect(fullStderrCall).toBeDefined();
 		} finally {
 			consoleSpy.mockRestore();
-			if (origVerbose === undefined) delete process.env.VERBOSE;
+			if (origVerbose === undefined) process.env.VERBOSE = undefined;
 			else process.env.VERBOSE = origVerbose;
 		}
 	});
@@ -85,9 +85,9 @@ describe("engine timeout cleanup", () => {
 		spawnMock = spyOn(Bun, "spawn").mockReturnValue(fakeProc as never);
 		clearTimeoutSpy = spyOn(globalThis, "clearTimeout");
 
-		await expect(
-			execute("test prompt", "/tmp", config, { timeout: 50 }),
-		).rejects.toThrow("timed out");
+		await expect(execute("test prompt", "/tmp", config, { timeout: 50 })).rejects.toThrow(
+			"timed out",
+		);
 
 		expect(killMock).toHaveBeenCalled();
 		// clearTimeout should still be called in .finally()

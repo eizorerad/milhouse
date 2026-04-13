@@ -2,10 +2,10 @@
  * Tests for plan phase idempotency.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { planPhase } from "../../src/phases/plan.ts";
 import { RunStore } from "../../src/state.ts";
 import type { Issue, PhaseResult } from "../../src/types.ts";
@@ -25,7 +25,10 @@ function makeIssue(id: string): Issue {
 	};
 }
 
-function makePlanResult(issue: Issue, title: string): PhaseResult<{
+function makePlanResult(
+	issue: Issue,
+	title: string,
+): PhaseResult<{
 	issue_id: string;
 	summary: string;
 	tasks: Array<{ title: string; files?: string[] }>;

@@ -4,13 +4,13 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { scanPhase } from "../../src/phases/scan.ts";
-import { validatePhase } from "../../src/phases/validate.ts";
-import { planPhase } from "../../src/phases/plan.ts";
 import { consolidatePhase } from "../../src/phases/consolidate.ts";
 import { execPhase } from "../../src/phases/exec.ts";
+import { planPhase } from "../../src/phases/plan.ts";
+import { scanPhase } from "../../src/phases/scan.ts";
+import { validatePhase } from "../../src/phases/validate.ts";
 import { verifyPhase } from "../../src/phases/verify.ts";
-import type { Issue, Task, IssueGroup } from "../../src/types.ts";
+import type { Issue, IssueGroup, Task } from "../../src/types.ts";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -134,7 +134,7 @@ describe("validatePhase.parseResponse", () => {
 		expect(result.status).toBe("CONFIRMED");
 		expect(result.confidence).toBe("HIGH");
 		expect(result.evidence).toHaveLength(1);
-		expect(result.evidence![0].file).toBe("src/auth.ts");
+		expect(result.evidence?.[0]?.file).toBe("src/auth.ts");
 	});
 
 	it("parses FALSE response", () => {

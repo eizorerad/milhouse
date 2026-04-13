@@ -36,21 +36,45 @@ export interface ResolveResult {
 	failed: number;
 }
 
+export interface ResolveGitOps {
+	abortMerge(cwd: string): Promise<void>;
+	cleanupWorktree(worktreePath: string, baseDir: string): Promise<boolean>;
+	completeMerge(cwd: string): Promise<boolean>;
+	createIntegrationWorktree(branchName: string, baseDir: string): Promise<string>;
+	isWorkingTreeDirty(baseDir: string): Promise<boolean>;
+	listUnmergedBranches(baseDir: string): Promise<string[]>;
+	tryMerge(branch: string, cwd: string): Promise<{ ok: boolean; conflictFiles: string[] }>;
+}
+
+const defaultGitOps: ResolveGitOps = {
+	abortMerge,
+	cleanupWorktree,
+	completeMerge,
+	createIntegrationWorktree,
+	isWorkingTreeDirty,
+	listUnmergedBranches,
+	tryMerge,
+};
+
 /**
  * Run the AI merge resolver for all unmerged mh/* branches.
  */
-export async function runResolve(config: Config, executeFn = execute): Promise<void> {
+export async function runResolve(
+	config: Config,
+	executeFn = execute,
+	gitOps: ResolveGitOps = defaultGitOps,
+): Promise<void> {
 	const baseDir = process.cwd();
 
 	// 1. Check for dirty working tree
-	if (await isWorkingTreeDirty(baseDir)) {
+	if (await gitOps.isWorkingTreeDirty(baseDir)) {
 		log.warn("Working tree has uncommitted changes.");
 		log.warn("Commit or stash them first, then run: milhouse --resolve");
 		return;
 	}
 
 	// 2. Find unmerged branches
-	const branches = await listUnmergedBranches(baseDir);
+	const branches = await gitOps.listUnmergedBranches(baseDir);
 	if (branches.length === 0) {
 		log.success("No unmerged mh/* branches found. Nothing to resolve.");
 		return;
@@ -63,7 +87,7 @@ export async function runResolve(config: Config, executeFn = execute): Promise<v
 	const spinner = new Spinner("Creating integration worktree...").start();
 	let worktreePath: string;
 	try {
-		worktreePath = await createIntegrationWorktree(integrationBranch, baseDir);
+		worktreePath = await gitOps.createIntegrationWorktree(integrationBranch, baseDir);
 		spinner.success("Integration worktree ready");
 	} catch (err) {
 		spinner.fail(
@@ -80,7 +104,7 @@ export async function runResolve(config: Config, executeFn = execute): Promise<v
 	for (const branch of branches) {
 		const branchSpinner = new Spinner(`Merging ${branch}...`).start();
 
-		const merge = await tryMerge(branch, worktreePath);
+		const merge = await gitOps.tryMerge(branch, worktreePath);
 
 		if (merge.ok) {
 			// Clean merge, no conflicts
@@ -103,7 +127,7 @@ export async function runResolve(config: Config, executeFn = execute): Promise<v
 			});
 
 			// Check if AI completed the merge (no more conflicts)
-			const committed = await completeMerge(worktreePath);
+			const committed = await gitOps.completeMerge(worktreePath);
 			if (committed) {
 				branchSpinner.success(`${branch} — AI resolved ${merge.conflictFiles.length} conflict(s)`);
 				attempts.push({
@@ -115,13 +139,13 @@ export async function runResolve(config: Config, executeFn = execute): Promise<v
 				succeeded++;
 			} else {
 				// AI didn't fully resolve — abort and skip
-				await abortMerge(worktreePath);
+				await gitOps.abortMerge(worktreePath);
 				branchSpinner.fail(`${branch} — AI could not fully resolve conflicts`);
 				attempts.push({ branch, status: "failed", conflictFiles: merge.conflictFiles });
 				failed++;
 			}
 		} catch (err) {
-			await abortMerge(worktreePath).catch(() => {});
+			await gitOps.abortMerge(worktreePath).catch(() => {});
 			branchSpinner.fail(`${branch} — resolve error: ${err instanceof Error ? err.message : err}`);
 			attempts.push({ branch, status: "failed", conflictFiles: merge.conflictFiles });
 			failed++;
@@ -129,7 +153,7 @@ export async function runResolve(config: Config, executeFn = execute): Promise<v
 	}
 
 	// 5. Cleanup worktree (keep the branch)
-	await cleanupWorktree(worktreePath, baseDir);
+	await gitOps.cleanupWorktree(worktreePath, baseDir);
 
 	// 6. Print report
 	printResolveReport({ integrationBranch, attempts, succeeded, failed });

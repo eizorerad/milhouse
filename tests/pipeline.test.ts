@@ -2,15 +2,13 @@
  * Tests for pipeline resume and completion semantics.
  */
 
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { Config, Phase, PhaseResult } from "../src/types.ts";
 
-const mockRunPhase = mock<
-	(phase: { name: Phase }, ...args: unknown[]) => Promise<PhaseResult[]>
->();
+const mockRunPhase = mock<(phase: { name: Phase }, ...args: unknown[]) => Promise<PhaseResult[]>>();
 
 mock.module("../src/runner.ts", () => ({
 	runPhase: mockRunPhase,
@@ -53,7 +51,14 @@ function makeConfig(pipeline: Phase[]): Config {
 }
 
 function successResult(): PhaseResult[] {
-	return [{ item: {}, result: {}, success: true, tokens: { response: "", inputTokens: 0, outputTokens: 0 } }];
+	return [
+		{
+			item: {},
+			result: {},
+			success: true,
+			tokens: { response: "", inputTokens: 0, outputTokens: 0 },
+		},
+	];
 }
 
 describe("runPipeline", () => {
@@ -99,12 +104,15 @@ describe("runPipeline", () => {
 		// runPipeline calls process.exit(1) on preflight failure; mock it to throw
 		// so execution actually stops
 		const originalExit = process.exit;
-		process.exit = (() => { throw new Error("EXIT"); }) as any;
+		process.exit = (() => {
+			throw new Error("EXIT");
+		}) as typeof process.exit;
 
 		try {
 			await runPipeline(config, { scope: "scope" });
-		} catch (e: any) {
-			expect(e.message).toBe("EXIT");
+		} catch (e: unknown) {
+			expect(e).toBeInstanceOf(Error);
+			expect((e as Error).message).toBe("EXIT");
 		} finally {
 			process.exit = originalExit;
 		}
@@ -125,7 +133,7 @@ describe("runPipeline", () => {
 
 		const store = RunStore.latest(tmpDir);
 		expect(store).not.toBeNull();
-		expect(store!.loadMeta()).toMatchObject({
+		expect(store?.loadMeta()).toMatchObject({
 			phase: "plan",
 			status: "stopped",
 			last_completed_phase: "validate",

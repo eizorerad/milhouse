@@ -7,32 +7,34 @@ import { PromptBuilder } from "./base.ts";
 
 export function buildVerifyPrompt(task: Task): string {
 	const builder = new PromptBuilder()
-		.role(
-			"Truth Verifier (TV)",
-			"You are verifying ONE task's execution results.",
-		)
-		.section("Task to Verify", [
-			`**ID**: ${task.id}`,
-			`**Title**: ${task.title}`,
-			task.issue_id ? `**Issue**: ${task.issue_id}` : "",
-			task.description ? `**Description**: ${task.description}` : "",
-		].filter(Boolean).join("\n"));
+		.role("Truth Verifier (TV)", "You are verifying ONE task's execution results.")
+		.section(
+			"Task to Verify",
+			[
+				`**ID**: ${task.id}`,
+				`**Title**: ${task.title}`,
+				task.issue_id ? `**Issue**: ${task.issue_id}` : "",
+				task.description ? `**Description**: ${task.description}` : "",
+			]
+				.filter(Boolean)
+				.join("\n"),
+		);
 
 	if (task.files.length > 0) {
-		builder.section("Files", task.files.map(f => `- \`${f}\``).join("\n"));
+		builder.section("Files", task.files.map((f) => `- \`${f}\``).join("\n"));
 	}
 
 	if (task.acceptance.length > 0) {
 		builder.section(
 			"Acceptance Criteria",
-			task.acceptance.map(a =>
-				`- [ ] ${a.description}${a.check_command ? ` (\`${a.check_command}\`)` : ""}`,
-			).join("\n"),
+			task.acceptance
+				.map((a) => `- [ ] ${a.description}${a.check_command ? ` (\`${a.check_command}\`)` : ""}`)
+				.join("\n"),
 		);
 	}
 
 	if (task.checks.length > 0) {
-		builder.section("Verification Commands", task.checks.map(c => `- \`${c}\``).join("\n"));
+		builder.section("Verification Commands", task.checks.map((c) => `- \`${c}\``).join("\n"));
 	}
 
 	return builder
@@ -42,7 +44,7 @@ export function buildVerifyPrompt(task: Task): string {
 2. If nothing matches, run \`git log --oneline --all --grep="[${task.issue_id}] Task"\` and identify the right commit by task title "${task.title}"
 3. \`git show <commit>\` to review changes
 4. Run verification commands
-5. Check for TODO/FIXME/placeholder in modified files
+5. Check for unfinished markers or placeholder code in modified files
 6. Confirm acceptance criteria`)
 		.jsonOutput(`{
   "overall_pass": true,

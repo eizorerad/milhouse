@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { execute } from "../src/engine.ts";
-import { parseGeminiOutput, parseAiderOutput } from "../src/engine.ts";
+import { parseAiderOutput, parseGeminiOutput } from "../src/engine.ts";
 import type { Config } from "../src/types.ts";
 
 function makeFakeProc(stdout: string, stderr: string, exitCode: number) {

@@ -28,7 +28,9 @@ export function addTokens(
 	phase?: Phase,
 ): void {
 	if (!estimatedTokensWarned && isEstimatedTokens(config.engine)) {
-		debugLog(`[cost] Token counts for engine "${config.engine}" are estimated — budget enforcement is approximate`);
+		debugLog(
+			`[cost] Token counts for engine "${config.engine}" are estimated — budget enforcement is approximate`,
+		);
 		estimatedTokensWarned = true;
 	}
 	cost.inputTokens += inputTokens;
@@ -61,7 +63,9 @@ export function formatPhaseCosts(cost: RunCost): string {
 	if (entries.length === 0) return "";
 	const lines: string[] = [];
 	for (const [phase, pc] of entries) {
-		lines.push(`  ${phase}: $${pc.cost.toFixed(2)} (${formatTokens(pc.inputTokens)} in / ${formatTokens(pc.outputTokens)} out)`);
+		lines.push(
+			`  ${phase}: $${pc.cost.toFixed(2)} (${formatTokens(pc.inputTokens)} in / ${formatTokens(pc.outputTokens)} out)`,
+		);
 	}
 	return lines.join("\n");
 }

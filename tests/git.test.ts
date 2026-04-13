@@ -2,12 +2,12 @@
  * Tests for git utilities.
  */
 
-import { describe, expect, it, afterAll } from "bun:test";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { afterAll, describe, expect, it } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { parseTaskNumbersFromLog, createWorktree } from "../src/git.ts";
-import type { IssueGroup, Issue } from "../src/types.ts";
+import { join } from "node:path";
+import { createWorktree, parseTaskNumbersFromLog } from "../src/git.ts";
+import type { Issue, IssueGroup } from "../src/types.ts";
 
 describe("parseTaskNumbersFromLog", () => {
 	it("parses multiple task commits correctly", () => {

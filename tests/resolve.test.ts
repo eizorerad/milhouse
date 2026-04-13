@@ -2,7 +2,7 @@
  * Tests for AI merge resolver — prompt, git helpers, resolve flow.
  */
 
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { buildResolvePrompt } from "../src/prompts/resolve.ts";
 
 // ─── Prompt Tests ───────────────────────────────────────────────────────────

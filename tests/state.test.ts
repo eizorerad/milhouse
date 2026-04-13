@@ -2,10 +2,10 @@
  * Tests for run state persistence helpers.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { RunStore } from "../src/state.ts";
 import type { RunsIndex } from "../src/state.ts";
 
@@ -221,7 +221,7 @@ describe("RunStore.cleanRuns", () => {
 		b.stopRun("exec", "failed");
 		setRunCreatedAt(tmpDir, b.runId, "2020-02-01T00:00:00Z");
 
-		const c = RunStore.create(tmpDir, "c"); // running, recent
+		const _c = RunStore.create(tmpDir, "c"); // running, recent
 
 		const result = RunStore.cleanRuns(tmpDir, 30);
 		expect(result.removed).toHaveLength(2);
@@ -282,7 +282,7 @@ describe("listRuns and cleanRuns edge cases", () => {
 	});
 
 	it("list-runs with mixed statuses shows all", () => {
-		const a = RunStore.create(tmpDir, "running-scope");
+		const _a = RunStore.create(tmpDir, "running-scope");
 		const b = RunStore.create(tmpDir, "completed-scope");
 		b.completeRun();
 		const c = RunStore.create(tmpDir, "failed-scope");

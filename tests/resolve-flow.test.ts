@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { execute } from "../src/engine.ts";
+import type { ResolveGitOps } from "../src/resolve.ts";
 import type { Config } from "../src/types.ts";
 
 const mockExecute = mock<typeof execute>();
@@ -19,16 +20,6 @@ const mockIsWorkingTreeDirty = mock<(baseDir: string) => Promise<boolean>>();
 const mockListUnmergedBranches = mock<(baseDir: string) => Promise<string[]>>();
 const mockTryMerge =
 	mock<(branch: string, cwd: string) => Promise<{ ok: boolean; conflictFiles: string[] }>>();
-
-mock.module("../src/git.ts", () => ({
-	abortMerge: mockAbortMerge,
-	cleanupWorktree: mockCleanupWorktree,
-	completeMerge: mockCompleteMerge,
-	createIntegrationWorktree: mockCreateIntegrationWorktree,
-	isWorkingTreeDirty: mockIsWorkingTreeDirty,
-	listUnmergedBranches: mockListUnmergedBranches,
-	tryMerge: mockTryMerge,
-}));
 
 const { runResolve } = await import("../src/resolve.ts");
 
@@ -81,7 +72,17 @@ describe("runResolve", () => {
 		mockCompleteMerge.mockResolvedValue(true);
 		mockCleanupWorktree.mockResolvedValue(true);
 
-		await runResolve(config, mockExecute);
+		const gitOps: ResolveGitOps = {
+			abortMerge: mockAbortMerge,
+			cleanupWorktree: mockCleanupWorktree,
+			completeMerge: mockCompleteMerge,
+			createIntegrationWorktree: mockCreateIntegrationWorktree,
+			isWorkingTreeDirty: mockIsWorkingTreeDirty,
+			listUnmergedBranches: mockListUnmergedBranches,
+			tryMerge: mockTryMerge,
+		};
+
+		await runResolve(config, mockExecute, gitOps);
 
 		const stdout = logSpy.mock.calls.map((call: unknown[]) => call.join(" ")).join("\n");
 

@@ -29,23 +29,22 @@ function hex(color: string): (text: string) => string {
 // ─── Theme ──────────────────────────────────────────────────────────────────
 
 export const theme = {
-	brand: hex("#7C3AED"),       // Purple
-	accent: hex("#06B6D4"),      // Cyan
-	success: hex("#10B981"),     // Green
-	warning: hex("#F59E0B"),     // Amber
-	error: hex("#EF4444"),       // Red
-	info: hex("#3B82F6"),        // Blue
+	brand: hex("#7C3AED"), // Purple
+	accent: hex("#06B6D4"), // Cyan
+	success: hex("#10B981"), // Green
+	warning: hex("#F59E0B"), // Amber
+	error: hex("#EF4444"), // Red
+	info: hex("#3B82F6"), // Blue
 
 	phase: {
-		scan: hex("#8B5CF6"),       // Violet
-		validate: hex("#06B6D4"),   // Cyan
-		plan: hex("#3B82F6"),       // Blue
-		consolidate: hex("#10B981"),// Green
-		exec: hex("#F59E0B"),       // Amber
-		verify: hex("#EC4899"),     // Pink
+		scan: hex("#8B5CF6"), // Violet
+		validate: hex("#06B6D4"), // Cyan
+		plan: hex("#3B82F6"), // Blue
+		consolidate: hex("#10B981"), // Green
+		exec: hex("#F59E0B"), // Amber
+		verify: hex("#EC4899"), // Pink
 	} as Record<string, (t: string) => string>,
 };
-
 
 const severityTextColor: Record<string, (t: string) => string> = {
 	CRITICAL: theme.error,
@@ -53,7 +52,6 @@ const severityTextColor: Record<string, (t: string) => string> = {
 	MEDIUM: theme.info,
 	LOW: pc.dim,
 };
-
 
 // ─── Severity colors ────────────────────────────────────────────────────────
 
@@ -66,7 +64,16 @@ export function severityColor(severity: string, text: string): string {
 
 /** Strip ANSI escape codes from a string to get visible width. */
 export function stripAnsi(str: string): string {
-	return str.replace(/\x1b\[[0-9;]*m/g, "");
+	let result = "";
+	for (let i = 0; i < str.length; i++) {
+		if (str.charCodeAt(i) === 27 && str[i + 1] === "[") {
+			i += 2;
+			while (i < str.length && !/[A-Za-z]/.test(str[i])) i++;
+			continue;
+		}
+		result += str[i];
+	}
+	return result;
 }
 
 // ─── Banner ─────────────────────────────────────────────────────────────────
@@ -132,7 +139,9 @@ export function printIssueList(issues: Issue[]): void {
 	for (const issue of issues) {
 		const sc = statusColor[issue.status] ?? pc.dim;
 		const vc = issueSeverityColor[issue.severity] ?? pc.dim;
-		console.log(`  ${sc(`[${issue.status}]`)} ${vc(`[${issue.severity}]`)} ${issue.title} ${pc.dim(`(${issue.id})`)}`);
+		console.log(
+			`  ${sc(`[${issue.status}]`)} ${vc(`[${issue.severity}]`)} ${issue.title} ${pc.dim(`(${issue.id})`)}`,
+		);
 	}
 }
 
@@ -170,7 +179,9 @@ export const log = {
 	summary: (succeeded: number, total: number, cost: number, duration: number) => {
 		const secs = (duration / 1000).toFixed(1);
 		const bar = progressBar(succeeded, total, 15);
-		console.log(`  ${bar}  ${theme.success(String(succeeded))}/${total} | $${cost.toFixed(2)} | ${pc.dim(`${secs}s`)}`);
+		console.log(
+			`  ${bar}  ${theme.success(String(succeeded))}/${total} | $${cost.toFixed(2)} | ${pc.dim(`${secs}s`)}`,
+		);
 	},
 };
 
@@ -208,10 +219,7 @@ const FRAMES = ["|", "/", "-", "\\"];
 
 // ─── Shared stop/finish helper ──────────────────────────────────────────────
 
-function finishLine(
-	timer: ReturnType<typeof setInterval> | null,
-	finalText: string,
-): void {
+function finishLine(timer: ReturnType<typeof setInterval> | null, finalText: string): void {
 	if (timer) clearInterval(timer);
 	process.stdout.write(`\r${finalText}`);
 	clearLine();
@@ -254,7 +262,7 @@ export class Spinner {
 	writeLine(msg: string): void {
 		if (this.timer) clearInterval(this.timer);
 		process.stdout.write("\r\x1b[K");
-		process.stdout.write(msg + "\n");
+		process.stdout.write(`${msg}\n`);
 		if (this.timer) {
 			this.timer = setInterval(() => {
 				this.render();
@@ -328,7 +336,8 @@ export class ParallelSpinner {
 		// Build slot display
 		const parts: string[] = [];
 		for (let i = 1; i <= this.maxSlots; i++) {
-			const slot = this.slots.get(i)!;
+			const slot = this.slots.get(i);
+			if (!slot) continue;
 			if (slot.id && slot.status !== "idle") {
 				const shortId = slot.id.length > 10 ? slot.id.slice(0, 8) : slot.id;
 				const shortStatus = slot.status.length > 12 ? `${slot.status.slice(0, 10)}..` : slot.status;
@@ -342,7 +351,7 @@ export class ParallelSpinner {
 		const maxW = getMaxWidth();
 		const raw = `\r  ${theme.brand(f)} ${progress} ${slotsStr} ${bar} ${time}`;
 		// Truncate if needed
-		const visible = raw.replace(/\x1b\[[0-9;]*m/g, "");
+		const visible = stripAnsi(raw);
 		if (visible.length > maxW) {
 			process.stdout.write(`\r  ${theme.brand(f)} ${progress} ${bar} ${time} `);
 		} else {
@@ -354,7 +363,8 @@ export class ParallelSpinner {
 	/** Acquire a slot for an item. Returns slot number. */
 	acquireSlot(itemId: string): number {
 		for (let i = 1; i <= this.maxSlots; i++) {
-			const slot = this.slots.get(i)!;
+			const slot = this.slots.get(i);
+			if (!slot) continue;
 			if (!slot.id || slot.status === "idle") {
 				this.slots.set(i, { id: itemId, status: "starting" });
 				return i;
@@ -381,7 +391,7 @@ export class ParallelSpinner {
 	writeLine(msg: string): void {
 		if (this.timer) clearInterval(this.timer);
 		process.stdout.write("\r\x1b[K");
-		process.stdout.write(msg + "\n");
+		process.stdout.write(`${msg}\n`);
 		if (this.timer) {
 			this.timer = setInterval(() => {
 				this.render();

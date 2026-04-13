@@ -24,7 +24,8 @@ function groupTasksByIssue(tasks: Task[], issues: Issue[]): IssueGroup[] {
 	for (const task of tasks) {
 		const key = task.issue_id || "UNASSIGNED";
 		if (!groups.has(key)) groups.set(key, []);
-		groups.get(key)!.push(task);
+		const issueTasks = groups.get(key);
+		if (issueTasks) issueTasks.push(task);
 	}
 
 	const result: IssueGroup[] = [];

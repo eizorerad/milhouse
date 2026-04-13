@@ -2,7 +2,7 @@
  * Plan phase — generate WBS for each validated issue.
  */
 
-import { buildPlanPrompt, PLAN_SCHEMA } from "../prompts/plan.ts";
+import { PLAN_SCHEMA, buildPlanPrompt } from "../prompts/plan.ts";
 import type { Issue, PhaseConfig, Task } from "../types.ts";
 import { extractJson, generateId, now } from "../util.ts";
 
@@ -10,10 +10,15 @@ interface PlanResult {
 	issue_id: string;
 	summary: string;
 	tasks: Array<{
-		title: string; description?: string; files?: string[];
-		depends_on?: string[]; checks?: string[];
+		title: string;
+		description?: string;
+		files?: string[];
+		depends_on?: string[];
+		checks?: string[];
 		acceptance?: Array<{ description: string; check_command?: string }>;
-		risk?: string; rollback?: string; parallel_group?: number;
+		risk?: string;
+		rollback?: string;
+		parallel_group?: number;
 	}>;
 }
 
@@ -25,11 +30,12 @@ export const planPhase: PhaseConfig<Issue, PlanResult> = {
 
 	loadItems(store) {
 		const plannedIssueIds = new Set(store.loadTasks().map((task: Task) => task.issue_id));
-		return store.loadIssues().filter(
-			(i: Issue) =>
-				(i.status === "CONFIRMED" || i.status === "PARTIAL") &&
-				!plannedIssueIds.has(i.id),
-		);
+		return store
+			.loadIssues()
+			.filter(
+				(i: Issue) =>
+					(i.status === "CONFIRMED" || i.status === "PARTIAL") && !plannedIssueIds.has(i.id),
+			);
 	},
 
 	buildPrompt(issue) {
@@ -59,7 +65,10 @@ export const planPhase: PhaseConfig<Issue, PlanResult> = {
 			plannedIssueIds.add(issue.id);
 
 			// Save plan markdown
-			store.savePlan(issue.id, `# Plan: ${issue.title}\n\n${plan.summary}\n\n${plan.tasks.map((t, i) => `## Task ${i + 1}: ${t.title}\n${t.description ?? ""}`).join("\n\n")}`);
+			store.savePlan(
+				issue.id,
+				`# Plan: ${issue.title}\n\n${plan.summary}\n\n${plan.tasks.map((t, i) => `## Task ${i + 1}: ${t.title}\n${t.description ?? ""}`).join("\n\n")}`,
+			);
 
 			// Create tasks
 			for (const raw of plan.tasks) {
@@ -78,11 +87,12 @@ export const planPhase: PhaseConfig<Issue, PlanResult> = {
 					updated_at: timestamp,
 				});
 			}
-
 		}
 
 		if (plannedIssueIds.size > 0) {
-			const existing = store.loadTasks().filter((task: Task) => !plannedIssueIds.has(task.issue_id));
+			const existing = store
+				.loadTasks()
+				.filter((task: Task) => !plannedIssueIds.has(task.issue_id));
 			store.saveTasks([...existing, ...allTasks]);
 			store.refreshStats();
 		}

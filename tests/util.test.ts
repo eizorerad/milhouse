@@ -7,7 +7,7 @@ import { extractJson, generateId, now } from "../src/util.ts";
 
 describe("extractJson", () => {
 	it("extracts from ```json code block", () => {
-		const input = "Here's the result:\n\n```json\n{\"key\": \"value\"}\n```\n\nDone.";
+		const input = 'Here\'s the result:\n\n```json\n{"key": "value"}\n```\n\nDone.';
 		expect(extractJson(input)).toBe('{"key": "value"}');
 	});
 
