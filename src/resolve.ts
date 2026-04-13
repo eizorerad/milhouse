@@ -108,7 +108,7 @@ export async function runResolve(
 
 		if (merge.ok) {
 			// Clean merge, no conflicts
-			branchSpinner.success(`${branch} — clean merge`);
+			branchSpinner.success(`${branch} - clean merge`);
 			attempts.push({ branch, status: "clean", conflictFiles: [] });
 			succeeded++;
 			continue;
@@ -116,7 +116,7 @@ export async function runResolve(
 
 		// Conflicts detected — call AI to resolve
 		branchSpinner.update(
-			`${branch} — ${merge.conflictFiles.length} conflict(s), resolving with AI...`,
+			`${branch} - ${merge.conflictFiles.length} conflict(s), resolving with AI...`,
 		);
 
 		try {
@@ -129,7 +129,7 @@ export async function runResolve(
 			// Check if AI completed the merge (no more conflicts)
 			const committed = await gitOps.completeMerge(worktreePath);
 			if (committed) {
-				branchSpinner.success(`${branch} — AI resolved ${merge.conflictFiles.length} conflict(s)`);
+				branchSpinner.success(`${branch} - AI resolved ${merge.conflictFiles.length} conflict(s)`);
 				attempts.push({
 					branch,
 					status: "resolved",
@@ -140,13 +140,13 @@ export async function runResolve(
 			} else {
 				// AI didn't fully resolve — abort and skip
 				await gitOps.abortMerge(worktreePath);
-				branchSpinner.fail(`${branch} — AI could not fully resolve conflicts`);
+				branchSpinner.fail(`${branch} - AI could not fully resolve conflicts`);
 				attempts.push({ branch, status: "failed", conflictFiles: merge.conflictFiles });
 				failed++;
 			}
 		} catch (err) {
 			await gitOps.abortMerge(worktreePath).catch(() => {});
-			branchSpinner.fail(`${branch} — resolve error: ${err instanceof Error ? err.message : err}`);
+			branchSpinner.fail(`${branch} - resolve error: ${err instanceof Error ? err.message : err}`);
 			attempts.push({ branch, status: "failed", conflictFiles: merge.conflictFiles });
 			failed++;
 		}
@@ -168,11 +168,11 @@ function printResolveReport(result: ResolveResult): void {
 
 	for (const a of result.attempts) {
 		if (a.status === "clean") {
-			log.success(`${a.branch} — merged cleanly`);
+			log.success(`${a.branch} - merged cleanly`);
 		} else if (a.status === "resolved") {
-			log.success(`${a.branch} — AI resolved conflicts in: ${a.conflictFiles.join(", ")}`);
+			log.success(`${a.branch} - AI resolved conflicts in: ${a.conflictFiles.join(", ")}`);
 		} else {
-			log.error(`${a.branch} — FAILED (conflicts in: ${a.conflictFiles.join(", ")})`);
+			log.error(`${a.branch} - FAILED (conflicts in: ${a.conflictFiles.join(", ")})`);
 		}
 	}
 

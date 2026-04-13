@@ -6,7 +6,7 @@ import type { Config, Phase, PhaseCost, RunCost } from "./types.ts";
 
 // Inline debug log to avoid circular dependency
 const debugLog = (msg: string) => {
-	if (process.env.VERBOSE === "1") console.log(`… ${msg}`);
+	if (process.env.VERBOSE === "1") console.log(`... ${msg}`);
 };
 
 const CLAUDE_ENGINES = new Set(["claude"]);
@@ -29,7 +29,7 @@ export function addTokens(
 ): void {
 	if (!estimatedTokensWarned && isEstimatedTokens(config.engine)) {
 		debugLog(
-			`[cost] Token counts for engine "${config.engine}" are estimated — budget enforcement is approximate`,
+			`[cost] Token counts for engine "${config.engine}" are estimated - budget enforcement is approximate`,
 		);
 		estimatedTokensWarned = true;
 	}

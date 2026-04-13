@@ -125,7 +125,7 @@ function topoSortGroups(groups: IssueGroup[]): IssueGroup[] {
 	}
 
 	if (sorted.length < groups.length) {
-		log.warn("Circular cross-issue dependencies detected — using severity-based order.");
+		log.warn("Circular cross-issue dependencies detected - using severity-based order.");
 		return groups;
 	}
 

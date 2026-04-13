@@ -42,7 +42,7 @@ export async function runPhase<TItem, TResult>(
 	}
 
 	if (isExec && workers > 1 && hasCrossIssueDeps(items as unknown as IssueGroup[])) {
-		log.warn("[exec] Cross-issue dependencies detected — serializing to enforce ordering.");
+		log.warn("[exec] Cross-issue dependencies detected - serializing to enforce ordering.");
 		workers = 1;
 	}
 

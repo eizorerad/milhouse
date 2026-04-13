@@ -123,7 +123,7 @@ export async function cleanupDeferredWorktrees(paths: string[], baseDir: string)
 		if (!existsSync(worktreePath)) continue;
 		const ok = await cleanupWorktree(worktreePath, baseDir);
 		if (!ok) {
-			log.warn(`Deferred cleanup still failed: ${worktreePath} — manual removal may be needed`);
+			log.warn(`Deferred cleanup still failed: ${worktreePath} - manual removal may be needed`);
 		}
 	}
 }

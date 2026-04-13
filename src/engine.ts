@@ -8,7 +8,7 @@ import type { Config, EngineResult, ExecuteResult } from "./types.ts";
 
 // Inline debug log to avoid circular dependency
 const debugLog = (msg: string) => {
-	if (process.env.VERBOSE === "1") console.log(`… ${msg}`);
+	if (process.env.VERBOSE === "1") console.log(`... ${msg}`);
 };
 
 /** Max prompt length for CLI arg (avoid OS limits on Windows) */
