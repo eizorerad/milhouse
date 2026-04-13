@@ -32,10 +32,11 @@ ${t.acceptance.length > 0 ? t.acceptance.map(a => `- [ ] ${a.description}`).join
 		.section("Tasks", `(${tasks.length})\n\n${taskSections}`)
 		.raw(`## Protocol
 
-1. For each task: implement → run checks → commit with "[${issue.id}] Task N: <title>"
+1. For each task: implement → run checks → commit with "[${issue.id}] Task N: <task-id> <title>"
 2. Keep changes minimal and focused
 3. Do NOT add TODO/placeholder code
 4. Do NOT modify unrelated files
-5. Complete ALL tasks before finishing`)
+5. Use the exact task ID shown above for <task-id>
+6. Complete ALL tasks before finishing`)
 		.build();
 }

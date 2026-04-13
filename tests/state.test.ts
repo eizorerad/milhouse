@@ -163,6 +163,12 @@ describe("RunStore.listRuns", () => {
 		expect(runs[0].created_at).toBeTruthy();
 		expect(runs[1].scope).toBe("scope-b");
 	});
+
+	it("RunStore.exists only returns true for persisted runs", () => {
+		const store = RunStore.create(tmpDir, "scope-a");
+		expect(RunStore.exists(tmpDir, store.runId)).toBe(true);
+		expect(RunStore.exists(tmpDir, "run-does-not-exist")).toBe(false);
+	});
 });
 
 describe("RunStore.cleanRuns", () => {
