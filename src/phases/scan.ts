@@ -5,7 +5,7 @@
 import { SCAN_SCHEMA, buildScanPrompt } from "../prompts/scan.ts";
 import type { Issue, PhaseConfig } from "../types.ts";
 import { log, severityColor } from "../ui.ts";
-import { extractJson, generateId, now } from "../util.ts";
+import { generateId, now, parseJsonResponse } from "../util.ts";
 
 interface ScanInput {
 	scope: string;
@@ -40,21 +40,7 @@ export const scanPhase: PhaseConfig<ScanInput, ScanResult> = {
 	},
 
 	parseResponse(response) {
-		// Try direct JSON.parse first (structured_output from --json-schema is clean JSON)
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(response);
-		} catch {
-			// Fallback: extract JSON from markdown/text response
-			const jsonStr = extractJson(response);
-			if (!jsonStr)
-				throw new Error(`Scan: no JSON in response (first 200 chars: ${response.slice(0, 200)})`);
-			try {
-				parsed = JSON.parse(jsonStr);
-			} catch {
-				throw new Error(`Scan: invalid JSON (first 200 chars: ${jsonStr.slice(0, 200)})`);
-			}
-		}
+		const parsed = parseJsonResponse(response, "Scan");
 		const raw = Array.isArray(parsed) ? parsed : (parsed as Record<string, unknown>).items;
 		const items = Array.isArray(raw) ? raw : [];
 		return {

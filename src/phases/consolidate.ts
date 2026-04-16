@@ -4,7 +4,7 @@
 
 import { CONSOLIDATE_SCHEMA, buildConsolidatePrompt } from "../prompts/consolidate.ts";
 import type { Issue, PhaseConfig, Task } from "../types.ts";
-import { extractJson } from "../util.ts";
+import { parseJsonResponse } from "../util.ts";
 
 interface ConsolidateInput {
 	tasks: Task[];
@@ -38,14 +38,14 @@ export const consolidatePhase: PhaseConfig<ConsolidateInput, ConsolidateResult> 
 	},
 
 	parseResponse(response) {
-		const jsonStr = extractJson(response);
-		if (!jsonStr) throw new Error("Consolidate: no JSON in response");
-		const parsed = JSON.parse(jsonStr);
+		const parsed = parseJsonResponse(response, "Consolidate") as Record<string, unknown>;
 		return {
-			duplicates: parsed.duplicates ?? [],
-			cross_dependencies: parsed.cross_dependencies ?? [],
-			parallel_groups: parsed.parallel_groups ?? [],
-			execution_order: parsed.execution_order ?? [],
+			duplicates: Array.isArray(parsed.duplicates) ? parsed.duplicates : [],
+			cross_dependencies: Array.isArray(parsed.cross_dependencies)
+				? parsed.cross_dependencies
+				: [],
+			parallel_groups: Array.isArray(parsed.parallel_groups) ? parsed.parallel_groups : [],
+			execution_order: Array.isArray(parsed.execution_order) ? parsed.execution_order : [],
 		};
 	},
 

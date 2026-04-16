@@ -5,7 +5,7 @@
 import { VALIDATE_SCHEMA, buildValidatePrompt } from "../prompts/validate.ts";
 import type { Issue, IssueStatus, PhaseConfig } from "../types.ts";
 import { printIssueList } from "../ui.ts";
-import { extractJson } from "../util.ts";
+import { parseJsonResponse } from "../util.ts";
 
 interface ValidateResult {
 	issue_id: string;
@@ -37,27 +37,28 @@ export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
 	},
 
 	parseResponse(response, item) {
-		// Try direct JSON.parse first (structured_output from --json-schema is clean JSON)
-		// biome-ignore lint: parsed needs any for JSON.parse compatibility
-		let parsed: any;
+		let parsed: Record<string, unknown>;
 		try {
-			parsed = JSON.parse(response);
+			parsed = parseJsonResponse(response, "Validate") as Record<string, unknown>;
 		} catch {
-			// Fallback: extract JSON from markdown/text response
-			const jsonStr = extractJson(response);
-			if (!jsonStr)
-				return { issue_id: item.id, status: "UNVALIDATED" as IssueStatus, summary: "No JSON" };
-			parsed = JSON.parse(jsonStr);
+			return { issue_id: item.id, status: "UNVALIDATED" as IssueStatus, summary: "No JSON" };
 		}
+		const statusValue = parsed.status;
 		const validStatuses: IssueStatus[] = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"];
-		const status = validStatuses.includes(parsed.status) ? parsed.status : "UNVALIDATED";
+		const status =
+			typeof statusValue === "string" && validStatuses.includes(statusValue as IssueStatus)
+				? (statusValue as IssueStatus)
+				: "UNVALIDATED";
 
 		return {
 			issue_id: item.id,
 			status,
-			confidence: parsed.confidence,
-			summary: parsed.summary,
-			corrected_description: parsed.corrected_description,
+			confidence: typeof parsed.confidence === "string" ? parsed.confidence : undefined,
+			summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
+			corrected_description:
+				typeof parsed.corrected_description === "string"
+					? parsed.corrected_description
+					: undefined,
 			evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
 		};
 	},
