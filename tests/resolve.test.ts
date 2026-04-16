@@ -24,7 +24,8 @@ describe("buildResolvePrompt", () => {
 		const prompt = buildResolvePrompt("mh/test", ["a.ts"]);
 		expect(prompt).toContain("git diff");
 		expect(prompt).toContain("git add");
-		expect(prompt).toContain("git commit --no-edit");
+		expect(prompt).toContain("Leave the merge uncommitted");
+		expect(prompt).toContain("Do NOT run `git commit`");
 	});
 
 	it("includes rules about not dropping changes", () => {
@@ -84,6 +85,15 @@ describe("listUnmergedBranches", () => {
 		restore();
 
 		expect(branches).toEqual([]);
+	});
+
+	it("filters out prior resolve integration branches", async () => {
+		spawnOutput = "  mh/issue-1\n  mh/resolve-old\n";
+		const { listUnmergedBranches } = await import("../src/git.ts");
+		const branches = await listUnmergedBranches("/fake");
+		restore();
+
+		expect(branches).toEqual(["mh/issue-1"]);
 	});
 });
 

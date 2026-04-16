@@ -198,7 +198,10 @@ export async function getCommittedTaskNumbers(
 	branch: string,
 	cwd: string,
 ): Promise<Set<number>> {
-	const result = await git(["log", branch, "--oneline", `--grep=[${issueId}]`], cwd);
+	const result = await git(
+		["log", branch, "--oneline", "--fixed-strings", `--grep=[${issueId}]`],
+		cwd,
+	);
 	if (!result.ok) return new Set();
 	return parseTaskNumbersFromLog(result.stdout);
 }
@@ -222,7 +225,7 @@ export async function listUnmergedBranches(baseDir: string): Promise<string[]> {
 	return result.stdout
 		.split("\n")
 		.map((b) => b.replace(/^\*?\s+/, "").trim())
-		.filter(Boolean);
+		.filter((branch) => branch.length > 0 && !branch.startsWith("mh/resolve-"));
 }
 
 /**

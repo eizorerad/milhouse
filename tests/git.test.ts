@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createWorktree, parseTaskNumbersFromLog } from "../src/git.ts";
+import { createWorktree, getCommittedTaskNumbers, parseTaskNumbersFromLog } from "../src/git.ts";
 import type { Issue, IssueGroup } from "../src/types.ts";
 
 describe("parseTaskNumbersFromLog", () => {
@@ -118,5 +118,38 @@ describe("createWorktree", () => {
 
 		// Cleanup
 		await shell(["git", "worktree", "remove", "--force", wtPath], baseDir);
+	});
+});
+
+describe("getCommittedTaskNumbers", () => {
+	const tempDirs: string[] = [];
+
+	async function setupRepo(): Promise<string> {
+		const dir = mkdtempSync(join(tmpdir(), "mh-git-log-test-"));
+		tempDirs.push(dir);
+		await shell(["git", "init", "--initial-branch=main"], dir);
+		await shell(["git", "config", "user.email", "test@test.com"], dir);
+		await shell(["git", "config", "user.name", "Test"], dir);
+		await shell(["git", "commit", "--allow-empty", "-m", "init"], dir);
+		return dir;
+	}
+
+	afterAll(() => {
+		for (const dir of tempDirs) {
+			try {
+				rmSync(dir, { recursive: true, force: true });
+			} catch {}
+		}
+	});
+
+	it("matches the issue id literally instead of as a regex character class", async () => {
+		const dir = await setupRepo();
+
+		await shell(["git", "commit", "--allow-empty", "-m", "[P-aaa] Task 1: correct issue"], dir);
+		await shell(["git", "commit", "--allow-empty", "-m", "[Q-bbb] Task 2: unrelated issue"], dir);
+
+		const committed = await getCommittedTaskNumbers("P-zzz", "HEAD", dir);
+
+		expect(committed).toEqual(new Set());
 	});
 });
