@@ -4,7 +4,7 @@
 
 import { PLAN_SCHEMA, buildPlanPrompt } from "../prompts/plan.ts";
 import type { Issue, PhaseConfig, Task } from "../types.ts";
-import { extractJson, generateId, now } from "../util.ts";
+import { generateId, now, parseJsonResponse } from "../util.ts";
 
 interface PlanResult {
 	issue_id: string;
@@ -43,12 +43,10 @@ export const planPhase: PhaseConfig<Issue, PlanResult> = {
 	},
 
 	parseResponse(response, item) {
-		const jsonStr = extractJson(response);
-		if (!jsonStr) throw new Error(`Plan: no JSON for ${item.id}`);
-		const parsed = JSON.parse(jsonStr);
+		const parsed = parseJsonResponse(response, `Plan ${item.id}`) as Record<string, unknown>;
 		return {
 			issue_id: item.id,
-			summary: parsed.summary ?? "",
+			summary: typeof parsed.summary === "string" ? parsed.summary : "",
 			tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
 		};
 	},

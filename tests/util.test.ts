@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { extractJson, generateId, now } from "../src/util.ts";
+import { extractJson, generateId, now, parseJsonResponse } from "../src/util.ts";
 
 describe("extractJson", () => {
 	it("extracts from ```json code block", () => {
@@ -87,6 +87,22 @@ describe("generateId", () => {
 	it("generates unique IDs", () => {
 		const ids = new Set(Array.from({ length: 100 }, () => generateId()));
 		expect(ids.size).toBe(100);
+	});
+});
+
+describe("parseJsonResponse", () => {
+	it("parses raw JSON directly", () => {
+		expect(parseJsonResponse('{"key":"value"}')).toEqual({ key: "value" });
+	});
+
+	it("parses JSON from fenced code blocks", () => {
+		expect(parseJsonResponse('```json\n{"key":"value"}\n```')).toEqual({ key: "value" });
+	});
+
+	it("throws a labeled error when no JSON is present", () => {
+		expect(() => parseJsonResponse("no structured output", "Verify")).toThrow(
+			"Verify: no JSON in response",
+		);
 	});
 });
 

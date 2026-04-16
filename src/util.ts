@@ -45,6 +45,25 @@ export function extractJson(response: string): string | null {
 }
 
 /**
+ * Parse JSON from a raw response or a markdown/code-fenced response.
+ */
+export function parseJsonResponse(response: string, label = "Response"): unknown {
+	try {
+		return JSON.parse(response);
+	} catch {
+		const jsonStr = extractJson(response);
+		if (!jsonStr) {
+			throw new Error(`${label}: no JSON in response`);
+		}
+		try {
+			return JSON.parse(jsonStr);
+		} catch {
+			throw new Error(`${label}: invalid JSON`);
+		}
+	}
+}
+
+/**
  * Generate a unique ID with optional prefix.
  */
 export function generateId(prefix = "P"): string {

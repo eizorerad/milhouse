@@ -4,7 +4,7 @@
 
 import { VERIFY_SCHEMA, buildVerifyPrompt } from "../prompts/verify.ts";
 import type { PhaseConfig, Task } from "../types.ts";
-import { extractJson } from "../util.ts";
+import { parseJsonResponse } from "../util.ts";
 
 interface VerifyResult {
 	task_id: string;
@@ -30,8 +30,10 @@ export const verifyPhase: PhaseConfig<Task, VerifyResult> = {
 	},
 
 	parseResponse(response, task) {
-		const jsonStr = extractJson(response);
-		if (!jsonStr) {
+		let parsed: Record<string, unknown>;
+		try {
+			parsed = parseJsonResponse(response, `Verify ${task.id}`) as Record<string, unknown>;
+		} catch {
 			return {
 				task_id: task.id,
 				overall_pass: false,
@@ -41,7 +43,6 @@ export const verifyPhase: PhaseConfig<Task, VerifyResult> = {
 				summary: "Failed to parse verification response",
 			};
 		}
-		const parsed = JSON.parse(jsonStr);
 		return {
 			task_id: task.id,
 			overall_pass: typeof parsed.overall_pass === "boolean" ? parsed.overall_pass : false,
@@ -49,7 +50,7 @@ export const verifyPhase: PhaseConfig<Task, VerifyResult> = {
 			recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
 			regressions_found:
 				typeof parsed.regressions_found === "boolean" ? parsed.regressions_found : false,
-			summary: parsed.summary ?? "",
+			summary: typeof parsed.summary === "string" ? parsed.summary : "",
 		};
 	},
 
