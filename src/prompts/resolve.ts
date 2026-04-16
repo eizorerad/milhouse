@@ -1,5 +1,5 @@
 /**
- * Resolve prompt — Merge Conflict Resolver (MR)
+ * Resolve prompt - Merge Conflict Resolver (MR)
  */
 
 import { PromptBuilder } from "./base.ts";
@@ -22,13 +22,14 @@ export function buildResolvePrompt(branch: string, conflictFiles: string[]): str
    - Remove all conflict markers
 3. Run \`git add <file>\` for each resolved file
 4. Run available test/lint commands to verify the resolution
-5. Run \`git commit --no-edit\` to complete the merge
+5. Leave the merge uncommitted after staging; the orchestrator will finalize it
 
 ## Rules
 - NEVER drop changes from either side unless they are truly redundant
 - If both sides renamed the same symbol differently, pick the most descriptive name and update all references
 - If both sides modified the same function, combine the modifications logically
 - Keep ALL tests passing
-- Do NOT add new features or refactor — only resolve the conflict`)
+- Do NOT run \`git commit\`
+- Do NOT add new features or refactor - only resolve the conflict`)
 		.build();
 }

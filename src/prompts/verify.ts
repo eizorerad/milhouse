@@ -40,8 +40,8 @@ export function buildVerifyPrompt(task: Task): string {
 	return builder
 		.raw(`## Steps
 
-1. Run \`git log --oneline --all --grep="${task.id}"\` to find the task commit
-2. If nothing matches, run \`git log --oneline --all --grep="[${task.issue_id}] Task"\` and identify the right commit by task title "${task.title}"
+1. Run \`git log --oneline --all --fixed-strings --grep="${task.id}"\` to find the task commit
+2. If nothing matches, run \`git log --oneline --all --fixed-strings --grep="[${task.issue_id}] Task"\` and identify the right commit by task title "${task.title}"
 3. \`git show <commit>\` to review changes
 4. Run verification commands
 5. Check for unfinished markers or placeholder code in modified files
