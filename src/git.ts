@@ -1,302 +1,271 @@
-/**
- * Git — worktree + merge. Three functions.
- */
+/** Git helpers. Every function takes the directory to run in first. Nothing here touches the user's files. */
 
-import { existsSync, renameSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { IssueGroup, PhaseResult } from "./types.ts";
-import { log } from "./ui.ts";
+import { run } from "./proc.ts";
+import { tail } from "./util.ts";
 
-async function git(args: string[], cwd: string): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-	const proc = Bun.spawn(["git", ...args], {
-		cwd,
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-	]);
-	const exitCode = await proc.exited;
-	return { ok: exitCode === 0, stdout: stdout.trim(), stderr: stderr.trim() };
+/** A hook or a lock that never finishes must not hang milhouse forever. */
+const GIT_TIMEOUT_MS = 10 * 60 * 1000;
+
+const gitEnv = (): NodeJS.ProcessEnv => ({ ...process.env, GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" });
+
+export interface GitResult {
+	ok: boolean;
+	out: string;
+	err: string;
 }
 
-/**
- * Create an isolated worktree for an issue group.
- * Returns the worktree path.
- */
-export async function createWorktree(
-	issueGroup: IssueGroup,
-	baseDir: string,
-): Promise<string> {
-	const branch = `mh/${issueGroup.issueId}`;
-	const worktreePath = join(baseDir, ".milhouse", "work", "worktrees", issueGroup.issueId);
+export async function git(cwd: string, ...args: string[]): Promise<GitResult> {
+	const result = await run("git", args, { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+	return { ok: result.code === 0, out: result.stdout.trimEnd(), err: result.stderr.trim() };
+}
 
-	// Clean up if exists
-	if (existsSync(worktreePath)) {
-		await git(["worktree", "remove", "--force", worktreePath], baseDir);
+/** Raw stdout (trailing whitespace on the last line intact). Throws when git fails. */
+async function gitText(cwd: string, ...args: string[]): Promise<string> {
+	const result = await run("git", args, { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+	if (result.code !== 0) {
+		throw new Error(`git ${args.join(" ")} failed: ${tail(result.stderr || result.stdout, 500)}`);
 	}
-	await git(["worktree", "prune"], baseDir);
-
-	const existingBranch = await branchExists(branch, baseDir);
-	const result = existingBranch
-		? await git(["worktree", "add", worktreePath, branch], baseDir)
-		: await git(["worktree", "add", "-b", branch, worktreePath], baseDir);
-	if (!result.ok) {
-		throw new Error(`Failed to create worktree for ${issueGroup.issueId}: ${result.stderr}`);
-	}
-
-	log.debug(`[git] Created worktree: ${worktreePath} (branch: ${branch}, reused: ${existingBranch})`);
-	return worktreePath;
+	return result.stdout;
 }
 
-const CLEANUP_MAX_RETRIES = 3;
-const CLEANUP_RETRY_DELAY_MS = 2000;
-
-function isEBUSY(err: unknown): boolean {
-	return err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "EBUSY";
+export async function gitOrThrow(cwd: string, ...args: string[]): Promise<string> {
+	return (await gitText(cwd, ...args)).trimEnd();
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((r) => setTimeout(r, ms));
+const lines = (text: string): string[] => text.split("\n").filter(Boolean);
+
+// ─── Repository state ────────────────────────────────────────────────
+
+/** Top-level directory of the repository containing `cwd` (or `cwd` itself outside a repository). */
+export async function repoRoot(cwd: string): Promise<string> {
+	const top = await git(cwd, "rev-parse", "--show-toplevel");
+	return top.ok ? top.out : cwd;
 }
 
-/**
- * Cleanup a worktree after execution.
- * Returns true if cleanup succeeded, false otherwise.
- * On Windows, retries with delay on EBUSY and uses rename-then-delete fallback.
- */
-export async function cleanupWorktree(
-	worktreePath: string,
-	baseDir: string,
+export const isRepo = async (cwd: string): Promise<boolean> =>
+	(await git(cwd, "rev-parse", "--is-inside-work-tree")).ok;
+
+export const hasCommits = async (cwd: string): Promise<boolean> =>
+	(await git(cwd, "rev-parse", "--verify", "-q", "HEAD")).ok;
+
+/** Name of the checked-out branch, or "" on a detached HEAD. */
+export async function currentBranch(cwd: string): Promise<string> {
+	return (await git(cwd, "symbolic-ref", "--short", "-q", "HEAD")).out;
+}
+
+export const revParse = (cwd: string, ref: string): Promise<string> =>
+	gitOrThrow(cwd, "rev-parse", "--verify", ref);
+
+export async function branchExists(cwd: string, branch: string): Promise<boolean> {
+	return (await git(cwd, "rev-parse", "--verify", "-q", `refs/heads/${branch}`)).ok;
+}
+
+export async function refExists(cwd: string, ref: string): Promise<boolean> {
+	return (await git(cwd, "rev-parse", "--verify", "-q", ref)).ok;
+}
+
+export async function isAncestor(
+	cwd: string,
+	ancestor: string,
+	descendant: string,
 ): Promise<boolean> {
-	const isWindows = process.platform === "win32";
+	return (await git(cwd, "merge-base", "--is-ancestor", ancestor, descendant)).ok;
+}
 
-	for (let attempt = 0; attempt < CLEANUP_MAX_RETRIES; attempt++) {
-		// First try: git worktree remove --force
-		const result = await git(["worktree", "remove", "--force", worktreePath], baseDir);
-		if (result.ok) {
-			await git(["worktree", "prune"], baseDir);
-			return true;
+/** Uncommitted changes outside .milhouse/ (milhouse's own state never counts). */
+export async function isDirty(cwd: string): Promise<boolean> {
+	const status = await git(cwd, "status", "--porcelain", "--", ".", ":(exclude).milhouse");
+	return status.out.length > 0;
+}
+
+// ─── History between two commits ─────────────────────────────────────
+
+/** Commit subjects in `from..to`, newest first. */
+export async function commitSubjects(cwd: string, from: string, to = "HEAD"): Promise<string[]> {
+	return lines(await gitOrThrow(cwd, "log", "--format=%s", `${from}..${to}`));
+}
+
+/**
+ * Every file touched by any commit in `from..to`: a file changed and reverted still counts, a moved
+ * file counts under both names (--no-renames), merge commits are included (-m), and -z keeps
+ * non-ASCII names unquoted.
+ */
+export async function touchedFiles(cwd: string, from: string, to = "HEAD"): Promise<string[]> {
+	const out = await gitOrThrow(
+		cwd,
+		"log",
+		"-m",
+		"--no-renames",
+		"--name-only",
+		"-z",
+		"--format=",
+		`${from}..${to}`,
+	);
+	return [...new Set(out.split("\0").filter(Boolean))];
+}
+
+export interface AddedLine {
+	file: string;
+	text: string;
+}
+
+/**
+ * Lines added by `from..to`, with the file they belong to. --text: a .gitattributes entry such as
+ * `* -diff` must not hide the changes. Hunk headers say how many lines follow, so a content line
+ * that looks like a file header (`+++ x`) is never mistaken for one.
+ */
+export async function addedLines(cwd: string, from: string, to = "HEAD"): Promise<AddedLine[]> {
+	// Raw output: trailing whitespace on the very last added line must survive.
+	const diff = await gitText(
+		cwd,
+		"diff",
+		"--text",
+		"-U0",
+		"--inter-hunk-context=0", // a user's diff.interHunkContext must not add context lines
+		"--src-prefix=a/",
+		"--dst-prefix=b/",
+		"--no-color",
+		"--no-ext-diff",
+		from,
+		to,
+		"--",
+	);
+	const added: AddedLine[] = [];
+	const rows = diff.split("\n");
+	let file = "";
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i];
+		if (row.startsWith("+++ ")) {
+			file = row.slice(4).replace(/^b\//, "");
+			continue;
 		}
-
-		// Fallback: manual removal (with rename-then-delete on Windows)
-		try {
-			if (isWindows) {
-				const tempPath = `${worktreePath}._removing_${Date.now()}`;
-				renameSync(worktreePath, tempPath);
-				rmSync(tempPath, { recursive: true, force: true });
-			} else {
-				rmSync(worktreePath, { recursive: true, force: true });
-			}
-			await git(["worktree", "prune"], baseDir);
-			return true;
-		} catch (err) {
-			if (isEBUSY(err) && attempt < CLEANUP_MAX_RETRIES - 1) {
-				log.debug(`[git] EBUSY on worktree cleanup, retrying in ${CLEANUP_RETRY_DELAY_MS}ms (attempt ${attempt + 1}/${CLEANUP_MAX_RETRIES})`);
-				await sleep(CLEANUP_RETRY_DELAY_MS);
+		const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(row);
+		if (!hunk) continue;
+		const removed = hunk[1] === undefined ? 1 : Number(hunk[1]);
+		const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+		i += removed; // skip the removed lines
+		for (let n = 0; n < count && i + 1 < rows.length; n++) {
+			i++;
+			if (rows[i].startsWith("\\")) {
+				n--; // "\ No newline at end of file" belongs to no line
 				continue;
 			}
-			// Non-EBUSY error or final attempt
-			if (attempt === CLEANUP_MAX_RETRIES - 1) {
-				log.warn(`Failed to remove worktree after ${CLEANUP_MAX_RETRIES} attempts: ${worktreePath}`);
-			}
+			added.push({ file, text: rows[i].slice(1) });
 		}
 	}
+	return added;
+}
 
-	return false;
+export async function diffStat(cwd: string, from: string, to = "HEAD"): Promise<string> {
+	return gitOrThrow(cwd, "diff", "--stat", "--no-color", from, to, "--");
+}
+
+export async function diffPatch(cwd: string, from: string, to = "HEAD"): Promise<string> {
+	return gitOrThrow(cwd, "diff", "--text", "--no-color", "--no-ext-diff", from, to, "--");
+}
+
+// ─── The run's worktree and accepted work ────────────────────────────
+
+/**
+ * Make sure `path` is a worktree, creating `ref` at `baseSha` first when needed. `ref` lives outside
+ * refs/heads on purpose: an agent that switches branches or runs `git branch -f` cannot move it.
+ * Returns whether the worktree is new (a fresh checkout has no installed dependencies).
+ */
+export async function ensureWorktree(
+	repo: string,
+	path: string,
+	ref: string,
+	baseSha: string,
+): Promise<{ created: boolean }> {
+	if (!(await refExists(repo, ref))) await gitOrThrow(repo, "update-ref", ref, baseSha);
+	if (existsSync(join(path, ".git"))) return { created: false };
+
+	rmSync(path, { recursive: true, force: true }); // a leftover directory that is not a worktree
+	await git(repo, "worktree", "prune");
+	await gitOrThrow(repo, "worktree", "add", "--detach", path, ref);
+	return { created: true };
+}
+
+/** Back to the commit `to` (a ref) with a detached HEAD and no local changes. */
+export async function resetWorktree(path: string, to: string): Promise<void> {
+	await gitOrThrow(path, "checkout", "-f", "--detach", to);
+	await gitOrThrow(path, "clean", "-fd");
+}
+
+/** Accept `sha`: it becomes the tip of the run's ref. */
+export async function acceptCommit(repo: string, ref: string, sha: string): Promise<void> {
+	await gitOrThrow(repo, "update-ref", ref, sha);
+}
+
+export async function deleteRef(repo: string, ref: string): Promise<void> {
+	await git(repo, "update-ref", "-d", ref);
 }
 
 /**
- * Retry cleanup of worktree paths that failed during the run.
- * Called after merge phase to give file locks more time to release.
+ * Keep a failed attempt for inspection on its own branch. Uncommitted files are committed first;
+ * a clean worktree is parked exactly as it is, so the branch can be resumed and accepted as is.
  */
-export async function cleanupDeferredWorktrees(
-	paths: string[],
-	baseDir: string,
-): Promise<void> {
-	if (paths.length === 0) return;
-
-	log.info(`Retrying cleanup of ${paths.length} deferred worktree(s)...`);
-
-	for (const worktreePath of paths) {
-		if (!existsSync(worktreePath)) continue;
-		const ok = await cleanupWorktree(worktreePath, baseDir);
-		if (!ok) {
-			log.warn(`Deferred cleanup still failed: ${worktreePath} — manual removal may be needed`);
-		}
-	}
-}
-
-/**
- * Merge completed branches back to base branch, then cleanup.
- */
-export async function mergeCompletedBranches(
-	results: PhaseResult[],
-	baseDir: string,
-): Promise<void> {
-	const branches = results
-		.filter((r) => r.success)
-		.map((r) => `mh/${(r.item as IssueGroup).issueId}`);
-
-	if (branches.length === 0) return;
-
-	log.info(`Merging ${branches.length} branch(es)...`);
-
-	const mergedBranches: string[] = [];
-	for (const branch of branches) {
-		const result = await git(
-			["merge", "--no-ff", branch, "-m", `Merge ${branch}`],
-			baseDir,
+export async function parkWorktree(repo: string, path: string, parkBranch: string): Promise<void> {
+	if ((await git(path, "status", "--porcelain")).out) {
+		await git(path, "add", "-A");
+		await git(
+			path,
+			"-c",
+			"commit.gpgsign=false",
+			"commit",
+			"-q",
+			"--no-verify",
+			"-m",
+			"wip: failed attempt",
 		);
-		if (result.ok) {
-			log.success(`Merged ${branch}`);
-			mergedBranches.push(branch);
-		} else {
-			log.warn(`Merge failed for ${branch}, aborting and skipping. Branch preserved.`);
-			await git(["merge", "--abort"], baseDir);
-		}
 	}
-
-	if (mergedBranches.length < branches.length) {
-		const failed = branches.length - mergedBranches.length;
-		log.warn(`${failed} branch(es) failed to merge. Run: milhouse --resolve`);
-	}
-
-	// Cleanup only successfully merged branches
-	for (const branch of mergedBranches) {
-		await git(["branch", "-D", branch], baseDir);
-	}
+	const head = await git(path, "rev-parse", "HEAD");
+	if (head.ok) await git(repo, "branch", "-f", parkBranch, head.out);
 }
 
-/**
- * Get current branch name.
- */
-export async function getCurrentBranch(baseDir: string): Promise<string> {
-	const result = await git(["branch", "--show-current"], baseDir);
-	return result.stdout || "main";
+export async function deleteBranch(repo: string, branch: string): Promise<void> {
+	await git(repo, "branch", "-D", branch);
 }
 
-/**
- * Parse task numbers from git log output.
- * Matches commit messages like `[ISSUE-ID] Task N: title`.
- */
-export function parseTaskNumbersFromLog(logOutput: string): Set<number> {
-	const result = new Set<number>();
-	const regex = /\[.+?\]\s+Task\s+(\d+):/g;
-	let match: RegExpExecArray | null;
-	while ((match = regex.exec(logOutput)) !== null) {
-		result.add(Number(match[1]));
-	}
-	return result;
+export async function removeWorktree(repo: string, path: string): Promise<void> {
+	const removed = await git(repo, "worktree", "remove", "--force", path);
+	if (!removed.ok) rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 500 });
+	await git(repo, "worktree", "prune");
 }
 
-/**
- * Get task numbers that have commits on a branch for a given issue.
- */
-export async function getCommittedTaskNumbers(
-	issueId: string,
-	branch: string,
+// ─── Merging the result ──────────────────────────────────────────────
+
+/** Merge `sha` into the commit checked out in `cwd` with a merge commit. A failed merge is aborted. */
+export async function mergeInto(
 	cwd: string,
-): Promise<Set<number>> {
-	const result = await git(
-		["log", branch, "--oneline", `--grep=[${issueId}]`],
+	sha: string,
+	message: string,
+): Promise<{ ok: boolean; error?: string }> {
+	// Explicit flags: a user's merge.* / branch.*.mergeOptions must not turn this into something else.
+	const merged = await git(
 		cwd,
+		"-c",
+		"commit.gpgsign=false",
+		"merge",
+		"--no-ff",
+		"--no-squash",
+		"--commit",
+		"-m",
+		message,
+		sha,
 	);
-	if (!result.ok) return new Set();
-	return parseTaskNumbersFromLog(result.stdout);
+	if (merged.ok) return { ok: true };
+	await git(cwd, "merge", "--abort");
+	return { ok: false, error: tail(merged.err || merged.out, 500) };
 }
 
 /**
- * Check if a branch exists.
+ * Move the branch checked out in `repo` forward to `sha` and confirm that it got there. A fast-forward
+ * that cannot happen changes nothing, so the user's checkout (staged edits included) is never reset.
  */
-export async function branchExists(branch: string, cwd: string): Promise<boolean> {
-	const result = await git(["rev-parse", "--verify", branch], cwd);
-	return result.ok;
-}
-
-// ─── Merge Resolver Helpers ─────────────────────────────────────────────────
-
-/**
- * List mh/* branches that are NOT merged into HEAD.
- */
-export async function listUnmergedBranches(baseDir: string): Promise<string[]> {
-	const result = await git(["branch", "--list", "mh/*", "--no-merged", "HEAD"], baseDir);
-	if (!result.ok || !result.stdout) return [];
-	return result.stdout
-		.split("\n")
-		.map((b) => b.replace(/^\*?\s+/, "").trim())
-		.filter(Boolean);
-}
-
-/**
- * List files with merge conflicts in the working tree.
- */
-export async function getConflictFiles(cwd: string): Promise<string[]> {
-	const result = await git(["diff", "--name-only", "--diff-filter=U"], cwd);
-	if (!result.ok || !result.stdout) return [];
-	return result.stdout.split("\n").filter(Boolean);
-}
-
-/**
- * Create a clean integration worktree with a new branch based on HEAD.
- * Returns the worktree path.
- */
-export async function createIntegrationWorktree(
-	branchName: string,
-	baseDir: string,
-): Promise<string> {
-	const worktreePath = join(baseDir, ".milhouse", "work", "integration", branchName);
-
-	// Clean up if exists
-	if (existsSync(worktreePath)) {
-		await git(["worktree", "remove", "--force", worktreePath], baseDir);
-	}
-	await git(["worktree", "prune"], baseDir);
-
-	// Delete branch if leftover from previous resolve
-	await git(["branch", "-D", branchName], baseDir);
-
-	const result = await git(["worktree", "add", "-b", branchName, worktreePath, "HEAD"], baseDir);
-	if (!result.ok) {
-		throw new Error(`Failed to create integration worktree: ${result.stderr}`);
-	}
-	return worktreePath;
-}
-
-/**
- * Try merging a branch. Returns { ok, conflictFiles }.
- */
-export async function tryMerge(
-	branch: string,
-	cwd: string,
-): Promise<{ ok: boolean; conflictFiles: string[] }> {
-	const result = await git(["merge", "--no-ff", branch, "-m", `Merge ${branch}`], cwd);
-	if (result.ok) return { ok: true, conflictFiles: [] };
-	const files = await getConflictFiles(cwd);
-	return { ok: false, conflictFiles: files };
-}
-
-/**
- * Complete a merge after conflicts have been resolved.
- */
-export async function completeMerge(cwd: string): Promise<boolean> {
-	await git(["add", "-A"], cwd);
-	const result = await git(["commit", "--no-edit"], cwd);
-	return result.ok;
-}
-
-/**
- * Abort an in-progress merge.
- */
-export async function abortMerge(cwd: string): Promise<void> {
-	await git(["merge", "--abort"], cwd);
-}
-
-/**
- * Check if working tree has uncommitted changes.
- */
-export async function isWorkingTreeDirty(baseDir: string): Promise<boolean> {
-	const result = await git(["status", "--porcelain"], baseDir);
-	return result.ok && result.stdout.trim().length > 0;
+export async function publish(repo: string, sha: string): Promise<boolean> {
+	await git(repo, "merge", "--ff-only", "--no-squash", sha);
+	return (await git(repo, "rev-parse", "HEAD")).out === sha;
 }

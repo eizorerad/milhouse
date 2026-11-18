@@ -1,47 +1,47 @@
-/**
- * Milhouse v0.3 — All types in one place.
- * No Zod. No deprecated fields. No dual naming.
- */
+/** Shared types: config and the domain model. */
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-
-export const PHASES = ["scan", "validate", "plan", "consolidate", "exec", "verify"] as const;
-export const KNOWN_ENGINES = ["claude", "gemini", "aider"] as const;
+export const PHASES = ["scan", "validate", "plan", "consolidate", "exec", "merge"] as const;
 export type Phase = (typeof PHASES)[number];
+/** Steps that call the agent. `verify` is the reviewer that runs inside `exec`, once per issue. */
+export type AgentStep = Exclude<Phase, "merge"> | "verify";
 export type RunStatus = "running" | "completed" | "failed" | "stopped";
 
-export interface PhaseOptions {
-	workers: number;
+export interface StepOptions {
 	retries: number;
-	model?: string;
+	/** Empty string = use the global model. */
+	model: string;
+	/** Parallel agents. Only for steps that run items in parallel (validate, plan). */
+	workers?: number;
 }
 
 export interface Config {
-	engine: string;
 	model: string;
 	pipeline: Phase[];
+	/** Stop after the first phase with a failed item. Otherwise continue with what worked. */
 	failFast: boolean;
-	phases: Record<Phase, PhaseOptions>;
-	cost: { inputPerMillion: number; outputPerMillion: number; budget: number };
+	phases: Record<AgentStep, StepOptions>;
+	/** USD limit for one run. 0 = unlimited. */
+	budget: number;
 	project: { name: string; language: string; framework: string; description: string };
-	commands: { test: string; lint: string; build: string };
+	/** Shell commands run inside the worktree. An empty string skips the command. */
+	commands: { setup: string; build: string; lint: string; test: string };
+	/** Extra rules injected into every prompt. */
 	rules: string[];
-	boundaries: { neverTouch: string[] };
+	/** Globs agents must not change. Enforced after every exec attempt. */
+	neverTouch: string[];
 	gates: { evidence: boolean; diffHygiene: boolean; placeholder: boolean; dod: boolean };
 }
 
-// ─── Domain ──────────────────────────────────────────────────────────────────
-
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 export type IssueStatus = "UNVALIDATED" | "CONFIRMED" | "FALSE" | "PARTIAL" | "MISDIAGNOSED";
-export type TaskStatus = "pending" | "running" | "done" | "failed" | "skipped";
+/** Validated statuses that still describe real work to do. */
+export const ACTIONABLE: readonly IssueStatus[] = ["CONFIRMED", "PARTIAL", "MISDIAGNOSED"];
 
 export interface Evidence {
-	type: "file" | "log" | "command";
-	file?: string;
-	line_start?: number;
-	line_end?: number;
-	output?: string;
+	file: string;
+	line_start: number;
+	line_end: number;
+	snippet: string;
 }
 
 export interface Issue {
@@ -55,118 +55,46 @@ export interface Issue {
 	corrected_description?: string;
 	scope_impact?: string;
 	strategy?: string;
-	created_at: string;
-	updated_at: string;
+	/** Set once the issue has been planned, even if consolidate later removed all its tasks. */
+	planned?: boolean;
 }
 
-export interface DoDCriteria {
-	description: string;
-	check_command?: string;
-}
+/** pending -> verified (committed, checked, reviewed) -> merged into the user's branch. */
+export type TaskStatus = "pending" | "verified" | "merged" | "failed";
 
 export interface Task {
 	id: string;
 	issue_id: string;
 	title: string;
-	description?: string;
+	description: string;
 	files: string[];
+	/** Ids of tasks that must be done first. */
 	depends_on: string[];
+	/** Commands the executor should run. */
 	checks: string[];
-	acceptance: DoDCriteria[];
-	parallel_group: number;
+	/** Criteria the reviewer verifies. */
+	acceptance: string[];
 	status: TaskStatus;
 	error?: string;
-	created_at: string;
-	updated_at: string;
-}
-
-export interface IssueGroup {
-	issueId: string;
-	issue: Issue;
-	tasks: Task[];
+	/** The commit accepted for this task. Written just before the run's ref moves to it. */
+	sha?: string;
 }
 
 export interface RunMeta {
 	id: string;
 	scope?: string;
+	status: RunStatus;
 	phase: string;
-	status?: RunStatus;
-	last_completed_phase?: Phase;
-	issues_found: number;
-	issues_validated: number;
-	tasks_total: number;
-	tasks_completed: number;
-	tasks_failed: number;
+	/** Phases that finished without a failed item. */
+	done: Phase[];
+	/** Branch and commit the run started from. Verified work is merged back into this branch. */
+	base_branch: string;
+	base_sha: string;
 	created_at: string;
 	updated_at: string;
 }
 
-// ─── Engine ──────────────────────────────────────────────────────────────────
-
-export interface EngineResult {
-	response: string;
-	inputTokens: number;
-	outputTokens: number;
-}
-
-export interface ExecuteResult {
-	result: EngineResult;
-	proc: { kill(): void; readonly exited: Promise<number> };
-}
-
-// ─── Phase Runner ────────────────────────────────────────────────────────────
-
-export interface RunStoreInterface {
-	readonly workDir: string;
-	readonly runId: string;
-	loadIssues(): Issue[];
-	saveIssues(issues: Issue[]): void;
-	updateIssue(id: string, update: Partial<Issue>): void;
-	loadTasks(): Task[];
-	saveTasks(tasks: Task[]): void;
-	updateTask(id: string, update: Partial<Task>): void;
-	loadMeta(): RunMeta;
-	saveMeta(meta: RunMeta): void;
-	refreshStats(): void;
-	savePlan(issueId: string, content: string): void;
-	loadPlan(issueId: string): string | null;
-	loadCost(): RunCost;
-	saveCost(cost: RunCost): void;
-	saveVerification(data: unknown): void;
-	loadVerification(): unknown;
-}
-
-export interface PhaseResult<T = unknown> {
-	item: unknown;
-	result: T;
-	success: boolean;
-	error?: string;
-	tokens: EngineResult;
-}
-
-export interface PhaseConfig<TItem = unknown, TResult = unknown> {
-	name: Phase;
-	schema?: Record<string, unknown>;
-	maxTurns?: number;
-	/** Timeout per item in milliseconds */
-	timeout?: number;
-	loadItems(store: RunStoreInterface, config: Config): TItem[] | Promise<TItem[]>;
-	buildPrompt(item: TItem, store: RunStoreInterface, config: Config): string;
-	parseResponse(response: string, item: TItem): TResult;
-	saveResults(results: PhaseResult<TResult>[], store: RunStoreInterface): void | Promise<void>;
-}
-
-// ─── Cost ────────────────────────────────────────────────────────────────────
-
-export interface PhaseCost {
-	inputTokens: number;
-	outputTokens: number;
-	cost: number;
-}
-
 export interface RunCost {
-	inputTokens: number;
-	outputTokens: number;
-	totalCost: number;
-	byPhase: Partial<Record<Phase, PhaseCost>>;
+	total: number;
+	byPhase: Partial<Record<AgentStep, number>>;
 }

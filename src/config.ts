@@ -1,181 +1,164 @@
-/**
- * Config — one loader, one type, one flow.
- *
- * CLI args → loadConfig(workDir) → deepMerge(DEFAULTS, userConfig, cliOverrides) → Config
- */
+/** Config: DEFAULTS <- .milhouse/config.ts <- CLI overrides. Unknown keys and bad values are errors. */
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { KNOWN_ENGINES, PHASES } from "./types.ts";
+import { STATE_DIR } from "./state.ts";
+import { PHASES } from "./types.ts";
 import type { Config } from "./types.ts";
+import { errorMessage } from "./util.ts";
 
-const DEFAULTS: Config = {
-	engine: "claude",
+export class ConfigError extends Error {
+	override name = "ConfigError";
+}
+
+export const DEFAULTS: Config = {
 	model: "sonnet",
-	pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
-	failFast: true,
+	pipeline: [...PHASES],
+	failFast: false,
 	phases: {
-		scan: { workers: 1, retries: 2 },
-		validate: { workers: 5, retries: 2 },
-		plan: { workers: 5, retries: 3 },
-		consolidate: { workers: 1, retries: 2 },
-		exec: { workers: 3, retries: 3 },
-		verify: { workers: 5, retries: 1 },
+		scan: { retries: 2, model: "" },
+		validate: { workers: 5, retries: 2, model: "" },
+		plan: { workers: 5, retries: 2, model: "" },
+		consolidate: { retries: 2, model: "" },
+		exec: { retries: 2, model: "" },
+		verify: { retries: 1, model: "" },
 	},
-	cost: { inputPerMillion: 5, outputPerMillion: 25, budget: 50 },
+	budget: 50,
 	project: { name: "", language: "", framework: "", description: "" },
-	commands: { test: "", lint: "", build: "" },
+	commands: { setup: "", build: "", lint: "", test: "" },
 	rules: [],
-	boundaries: { neverTouch: [] },
+	neverTouch: [],
 	gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
 };
 
-/**
- * Deep merge objects. Later values win. Only merges plain objects, not arrays.
- */
-function deepMerge<T extends Record<string, unknown>>(...sources: Partial<T>[]): T {
-	const result: Record<string, unknown> = {};
+type Plain = Record<string, unknown>;
+const isPlain = (value: unknown): value is Plain =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Immutable deep merge. Later sources win; arrays are replaced, not merged. */
+export function deepMerge(base: Plain, ...sources: unknown[]): Plain {
+	let result = base;
 	for (const source of sources) {
-		if (!source) continue;
+		if (!isPlain(source)) continue;
+		const next: Plain = { ...result };
 		for (const [key, value] of Object.entries(source)) {
 			if (value === undefined) continue;
+			const current = result[key];
+			next[key] = isPlain(value) && isPlain(current) ? deepMerge(current, value) : value;
+		}
+		result = next;
+	}
+	return result;
+}
+
+/** Dotted paths in `user` that DEFAULTS does not know (typos such as `cost.budgetLimit`). */
+function unknownKeys(user: unknown, known: unknown, path = ""): string[] {
+	if (!isPlain(user) || !isPlain(known)) return [];
+	return Object.entries(user).flatMap(([key, value]) =>
+		key in known ? unknownKeys(value, known[key], `${path}${key}.`) : [`${path}${key}`],
+	);
+}
+
+/** Type mismatches of `value` against the shape of `template`. */
+function typeErrors(value: unknown, template: unknown, path: string): string[] {
+	if (isPlain(template)) {
+		if (!isPlain(value)) return [`${path} must be an object`];
+		return Object.entries(template).flatMap(([key, t]) =>
+			key in value ? typeErrors(value[key], t, path ? `${path}.${key}` : key) : [],
+		);
+	}
+	if (Array.isArray(template)) {
+		const ok = Array.isArray(value) && value.every((v) => typeof v === "string");
+		return ok ? [] : [`${path} must be an array of strings`];
+	}
+	return typeof value === typeof template ? [] : [`${path} must be a ${typeof template}`];
+}
+
+function validate(config: Config): void {
+	const errors = typeErrors(config, DEFAULTS, "");
+
+	if (errors.length === 0) {
+		const order = config.pipeline.map((phase) => PHASES.indexOf(phase));
+		if (order.includes(-1) || order.some((index, i) => i > 0 && index <= order[i - 1])) {
+			errors.push(`pipeline must list phases of ${PHASES.join(", ")} once each, in that order`);
+		}
+		if (config.budget < 0) errors.push("budget must be >= 0");
+		for (const [step, options] of Object.entries(config.phases)) {
+			if (!Number.isInteger(options.retries) || options.retries < 0) {
+				errors.push(`phases.${step}.retries must be an integer >= 0`);
+			}
 			if (
-				typeof value === "object" &&
-				value !== null &&
-				!Array.isArray(value) &&
-				typeof result[key] === "object" &&
-				result[key] !== null &&
-				!Array.isArray(result[key])
+				options.workers !== undefined &&
+				(!Number.isInteger(options.workers) || options.workers < 1)
 			) {
-				result[key] = deepMerge(
-					result[key] as Record<string, unknown>,
-					value as Record<string, unknown>,
-				);
-			} else {
-				result[key] = value;
+				errors.push(`phases.${step}.workers must be an integer >= 1`);
 			}
 		}
 	}
-	return result as T;
+	if (errors.length > 0) throw new ConfigError(`Invalid config:\n- ${errors.join("\n- ")}`);
 }
 
-export class ConfigError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "ConfigError";
+export async function loadConfig(workDir: string, overrides: Plain = {}): Promise<Config> {
+	const path = join(workDir, STATE_DIR, "config.ts");
+	let user: unknown = {};
+	if (existsSync(path)) {
+		try {
+			const mod = await import(pathToFileURL(path).href);
+			user = mod.default ?? mod;
+		} catch (err) {
+			throw new ConfigError(`Cannot load ${path}: ${errorMessage(err)}`);
+		}
 	}
-}
+	if (!isPlain(user)) throw new ConfigError(`${path} must export a config object as default`);
 
-const KNOWN_TOP_LEVEL_KEYS = new Set(Object.keys(DEFAULTS));
-
-function validateConfig(config: Config): void {
-	if (!KNOWN_ENGINES.includes(config.engine as any)) {
+	const unknown = unknownKeys(user, DEFAULTS);
+	if (unknown.length > 0) {
 		throw new ConfigError(
-			`Invalid engine "${config.engine}". Must be one of: ${KNOWN_ENGINES.join(", ")}`,
+			`Unknown config key(s) in ${path}: ${unknown.join(", ")}. See the README for the current options.`,
 		);
 	}
-
-	for (const entry of config.pipeline) {
-		if (!PHASES.includes(entry as any)) {
-			throw new ConfigError(
-				`Invalid pipeline phase "${entry}". Must be one of: ${PHASES.join(", ")}`,
-			);
-		}
-	}
-
-	for (const [phase, opts] of Object.entries(config.phases)) {
-		if (opts.workers != null && opts.workers <= 0) {
-			throw new ConfigError(`phases.${phase}.workers is ${opts.workers}, must be > 0`);
-		}
-		if (opts.retries != null && opts.retries < 0) {
-			throw new ConfigError(`phases.${phase}.retries is ${opts.retries}, must be >= 0`);
-		}
-	}
-
-	if (config.cost.budget < 0) {
-		throw new ConfigError(`cost.budget is ${config.cost.budget}, must be >= 0`);
-	}
-	if (config.cost.inputPerMillion < 0) {
-		throw new ConfigError(`cost.inputPerMillion is ${config.cost.inputPerMillion}, must be >= 0`);
-	}
-	if (config.cost.outputPerMillion < 0) {
-		throw new ConfigError(`cost.outputPerMillion is ${config.cost.outputPerMillion}, must be >= 0`);
-	}
-
-	for (const key of Object.keys(config)) {
-		if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
-			console.warn(`Warning: Unknown config key "${key}"`);
-		}
-	}
+	const config = deepMerge(DEFAULTS as unknown as Plain, user, overrides) as unknown as Config;
+	validate(config);
+	return config;
 }
 
-/**
- * Load config from .milhouse/config.ts, merge with defaults and CLI overrides.
- */
-export async function loadConfig(workDir: string, cliOverrides?: Partial<Config>): Promise<Config> {
-	const configPath = join(workDir, ".milhouse", "config.ts");
-	let userConfig: Partial<Config> = {};
-
-	if (existsSync(configPath)) {
-		try {
-			const mod = await import(pathToFileURL(configPath).href);
-			userConfig = (mod.default ?? mod) as Partial<Config>;
-		} catch (err) {
-			console.warn(
-				`Warning: Failed to load config from ${configPath}: ${err instanceof Error ? err.message : err}. Using defaults.`,
-			);
-		}
-	}
-
-	const merged = deepMerge(
-		DEFAULTS as unknown as Record<string, unknown>,
-		userConfig as Record<string, unknown>,
-		(cliOverrides ?? {}) as Record<string, unknown>,
-	) as unknown as Config;
-	validateConfig(merged);
-	return merged;
-}
-
-/**
- * Config template for `milhouse --init`
- */
-export const CONFIG_TEMPLATE = `import type { Config } from "milhouse";
-
-const config: Config = {
-  // AI engine: "claude" | "gemini" | "aider"
-  engine: "claude",
+export const CONFIG_TEMPLATE = `// Milhouse config. Every key is optional; the values below are the defaults.
+export default {
+  // Claude model alias or id. Override per step with phases.<step>.model.
   model: "sonnet",
 
-  // Pipeline phases (remove to skip)
-  pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
+  // Phases to run, in this order. Remove "merge" to review the verified branch yourself.
+  pipeline: ["scan", "validate", "plan", "consolidate", "exec", "merge"],
 
-  // Per-phase settings
+  // Stop after the first phase with a failed item (default: continue with what worked).
+  failFast: false,
+
+  // Retries per item. An exec retry is a repair round that feeds the failure back to the agent.
+  // verify is the reviewer that checks every issue inside exec.
   phases: {
-    scan:        { workers: 1, retries: 2 },
-    validate:    { workers: 5, retries: 2 },
-    plan:        { workers: 5, retries: 3 },
-    consolidate: { workers: 1, retries: 2 },
-    exec:        { workers: 3, retries: 3 },
-    verify:      { workers: 5, retries: 1 },
+    scan: { retries: 2 },
+    validate: { workers: 5, retries: 2 },
+    plan: { workers: 5, retries: 2 },
+    consolidate: { retries: 2 },
+    exec: { retries: 2 },
+    verify: { retries: 1 },
   },
 
-  // Project info (auto-detected or manual)
+  // Spending limit for one run, in USD. 0 = unlimited.
+  budget: 50,
+
   project: { name: "", language: "", framework: "", description: "" },
-  commands: { test: "", lint: "", build: "" },
 
-  // Rules injected into every agent prompt
+  // Shell commands run in the worktree. A failing build/lint/test sends the issue back to the agent.
+  commands: { setup: "", build: "", lint: "", test: "" },
+
+  // Rules injected into every prompt, and globs agents must not change (enforced after exec).
   rules: [],
+  neverTouch: [], // e.g. ["migrations/**", ".env*"]
 
-  // Files agents must never touch
-  boundaries: { neverTouch: [] },
-
-  // Quality gates
+  // evidence: validate cites real code. placeholder: no new TODO/FIXME/stubs. diffHygiene: no trailing whitespace or conflict markers.
+  // dod: commands pass and the reviewer confirms the acceptance criteria.
   gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
-
-  // Cost budget ($0 = unlimited)
-  cost: { inputPerMillion: 5, outputPerMillion: 25, budget: 50 },
 };
-
-export default config;
 `;

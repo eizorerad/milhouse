@@ -1,87 +1,84 @@
-/**
- * Tests for cost tracking with per-phase breakdown.
- */
-
 import { describe, expect, it } from "bun:test";
-import { addTokens, createRunCost, formatCost, formatPhaseCosts } from "../src/cost.ts";
-import type { Config } from "../src/types.ts";
+import { CostTracker, emptyCost, formatCost, formatUsd } from "../src/cost.ts";
 
-const mockConfig = {
-	cost: { inputPerMillion: 3.0, outputPerMillion: 15.0, budget: 10 },
-} as Config;
+describe("CostTracker", () => {
+	it("adds real USD per step and persists every change", () => {
+		const saved: number[] = [];
+		const tracker = new CostTracker(emptyCost(), 0, (c) => saved.push(c.total));
+		tracker.add("exec", 0.5);
+		tracker.add("verify", 0.25);
+		tracker.add("exec", 0.25);
+		expect(tracker.current.total).toBeCloseTo(1);
+		expect(tracker.current.byPhase.exec).toBeCloseTo(0.75);
+		expect(saved).toHaveLength(3);
+	});
 
-describe("createRunCost", () => {
-	it("initializes with zeros and empty byPhase", () => {
-		const cost = createRunCost();
-		expect(cost.inputTokens).toBe(0);
-		expect(cost.outputTokens).toBe(0);
-		expect(cost.totalCost).toBe(0);
-		expect(cost.byPhase).toEqual({});
+	it("ignores zero, negative and NaN amounts", () => {
+		const tracker = new CostTracker(emptyCost(), 0, () => {});
+		tracker.add("scan", 0);
+		tracker.add("scan", -1);
+		tracker.add("scan", Number.NaN);
+		expect(tracker.current.total).toBe(0);
+	});
+
+	it("never mutates the object it was given", () => {
+		const start = emptyCost();
+		new CostTracker(start, 0, () => {}).add("scan", 1);
+		expect(start.total).toBe(0);
+	});
+
+	it("budget 0 means unlimited", () => {
+		const tracker = new CostTracker(emptyCost(), 0, () => {});
+		tracker.add("exec", 1000);
+		expect(tracker.exceeded()).toBe(false);
+	});
+
+	it("knows when the budget is gone", () => {
+		const tracker = new CostTracker(emptyCost(), 10, () => {});
+		tracker.add("exec", 4);
+		expect(tracker.exceeded()).toBe(false);
+		tracker.add("exec", 6.5);
+		expect(tracker.exceeded()).toBe(true);
 	});
 });
 
-describe("addTokens", () => {
-	it("accumulates aggregate tokens without phase", () => {
-		const cost = createRunCost();
-		addTokens(cost, 1000, 500, mockConfig);
-		expect(cost.inputTokens).toBe(1000);
-		expect(cost.outputTokens).toBe(500);
-		expect(cost.byPhase).toEqual({});
-	});
-
-	it("accumulates per-phase tokens when phase provided", () => {
-		const cost = createRunCost();
-		addTokens(cost, 1_000_000, 100_000, mockConfig, "scan");
-		expect(cost.byPhase.scan).toBeDefined();
-		expect(cost.byPhase.scan!.inputTokens).toBe(1_000_000);
-		expect(cost.byPhase.scan!.outputTokens).toBe(100_000);
-		expect(cost.byPhase.scan!.cost).toBeCloseTo(3.0 + 1.5, 5);
-	});
-
-	it("accumulates multiple calls to the same phase", () => {
-		const cost = createRunCost();
-		addTokens(cost, 500_000, 50_000, mockConfig, "exec");
-		addTokens(cost, 500_000, 50_000, mockConfig, "exec");
-		expect(cost.byPhase.exec!.inputTokens).toBe(1_000_000);
-		expect(cost.byPhase.exec!.outputTokens).toBe(100_000);
-		expect(cost.inputTokens).toBe(1_000_000);
-		expect(cost.outputTokens).toBe(100_000);
-	});
-
-	it("tracks multiple phases independently", () => {
-		const cost = createRunCost();
-		addTokens(cost, 1_000_000, 100_000, mockConfig, "scan");
-		addTokens(cost, 2_000_000, 200_000, mockConfig, "exec");
-		expect(cost.byPhase.scan!.inputTokens).toBe(1_000_000);
-		expect(cost.byPhase.exec!.inputTokens).toBe(2_000_000);
-		expect(cost.inputTokens).toBe(3_000_000);
+describe("formatting", () => {
+	it("formats USD and a per-step breakdown", () => {
+		expect(formatUsd(1.234)).toBe("$1.23");
+		expect(formatCost({ total: 1.5, byPhase: { scan: 0.5, exec: 1 } })).toBe(
+			"$1.50 (scan $0.50, exec $1.00)",
+		);
+		expect(formatCost(emptyCost())).toBe("$0.00");
 	});
 });
 
-describe("formatCost", () => {
-	it("formats aggregate cost unchanged", () => {
-		const cost = createRunCost();
-		addTokens(cost, 1_000_000, 100_000, mockConfig);
-		const formatted = formatCost(cost);
-		expect(formatted).toContain("$");
-		expect(formatted).toContain("in");
-		expect(formatted).toContain("out");
-	});
-});
+describe("reservations", () => {
+	it("splits what is free between parallel calls, so they can never add up to more than the budget", () => {
+		const tracker = new CostTracker(emptyCost(), 10, () => {});
+		const first = tracker.reserve(2);
+		const second = tracker.reserve(2);
+		expect([first, second]).toEqual([5, 5]);
+		expect(tracker.reserve(2)).toBe(0); // nothing is left to hand out while both are running
 
-describe("formatPhaseCosts", () => {
-	it("returns empty string when no phases", () => {
-		const cost = createRunCost();
-		expect(formatPhaseCosts(cost)).toBe("");
+		tracker.add("exec", 1); // the first call finishes and costs 1
+		tracker.release(first);
+		// 10 - 1 spent - 5 still reserved for the second call, one slot free
+		expect(tracker.reserve(2)).toBeCloseTo(4);
 	});
 
-	it("formats per-phase breakdown", () => {
-		const cost = createRunCost();
-		addTokens(cost, 1_000_000, 100_000, mockConfig, "scan");
-		addTokens(cost, 2_000_000, 200_000, mockConfig, "exec");
-		const formatted = formatPhaseCosts(cost);
-		expect(formatted).toContain("scan:");
-		expect(formatted).toContain("exec:");
-		expect(formatted).toContain("$");
+	it("is unlimited when there is no budget, and release is a no-op then", () => {
+		const tracker = new CostTracker(emptyCost(), 0, () => {});
+		expect(tracker.reserve(3)).toBeUndefined();
+		tracker.release(undefined);
+		expect(tracker.reserve(3)).toBeUndefined();
+	});
+
+	it("gives a sequential caller everything that is left", () => {
+		const tracker = new CostTracker(emptyCost(), 10, () => {});
+		const share = tracker.reserve(1);
+		expect(share).toBe(10);
+		tracker.add("exec", 3);
+		tracker.release(share);
+		expect(tracker.reserve(1)).toBe(7);
 	});
 });

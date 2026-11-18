@@ -1,85 +1,97 @@
-/**
- * Scan phase — identify work items in the codebase.
- */
+/** scan: read the code and list the work items worth doing. */
 
-import { buildScanPrompt, SCAN_SCHEMA } from "../prompts/scan.ts";
-import type { Config, Issue, PhaseConfig, PhaseResult } from "../types.ts";
-import { log, severityColor } from "../ui.ts";
-import { extractJson, generateId, now } from "../util.ts";
+import { context, feedback, prompt, role, section } from "../prompts.ts";
+import type { PhaseDef } from "../runner.ts";
+import type { Config, Issue } from "../types.ts";
+import { log } from "../ui.ts";
+import { generateId, parseJson, stripControl } from "../util.ts";
 
-interface ScanInput { scope: string }
+const DEFAULT_SCOPE = "Find the most important bugs and improvements.";
+const MINUTE = 60_000;
 
-interface ScanResult {
-	issues: Array<{
-		type?: string; title?: string; rationale?: string;
-		severity?: string; scope_impact?: string; strategy?: string;
-	}>;
+type RawIssue = Pick<
+	Issue,
+	"type" | "title" | "rationale" | "severity" | "scope_impact" | "strategy"
+>;
+
+const ITEM_FIELDS = ["type", "title", "rationale", "severity", "scope_impact", "strategy"];
+
+export const SCAN_SCHEMA = {
+	type: "object",
+	properties: {
+		items: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					type: { type: "string", enum: ["bug", "feature", "refactor", "improvement", "task"] },
+					title: { type: "string" },
+					rationale: { type: "string" },
+					severity: { type: "string", enum: ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
+					scope_impact: { type: "string" },
+					strategy: { type: "string" },
+				},
+				required: ITEM_FIELDS,
+				additionalProperties: false,
+			},
+		},
+	},
+	required: ["items"],
+	additionalProperties: false,
+} as const;
+
+export function scanPrompt(scope: string, config: Config, lastError?: string): string {
+	return prompt(
+		role(
+			"Lead Investigator",
+			"You analyse this repository and list the work items worth doing: bugs, missing features, refactors, improvements. You can only read files.",
+		),
+		section("Focus", scope),
+		context(config),
+		section(
+			"Task",
+			[
+				"Explore the code and report the most important work items for the focus above, most important first (at most 10).",
+				"Every item must be specific, real and actionable. Name the files involved in the rationale.",
+				"Fields: type, title, rationale (why, with file references), severity, scope_impact (areas affected), strategy (suggested approach).",
+				"If nothing is worth doing, return an empty list.",
+			].join("\n"),
+		),
+		feedback(lastError),
+	);
 }
 
-export const scanPhase: PhaseConfig<ScanInput, ScanResult> = {
+export const scanPhase: PhaseDef<{ scope: string }, RawIssue[]> = {
 	name: "scan",
-	schema: SCAN_SCHEMA as Record<string, unknown>,
-	maxTurns: 100,
-	timeout: 15 * 60 * 1000, // 15 min — scan reads many files
 
-	loadItems(store, config) {
-		const scope = config.pipeline.includes("scan") ? (store.loadMeta().scope ?? "find issues") : "find issues";
-		return [{ scope }];
+	loadItems: (store) =>
+		store.loadIssues().length > 0 ? [] : [{ scope: store.loadMeta().scope ?? DEFAULT_SCOPE }],
+
+	label: () => "scan",
+
+	async run(item, ctx) {
+		const text = await ctx.ask(scanPrompt(item.scope, ctx.config, ctx.lastError), {
+			schema: SCAN_SCHEMA,
+			maxTurns: 100,
+			timeoutMs: 15 * MINUTE,
+		});
+		const { items } = parseJson<{ items?: unknown }>(text, "Scan");
+		if (!Array.isArray(items)) throw new Error("Scan: the response has no `items` list");
+		return items
+			.filter((i): i is RawIssue => typeof i?.title === "string" && i.title.trim() !== "")
+			.map((i) => ({ ...i, title: stripControl(i.title.trim()) }));
 	},
 
-	buildPrompt(item, _store, config) {
-		return buildScanPrompt(item.scope, config);
-	},
-
-	parseResponse(response) {
-		// Try direct JSON.parse first (structured_output from --json-schema is clean JSON)
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(response);
-		} catch {
-			// Fallback: extract JSON from markdown/text response
-			const jsonStr = extractJson(response);
-			if (!jsonStr) throw new Error(`Scan: no JSON in response (first 200 chars: ${response.slice(0, 200)})`);
-			try {
-				parsed = JSON.parse(jsonStr);
-			} catch {
-				throw new Error(`Scan: invalid JSON (first 200 chars: ${jsonStr.slice(0, 200)})`);
-			}
-		}
-		const raw = Array.isArray(parsed) ? parsed : (parsed as Record<string, unknown>).items;
-		const items = Array.isArray(raw) ? raw : [];
-		return { issues: items.filter((i: unknown) => {
-			if (typeof i !== "object" || i === null) return false;
-			const o = i as Record<string, unknown>;
-			return (typeof o.title === "string" && o.title.trim()) ||
-			       (typeof o.symptom === "string");
-		}) };
-	},
-
-	saveResults(results, store) {
-		const timestamp = now();
-		const issues: Issue[] = results.flatMap(r =>
-			r.success ? r.result.issues.map(raw => ({
-				id: generateId("P"),
-				type: (raw.type as Issue["type"]) ?? "bug",
-				title: raw.title ?? "",
-				rationale: raw.rationale ?? "",
-				severity: (raw.severity as Issue["severity"]) ?? "MEDIUM",
-				status: "UNVALIDATED" as const,
-				evidence: [],
-				scope_impact: raw.scope_impact,
-				strategy: raw.strategy,
-				created_at: timestamp,
-				updated_at: timestamp,
-			})) : []
-		);
-
-		if (issues.length > 0) {
-			store.saveIssues(issues);
-			store.refreshStats();
-			for (const i of issues) {
-				log.info(severityColor(i.severity, `[${i.severity}]`) + ` ${i.title}`);
-			}
-		}
+	record(_item, outcome, store) {
+		if (!outcome.ok) return;
+		const issues: Issue[] = outcome.value.map((raw) => ({
+			...raw,
+			id: generateId("P"),
+			status: "UNVALIDATED",
+			evidence: [],
+		}));
+		store.saveIssues(issues);
+		if (issues.length === 0) log.info("scan found nothing to do");
+		for (const issue of issues) log.info(`[${issue.severity}] ${issue.title}`);
 	},
 };

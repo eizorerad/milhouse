@@ -1,210 +1,276 @@
 /**
- * Exec phase — execute tasks in worktrees.
- * Uses the same PhaseConfig interface as all other phases.
- * Worktree management is handled by the runner.
+ * exec: implement every issue on top of the previous ones, check it, have it reviewed, then accept it.
+ *
+ * Issues run one after another in a single worktree. `store.ref` holds accepted work only: an issue is
+ * accepted (the ref moves) once its tasks are committed, the checks pass and the reviewer agrees.
+ * A failed issue is parked on its own branch and the worktree returns to the accepted state, so no issue
+ * builds on broken work and every issue is checked on top of everything accepted before it.
  */
 
-import { branchExists, getCommittedTaskNumbers } from "../git.ts";
-import { buildExecPrompt } from "../prompts/exec.ts";
-import type { Issue, IssueGroup, PhaseConfig, Task } from "../types.ts";
-import { log } from "../ui.ts";
+import { existsSync } from "node:fs";
+import { EngineError } from "../engine.ts";
+import { findPlaceholders, findWhitespaceProblems, forbiddenFiles, runChecks } from "../gates.ts";
+import {
+	acceptCommit,
+	addedLines,
+	branchExists,
+	commitSubjects,
+	deleteBranch,
+	diffPatch,
+	diffStat,
+	git,
+	isAncestor,
+	parkWorktree,
+	resetWorktree,
+	revParse,
+	touchedFiles,
+} from "../git.ts";
+import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
+import type { Config, Task } from "../types.ts";
+import { errorMessage, parseJson, tail } from "../util.ts";
+import { prepareWorktree } from "../worktree.ts";
+import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
+import { REVIEW_SCHEMA, bullets, execPrompt, reviewPrompt } from "./exec-prompts.ts";
 
-interface ExecResult {
-	issueId: string;
-	taskIds: string[];
-}
+const MINUTE = 60_000;
+
+export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
 
 /**
- * Group tasks by issue_id.
+ * Marks a failure of the reviewer itself (not a verdict). It must not send the issue back to the executor:
+ * the work is fine, only the review has to be asked for again.
  */
-function groupTasksByIssue(tasks: Task[], issues: Issue[]): IssueGroup[] {
-	const issueMap = new Map(issues.map((i) => [i.id, i]));
-	const groups = new Map<string, Task[]>();
+const REVIEW_UNAVAILABLE = "The review could not be completed";
 
-	for (const task of tasks) {
-		const key = task.issue_id || "UNASSIGNED";
-		if (!groups.has(key)) groups.set(key, []);
-		groups.get(key)!.push(task);
-	}
+/** Failures that are not the executor's fault must not be fed back to it as feedback. */
+const blamesAgent = (error: string | undefined): error is string =>
+	error !== undefined && !error.startsWith(REVIEW_UNAVAILABLE) && !error.startsWith("setup failed");
 
-	const result: IssueGroup[] = [];
-	for (const [issueId, issueTasks] of groups) {
-		const issue = issueMap.get(issueId) ?? {
-			id: issueId,
-			type: "task" as const,
-			title: `Work item ${issueId}`,
-			rationale: "Derived from tasks",
-			severity: "MEDIUM" as const,
-			status: "CONFIRMED" as const,
-			evidence: [],
-			created_at: new Date().toISOString(),
-			updated_at: new Date().toISOString(),
-		};
-		result.push({ issueId, issue, tasks: issueTasks });
-	}
+// ─── Checks and review ───────────────────────────────────────────────
 
-	// Sort by severity
-	const order = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
-	return result.sort((a, b) => (order[a.issue.severity] ?? 4) - (order[b.issue.severity] ?? 4));
+interface Work {
+	dir: string;
+	/** Where the run started: every commit of the run lies after it. */
+	base: string;
+	/** Tip of the accepted work: this issue's commits lie after it. */
+	accepted: string;
 }
 
-export function hasCrossIssueDeps(groups: IssueGroup[]): boolean {
-	const taskToIssue = new Map<string, string>();
-	for (const group of groups) {
-		for (const task of group.tasks) {
-			taskToIssue.set(task.id, group.issueId);
+/** First problem with the work (written as instructions for the agent), or null when it passes. */
+export async function checkWork(
+	work: Work,
+	group: IssueGroup,
+	config: Config,
+): Promise<string | null> {
+	const tip = work.accepted.slice(0, 8);
+	if (!(await isAncestor(work.dir, work.accepted, "HEAD"))) {
+		return `The accepted commits (up to ${tip}) are no longer part of HEAD. Never reset, rebase or switch away from them: build on top of ${tip}.`;
+	}
+
+	const done = committedTaskIds(await commitSubjects(work.dir, work.base), group.tasks);
+	const missing = group.tasks.filter((t) => !done.has(t.id));
+	if (missing.length > 0) {
+		const list = missing.map((t) => `[${t.id}] ${t.title}`).join("; ");
+		return `These tasks have no commit with the subject \`[<task id>] <title>\`: ${list}`;
+	}
+
+	const status = await git(work.dir, "status", "--porcelain");
+	if (status.out) {
+		return `Uncommitted changes are left in the worktree. Commit them under the right task or remove them:\n${tail(status.out, 800)}`;
+	}
+
+	const forbidden = forbiddenFiles(await touchedFiles(work.dir, work.accepted), config.neverTouch);
+	if (forbidden.length > 0) {
+		return `Commits touched files that must never be modified: ${forbidden.join(", ")}. Rewrite the history so that no commit after ${tip} touches them (for example git reset --soft ${tip}, restore those files, then commit per task again).`;
+	}
+
+	const added =
+		config.gates.placeholder || config.gates.diffHygiene
+			? await addedLines(work.dir, work.accepted)
+			: [];
+	if (config.gates.placeholder) {
+		const found = findPlaceholders(added);
+		if (found.length > 0) {
+			return `Unfinished work was added (TODO/FIXME/stubs). Finish it:\n${bullets(found.slice(0, 10))}`;
 		}
 	}
-	for (const group of groups) {
-		for (const task of group.tasks) {
-			for (const depId of task.depends_on) {
-				const depIssue = taskToIssue.get(depId);
-				if (depIssue && depIssue !== group.issueId) return true;
+	if (config.gates.diffHygiene) {
+		const problems = findWhitespaceProblems(added);
+		if (problems.length > 0) {
+			return `Trailing whitespace or conflict markers were added:\n${bullets(problems.slice(0, 10))}`;
+		}
+	}
+	if (config.gates.dod) {
+		const { build, lint, test } = config.commands;
+		const failure = await runChecks(
+			[
+				["build", build],
+				["lint", lint],
+				["test", test],
+			],
+			work.dir,
+		);
+		await git(work.dir, "clean", "-fd"); // build output of the checks: the tree was clean before them
+		if (failure) return failure;
+		// A fixing linter or a formatter would leave the checks passing against an edit that is not in
+		// the commit being accepted.
+		const changed = await git(work.dir, "status", "--porcelain", "--untracked-files=no");
+		if (changed.out) {
+			return `Running the checks changed tracked files, so what was tested is not what is committed. Commit those changes or make the commands read-only:\n${tail(changed.out, 800)}`;
+		}
+	}
+	return null;
+}
+
+export interface Verdict {
+	task_id: string;
+	passed: boolean;
+	reason: string;
+}
+
+/** Exactly one verdict per task, no unknown or repeated ids. */
+export function parseVerdicts(text: string, tasks: Task[]): Verdict[] {
+	const { tasks: verdicts } = parseJson<{ tasks?: Verdict[] }>(text, "Review");
+	if (!Array.isArray(verdicts)) throw new Error("Review: the answer has no `tasks` list");
+	const expected = new Set(tasks.map((t) => t.id));
+	const seen = new Set<string>();
+	for (const { task_id } of verdicts) {
+		if (!expected.has(task_id)) throw new Error(`Review: unknown task id ${task_id}`);
+		if (seen.has(task_id)) throw new Error(`Review: two verdicts for ${task_id}`);
+		seen.add(task_id);
+	}
+	const missing = tasks.filter((t) => !seen.has(t.id));
+	if (missing.length > 0)
+		throw new Error(`Review: no verdict for ${missing.map((t) => t.id).join(", ")}`);
+	return verdicts;
+}
+
+/** Ask the reviewer (retrying only when it fails to answer). Throws when it rejects the work. */
+async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
+	const [stat, patch] = await Promise.all([
+		diffStat(work.dir, work.accepted),
+		diffPatch(work.dir, work.accepted),
+	]);
+	const text = reviewPrompt(group, stat, patch, ctx.config);
+	let verdicts: Verdict[] | undefined;
+	let failure = "";
+	for (let attempt = 0; attempt <= ctx.config.phases.verify.retries && !verdicts; attempt++) {
+		let answer: string;
+		try {
+			answer = await ctx.ask(text, {
+				step: "verify",
+				cwd: work.dir,
+				schema: REVIEW_SCHEMA,
+				maxTurns: 25,
+				timeoutMs: 10 * MINUTE,
+			});
+		} catch (err) {
+			// An agent failure (outage, budget) goes back to the runner, which backs off and retries.
+			if (err instanceof EngineError) {
+				throw new EngineError(`${REVIEW_UNAVAILABLE}: ${err.message}`, 0, err.fatal);
 			}
+			throw err;
+		}
+		try {
+			verdicts = parseVerdicts(answer, group.tasks);
+		} catch (err) {
+			failure = errorMessage(err); // a malformed answer: just ask again
 		}
 	}
-	return false;
+	if (!verdicts) throw new Error(`${REVIEW_UNAVAILABLE}: ${failure}`);
+
+	const reasons = rejectionReasons(verdicts, group.tasks);
+	if (reasons.length > 0) throw new Error(`The reviewer rejected the work:\n${bullets(reasons)}`);
 }
 
-/**
- * Topological sort of issue groups based on cross-issue task dependencies.
- * Falls back to original order for groups without cross-issue deps.
- */
-function topoSortGroups(groups: IssueGroup[]): IssueGroup[] {
-	if (!hasCrossIssueDeps(groups)) return groups;
-
-	const taskToIssue = new Map<string, string>();
-	for (const group of groups) {
-		for (const task of group.tasks) {
-			taskToIssue.set(task.id, group.issueId);
-		}
-	}
-
-	const deps = new Map<string, Set<string>>();
-	for (const group of groups) {
-		for (const task of group.tasks) {
-			for (const depId of task.depends_on) {
-				const depIssue = taskToIssue.get(depId);
-				if (depIssue && depIssue !== group.issueId) {
-					if (!deps.has(group.issueId)) deps.set(group.issueId, new Set());
-					deps.get(group.issueId)?.add(depIssue);
-				}
-			}
-		}
-	}
-
-	// Kahn's algorithm
-	const inDegree = new Map<string, number>();
-	const adj = new Map<string, string[]>();
-	for (const g of groups) {
-		inDegree.set(g.issueId, 0);
-		adj.set(g.issueId, []);
-	}
-	for (const [issueId, depSet] of deps) {
-		inDegree.set(issueId, (inDegree.get(issueId) ?? 0) + depSet.size);
-		for (const dep of depSet) {
-			adj.get(dep)?.push(issueId);
-		}
-	}
-
-	const queue: string[] = [];
-	for (const [id, deg] of inDegree) {
-		if (deg === 0) queue.push(id);
-	}
-
-	const sorted: string[] = [];
-	while (queue.length > 0) {
-		const current = queue.shift() as string;
-		sorted.push(current);
-		for (const next of adj.get(current) ?? []) {
-			const newDeg = (inDegree.get(next) ?? 1) - 1;
-			inDegree.set(next, newDeg);
-			if (newDeg === 0) queue.push(next);
-		}
-	}
-
-	if (sorted.length < groups.length) {
-		log.warn("Circular cross-issue dependencies detected — using severity-based order.");
-		return groups;
-	}
-
-	const orderMap = new Map(sorted.map((id, idx) => [id, idx]));
-	return [...groups].sort(
-		(a, b) => (orderMap.get(a.issueId) ?? 0) - (orderMap.get(b.issueId) ?? 0),
-	);
+/** One line per task the reviewer did not explicitly pass: anything but `true` counts as a rejection. */
+export function rejectionReasons(verdicts: Verdict[], tasks: Task[]): string[] {
+	const titles = new Map(tasks.map((t) => [t.id, t.title]));
+	return verdicts
+		.filter((v) => v.passed !== true)
+		.map((v) => `[${v.task_id}] ${titles.get(v.task_id)}: ${v.reason}`);
 }
 
-export const execPhase: PhaseConfig<IssueGroup, ExecResult> = {
+// ─── The phase ───────────────────────────────────────────────────────
+
+export const execPhase: PhaseDef<IssueGroup, string> = {
 	name: "exec",
-	timeout: 20 * 60 * 1000, // 20 min per issue — kill hung processes
 
-	loadItems(store) {
-		const tasks = store.loadTasks().filter((t: Task) => t.status === "pending");
-		const issues = store
-			.loadIssues()
-			.filter((i: Issue) => i.status === "CONFIRMED" || i.status === "PARTIAL");
-		return topoSortGroups(groupTasksByIssue(tasks, issues));
-	},
+	loadItems: (store) => loadGroups(store),
 
-	buildPrompt(item, _store, config) {
-		return buildExecPrompt(item, config);
-	},
+	label: (group) => group.issue.title.slice(0, 50),
 
-	parseResponse(_response, item) {
-		// Exec doesn't parse AI response — success is determined by process exit code
-		return { issueId: item.issueId, taskIds: item.tasks.map((t) => t.id) };
-	},
+	async run(group, ctx) {
+		const { store, config } = ctx;
+		const repo = store.workDir;
+		const { base_sha: base } = store.loadMeta();
 
-	async saveResults(results, store) {
-		// Batch update: load all tasks once, apply all changes, save once
-		const allTasks: Task[] = store.loadTasks();
-		const taskMap = new Map<string, Task>(allTasks.map((t: Task) => [t.id, t]));
-		const timestamp = new Date().toISOString();
+		// What this issue builds on has to be in place; otherwise it would only waste money.
+		const unmet = unmetDependencies(group, store.loadTasks());
+		if (unmet.length > 0) throw new Skip(`waiting for ${unmet.join(", ")}`);
 
-		for (const r of results) {
-			const group = r.item as IssueGroup;
-			const sorted = [...group.tasks].sort((a, b) => a.parallel_group - b.parallel_group);
+		const setupFailure = await prepareWorktree(store, config);
+		if (setupFailure) throw new GiveUp(setupFailure);
 
-			const numberToId = new Map<number, string>();
-			for (let i = 0; i < sorted.length; i++) {
-				numberToId.set(i + 1, sorted[i].id);
-			}
-
-			let committedNumbers: Set<number>;
-
-			if (r.success) {
-				committedNumbers = await getCommittedTaskNumbers(group.issueId, "HEAD", store.workDir);
-			} else {
-				const branch = `mh/${group.issueId}`;
-				const exists = await branchExists(branch, store.workDir);
-				committedNumbers = exists
-					? await getCommittedTaskNumbers(group.issueId, branch, store.workDir)
-					: new Set();
-			}
-
-			const committedIds = new Set<string>();
-			for (const [num, id] of numberToId) {
-				if (committedNumbers.has(num)) committedIds.add(id);
-			}
-
-			for (const groupTask of group.tasks) {
-				const task = taskMap.get(groupTask.id);
-				if (!task) continue;
-				if (committedIds.has(groupTask.id)) {
-					task.status = "done";
-					task.updated_at = timestamp;
-				} else if (r.success) {
-					task.status = "pending";
-					task.updated_at = timestamp;
-				} else {
-					task.status = "failed";
-					task.error = r.error;
-					task.updated_at = timestamp;
-				}
-			}
+		// Accepted before but never recorded (a crash in between): the recorded commit is in the ref.
+		const recorded = group.tasks[0]?.sha;
+		if (
+			recorded &&
+			group.tasks.every((t) => t.sha === recorded) &&
+			(await isAncestor(repo, recorded, store.ref))
+		) {
+			return recorded;
 		}
 
-		store.saveTasks(allTasks);
-		store.refreshStats();
+		const accepted = await revParse(repo, store.ref);
+		const previous = ctx.lastError ?? group.tasks.find((t) => t.error)?.error;
+		if (ctx.attempt === 0) {
+			// Start from the accepted state, so leftovers of an interrupted session never leak into this
+			// issue. Only a parked attempt whose sole problem was the review is picked up again.
+			const parked = parkBranch(group.issue.id);
+			const pickUp =
+				previous?.startsWith(REVIEW_UNAVAILABLE) &&
+				(await branchExists(repo, parked)) &&
+				(await isAncestor(repo, accepted, parked));
+			await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+		}
+		const work: Work = { dir: store.worktree, base, accepted };
+
+		const doneIds = committedTaskIds(await commitSubjects(work.dir, base), group.tasks);
+		const done = group.tasks.filter((t) => doneIds.has(t.id));
+		const problem = blamesAgent(previous) ? previous : undefined;
+		if (done.length < group.tasks.length || problem !== undefined) {
+			await ctx.ask(execPrompt(group, done, config, problem), {
+				cwd: work.dir,
+				tools: "all",
+				timeoutMs: 30 * MINUTE,
+			});
+		}
+
+		const failure = await checkWork(work, group, config);
+		if (failure) throw new Error(failure);
+		const checked = await revParse(work.dir, "HEAD"); // exactly this commit is reviewed and accepted
+		if (config.gates.dod) await review(ctx, group, work);
+		store.updateTasks(
+			group.tasks.map((t) => t.id),
+			{ sha: checked },
+		); // before the ref moves: a crash in between is recognised on resume
+		await acceptCommit(repo, store.ref, checked);
+		return checked;
+	},
+
+	async record(group, outcome, store) {
+		const ids = group.tasks.map((t) => t.id);
+		if (outcome.ok) {
+			store.updateTasks(ids, { status: "verified", error: undefined });
+			await deleteBranch(store.workDir, parkBranch(group.issue.id)); // a stale parked attempt
+			return;
+		}
+		if (existsSync(store.worktree)) {
+			await parkWorktree(store.workDir, store.worktree, parkBranch(group.issue.id));
+			await resetWorktree(store.worktree, store.ref);
+		}
+		// Keep the start of the message: markers such as REVIEW_UNAVAILABLE are recognised by their prefix.
+		store.updateTasks(ids, { status: "failed", error: outcome.error.slice(0, 2000) });
 	},
 };

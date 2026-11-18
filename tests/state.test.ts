@@ -1,311 +1,192 @@
-/**
- * Tests for run state persistence helpers.
- */
-
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { RunStore } from "../src/state.ts";
-import type { RunsIndex } from "../src/state.ts";
+import { RunStore, acquireLock } from "../src/state.ts";
+import type { Issue, Task } from "../src/types.ts";
+import { cleanupTempDirs, tempDir } from "./helpers.ts";
 
-describe("RunStore cost persistence", () => {
-	let tmpDir: string;
+afterEach(cleanupTempDirs);
 
-	beforeEach(() => {
-		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-state-test-"));
-	});
+const BASE = { branch: "main", sha: "abc123" };
 
-	afterEach(() => {
-		rmSync(tmpDir, { recursive: true, force: true });
-	});
+const issue = (id: string): Issue => ({
+	id,
+	type: "bug",
+	title: `Issue ${id}`,
+	rationale: "r",
+	severity: "HIGH",
+	status: "UNVALIDATED",
+	evidence: [],
+});
 
-	it("persists cost for later resume", () => {
-		const store = RunStore.create(tmpDir, "scope");
-		store.saveCost({ inputTokens: 1234, outputTokens: 5678, totalCost: 0.15, byPhase: {} });
+const task = (id: string, issueId = "P1"): Task => ({
+	id,
+	issue_id: issueId,
+	title: `Task ${id}`,
+	description: "",
+	files: [],
+	depends_on: [],
+	checks: [],
+	acceptance: [],
+	status: "pending",
+});
 
-		const resumed = RunStore.byId(tmpDir, store.runId);
-		expect(resumed.loadCost()).toEqual({
-			inputTokens: 1234,
-			outputTokens: 5678,
-			totalCost: 0.15,
-			byPhase: {},
+describe("RunStore", () => {
+	it("creates a run with its starting point and ignore file", () => {
+		const dir = tempDir();
+		const store = RunStore.create(dir, "fix auth", BASE);
+		const meta = store.loadMeta();
+		expect(meta).toMatchObject({
+			scope: "fix auth",
+			status: "running",
+			done: [],
+			base_branch: "main",
+			base_sha: "abc123",
 		});
+		expect(store.runId).toMatch(/^run-\d{8}-/);
+		expect(readFileSync(join(dir, ".milhouse", ".gitignore"), "utf-8")).toContain("work/");
 	});
 
-	it("returns zero cost when no cost file exists", () => {
-		const store = RunStore.create(tmpDir, "scope");
-		expect(store.loadCost()).toEqual({
-			inputTokens: 0,
-			outputTokens: 0,
-			totalCost: 0,
-			byPhase: {},
-		});
+	it("round-trips issues and tasks and patches them immutably", () => {
+		const store = RunStore.create(tempDir(), undefined, BASE);
+		store.saveIssues([issue("P1"), issue("P2")]);
+		store.updateIssue("P1", { status: "CONFIRMED" });
+		expect(store.loadIssues().map((i) => i.status)).toEqual(["CONFIRMED", "UNVALIDATED"]);
+
+		store.saveTasks([task("T1"), task("T2")]);
+		store.updateTasks(["T2"], { status: "failed", error: "boom" });
+		store.updateTasks(["T2"], { status: "verified", error: undefined });
+		expect(store.loadTasks().map((t) => [t.status, t.error])).toEqual([
+			["pending", undefined],
+			["verified", undefined],
+		]);
 	});
 
-	it("tracks phase lifecycle separately from run completion", () => {
-		const store = RunStore.create(tmpDir, "scope");
-
+	it("tracks completed phases without duplicates and finishes with a status", () => {
+		const store = RunStore.create(tempDir(), undefined, BASE);
 		store.startPhase("scan");
 		store.completePhase("scan");
-		store.startPhase("plan");
-		store.stopRun("plan", "stopped");
-
+		store.completePhase("scan");
+		store.startPhase("validate");
 		expect(store.loadMeta()).toMatchObject({
-			phase: "plan",
-			status: "stopped",
-			last_completed_phase: "scan",
+			phase: "validate",
+			done: ["scan"],
+			status: "running",
 		});
-
-		store.completeRun();
-
-		expect(store.loadMeta()).toMatchObject({
-			phase: "completed",
-			status: "completed",
-			last_completed_phase: "scan",
-		});
+		store.finish("failed");
+		expect(store.loadMeta().status).toBe("failed");
 	});
 
-	it("rebuilds stats from persisted issues and tasks", () => {
-		const store = RunStore.create(tmpDir, "scope");
-		const now = "2026-01-01T00:00:00Z";
+	it("derives the accepted-work ref and the worktree from the run id", () => {
+		const dir = tempDir();
+		const store = new RunStore(dir, "run-1");
+		expect(store.ref).toBe("refs/milhouse/run-1");
+		expect(store.worktree).toBe(join(dir, ".milhouse", "work", "run-1"));
+	});
 
-		store.saveIssues([
-			{
-				id: "P-1",
-				type: "bug",
-				title: "A",
-				rationale: "",
-				severity: "HIGH",
-				status: "CONFIRMED",
-				evidence: [],
-				created_at: now,
-				updated_at: now,
-			},
-			{
-				id: "P-2",
-				type: "bug",
-				title: "B",
-				rationale: "",
-				severity: "LOW",
-				status: "UNVALIDATED",
-				evidence: [],
-				created_at: now,
-				updated_at: now,
-			},
-		]);
-		store.saveTasks([
-			{
-				id: "T-1",
-				issue_id: "P-1",
-				title: "done",
-				files: [],
-				depends_on: [],
-				checks: [],
-				acceptance: [],
-				parallel_group: 0,
-				status: "done",
-				created_at: now,
-				updated_at: now,
-			},
-			{
-				id: "T-2",
-				issue_id: "P-1",
-				title: "failed",
-				files: [],
-				depends_on: [],
-				checks: [],
-				acceptance: [],
-				parallel_group: 0,
-				status: "failed",
-				created_at: now,
-				updated_at: now,
-			},
-		]);
+	it("fails loudly on a corrupt state file instead of silently resetting it", () => {
+		const dir = tempDir();
+		const store = RunStore.create(dir, undefined, BASE);
+		store.saveTasks([task("T1")]);
+		writeFileSync(join(dir, ".milhouse", "runs", store.runId, "tasks.json"), '[{"id": "T1", ');
+		expect(() => store.loadTasks()).toThrow(/Corrupt state file .*tasks\.json/);
+	});
 
-		store.refreshStats();
+	it("writes atomically (no temp file is left behind)", () => {
+		const dir = tempDir();
+		const store = RunStore.create(dir, undefined, BASE);
+		store.saveIssues([issue("P1")]);
+		expect(existsSync(join(dir, ".milhouse", "runs", store.runId, "issues.json.tmp"))).toBe(false);
+	});
 
-		expect(store.loadMeta()).toMatchObject({
-			issues_found: 2,
-			issues_validated: 1,
-			tasks_total: 2,
-			tasks_completed: 1,
-			tasks_failed: 1,
-		});
+	it("lists runs oldest first, finds the latest and looks runs up by id", async () => {
+		const dir = tempDir();
+		const first = RunStore.create(dir, "one", BASE);
+		await Bun.sleep(5);
+		const second = RunStore.create(dir, "two", BASE);
+		expect(RunStore.list(dir).map((r) => r.id)).toEqual([first.runId, second.runId]);
+		expect(RunStore.latest(dir)?.runId).toBe(second.runId);
+		expect(RunStore.byId(dir, first.runId).loadMeta().scope).toBe("one");
+		expect(() => RunStore.byId(dir, "nope")).toThrow(/not found/);
+		expect(RunStore.latest(tempDir())).toBeNull();
+		expect(RunStore.list(tempDir())).toEqual([]);
+	});
+
+	it("cleans only finished runs older than the cutoff", () => {
+		const dir = tempDir();
+		const old = RunStore.create(dir, "old", BASE);
+		const stopped = RunStore.create(dir, "stopped", BASE);
+		const fresh = RunStore.create(dir, "fresh", BASE);
+		for (const [store, status, daysAgo] of [
+			[old, "completed", 40],
+			[stopped, "stopped", 40],
+			[fresh, "completed", 1],
+		] as const) {
+			store.finish(status);
+			const metaPath = join(dir, ".milhouse", "runs", store.runId, "meta.json");
+			const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+			meta.created_at = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+			writeFileSync(metaPath, JSON.stringify(meta));
+		}
+		expect(RunStore.clean(dir, 30)).toEqual([old.runId]);
+		expect(
+			RunStore.list(dir)
+				.map((r) => r.id)
+				.sort(),
+		).toEqual([stopped.runId, fresh.runId].sort());
 	});
 });
 
-describe("RunStore.listRuns", () => {
-	let tmpDir: string;
-
-	beforeEach(() => {
-		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-list-test-"));
+describe("acquireLock", () => {
+	it("refuses a second holder and can be released and re-acquired", () => {
+		const dir = tempDir();
+		const release = acquireLock(dir);
+		expect(() => acquireLock(dir)).toThrow(/Another milhouse is running/);
+		release();
+		acquireLock(dir)();
 	});
 
-	afterEach(() => {
-		rmSync(tmpDir, { recursive: true, force: true });
+	it("takes over a stale lock left by a dead process", () => {
+		const dir = tempDir();
+		mkdirSync(join(dir, ".milhouse"));
+		writeFileSync(join(dir, ".milhouse", "lock"), "2147483646");
+		acquireLock(dir)();
 	});
 
-	it("returns empty array when no runs exist", () => {
-		const runs = RunStore.listRuns(tmpDir);
-		expect(runs).toEqual([]);
-	});
-
-	it("returns all runs with correct fields after creating multiple runs", () => {
-		RunStore.create(tmpDir, "scope-a");
-		RunStore.create(tmpDir, "scope-b");
-
-		const runs = RunStore.listRuns(tmpDir);
-		expect(runs).toHaveLength(2);
-		expect(runs[0].scope).toBe("scope-a");
-		expect(runs[0].status).toBe("running");
-		expect(runs[0].phase).toBe("scan");
-		expect(runs[0].created_at).toBeTruthy();
-		expect(runs[1].scope).toBe("scope-b");
-	});
-
-	it("RunStore.exists only returns true for persisted runs", () => {
-		const store = RunStore.create(tmpDir, "scope-a");
-		expect(RunStore.exists(tmpDir, store.runId)).toBe(true);
-		expect(RunStore.exists(tmpDir, "run-does-not-exist")).toBe(false);
+	it("treats an unreadable lock file as stale (never signals pid 0)", () => {
+		const dir = tempDir();
+		mkdirSync(join(dir, ".milhouse"));
+		writeFileSync(join(dir, ".milhouse", "lock"), "");
+		acquireLock(dir)();
 	});
 });
 
-describe("RunStore.cleanRuns", () => {
-	let tmpDir: string;
-
-	beforeEach(() => {
-		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-clean-test-"));
+describe("acquireLock takeover", () => {
+	it("clears a stale lock exactly once, even when a second starter is taking over at the same time", () => {
+		const dir = tempDir();
+		mkdirSync(join(dir, ".milhouse"));
+		writeFileSync(join(dir, ".milhouse", "lock"), "2147483646");
+		// Another starter is in the middle of taking the stale lock over: this one must wait, not delete.
+		mkdirSync(join(dir, ".milhouse", "lock.takeover"));
+		const old = new Date(Date.now() - 60_000);
+		utimesSync(join(dir, ".milhouse", "lock.takeover"), old, old); // ... but it died a minute ago
+		acquireLock(dir)();
+		expect(existsSync(join(dir, ".milhouse", "lock.takeover"))).toBe(false);
 	});
 
-	afterEach(() => {
-		rmSync(tmpDir, { recursive: true, force: true });
+	it("does not take a lock over while a live process holds it", () => {
+		const dir = tempDir();
+		mkdirSync(join(dir, ".milhouse"));
+		writeFileSync(join(dir, ".milhouse", "lock"), String(process.pid));
+		expect(() => acquireLock(dir)).toThrow(/Another milhouse is running/);
+		expect(readFileSync(join(dir, ".milhouse", "lock"), "utf-8")).toBe(String(process.pid));
 	});
 
-	function setRunCreatedAt(workDir: string, runId: string, dateIso: string): void {
-		const indexPath = join(workDir, ".milhouse", "runs-index.json");
-		const index = JSON.parse(readFileSync(indexPath, "utf-8")) as RunsIndex;
-		const entry = index.runs.find((r) => r.id === runId);
-		if (entry) entry.created_at = dateIso;
-		writeFileSync(indexPath, JSON.stringify(index, null, 2));
-	}
-
-	it("removes completed runs older than N days and keeps recent ones", () => {
-		const old = RunStore.create(tmpDir, "old");
-		old.completeRun();
-		setRunCreatedAt(tmpDir, old.runId, "2020-01-01T00:00:00Z");
-
-		const recent = RunStore.create(tmpDir, "recent");
-		recent.completeRun();
-
-		const result = RunStore.cleanRuns(tmpDir, 30);
-		expect(result.removed).toEqual([old.runId]);
-		expect(result.kept).toBe(1);
-	});
-
-	it("keeps running runs regardless of age", () => {
-		const running = RunStore.create(tmpDir, "running");
-		setRunCreatedAt(tmpDir, running.runId, "2020-01-01T00:00:00Z");
-
-		const result = RunStore.cleanRuns(tmpDir, 0);
-		expect(result.removed).toEqual([]);
-		expect(result.kept).toBe(1);
-	});
-
-	it("returns correct removed/kept counts", () => {
-		const a = RunStore.create(tmpDir, "a");
-		a.completeRun();
-		setRunCreatedAt(tmpDir, a.runId, "2020-01-01T00:00:00Z");
-
-		const b = RunStore.create(tmpDir, "b");
-		b.stopRun("exec", "failed");
-		setRunCreatedAt(tmpDir, b.runId, "2020-02-01T00:00:00Z");
-
-		const c = RunStore.create(tmpDir, "c"); // running, recent
-
-		const result = RunStore.cleanRuns(tmpDir, 30);
-		expect(result.removed).toHaveLength(2);
-		expect(result.kept).toBe(1);
-	});
-
-	it("deletes cleaned run directories from disk", () => {
-		const store = RunStore.create(tmpDir, "deleteme");
-		store.completeRun();
-		setRunCreatedAt(tmpDir, store.runId, "2020-01-01T00:00:00Z");
-
-		const runDir = join(tmpDir, ".milhouse", "runs", store.runId);
-		expect(existsSync(runDir)).toBe(true);
-
-		RunStore.cleanRuns(tmpDir, 30);
-		expect(existsSync(runDir)).toBe(false);
-	});
-});
-
-describe("listRuns and cleanRuns edge cases", () => {
-	let tmpDir: string;
-
-	beforeEach(() => {
-		tmpDir = mkdtempSync(join(tmpdir(), "milhouse-edge-test-"));
-	});
-
-	afterEach(() => {
-		rmSync(tmpDir, { recursive: true, force: true });
-	});
-
-	function setRunCreatedAt(workDir: string, runId: string, dateIso: string): void {
-		const indexPath = join(workDir, ".milhouse", "runs-index.json");
-		const index = JSON.parse(readFileSync(indexPath, "utf-8")) as RunsIndex;
-		const entry = index.runs.find((r) => r.id === runId);
-		if (entry) entry.created_at = dateIso;
-		writeFileSync(indexPath, JSON.stringify(index, null, 2));
-	}
-
-	it("clean with 0 days removes all eligible completed/failed runs", () => {
-		const a = RunStore.create(tmpDir, "a");
-		a.completeRun();
-		const b = RunStore.create(tmpDir, "b");
-		b.stopRun("exec", "failed");
-
-		const result = RunStore.cleanRuns(tmpDir, 0);
-		expect(result.removed).toHaveLength(2);
-		expect(result.kept).toBe(0);
-	});
-
-	it("clean with very large days removes none", () => {
-		const a = RunStore.create(tmpDir, "a");
-		a.completeRun();
-		setRunCreatedAt(tmpDir, a.runId, "2020-01-01T00:00:00Z");
-
-		const result = RunStore.cleanRuns(tmpDir, 999999);
-		expect(result.removed).toHaveLength(0);
-		expect(result.kept).toBe(1);
-	});
-
-	it("list-runs with mixed statuses shows all", () => {
-		const a = RunStore.create(tmpDir, "running-scope");
-		const b = RunStore.create(tmpDir, "completed-scope");
-		b.completeRun();
-		const c = RunStore.create(tmpDir, "failed-scope");
-		c.stopRun("exec", "failed");
-
-		const runs = RunStore.listRuns(tmpDir);
-		expect(runs).toHaveLength(3);
-
-		const statuses = runs.map((r) => r.status);
-		expect(statuses).toContain("running");
-		expect(statuses).toContain("completed");
-		expect(statuses).toContain("failed");
-	});
-
-	it("clean does not affect runs-index.json when no runs to clean", () => {
-		const a = RunStore.create(tmpDir, "active");
-
-		const result = RunStore.cleanRuns(tmpDir, 30);
-		expect(result.removed).toHaveLength(0);
-		expect(result.kept).toBe(1);
-
-		const runs = RunStore.listRuns(tmpDir);
-		expect(runs).toHaveLength(1);
-		expect(runs[0].id).toBe(a.runId);
+	it("gives up instead of waiting forever when another starter keeps the takeover", () => {
+		const dir = tempDir();
+		mkdirSync(join(dir, ".milhouse"));
+		writeFileSync(join(dir, ".milhouse", "lock"), "2147483646");
+		mkdirSync(join(dir, ".milhouse", "lock.takeover")); // fresh: somebody is working on it
+		expect(() => acquireLock(dir)).toThrow(/Could not acquire/);
 	});
 });

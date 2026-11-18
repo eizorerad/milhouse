@@ -1,73 +1,63 @@
-/**
- * Cost — token counting + budget checking.
- */
+/** Cost tracking. The agent reports real USD per call, so there is no token pricing to maintain. */
 
-import type { Config, Phase, PhaseCost, RunCost } from "./types.ts";
+import type { AgentStep, RunCost } from "./types.ts";
 
-// Inline debug log to avoid circular dependency
-const debugLog = (msg: string) => {
-	if (process.env.VERBOSE === "1") console.log(`… ${msg}`);
-};
+export const emptyCost = (): RunCost => ({ total: 0, byPhase: {} });
 
-const CLAUDE_ENGINES = new Set(["claude"]);
-let estimatedTokensWarned = false;
-
-export function isEstimatedTokens(engine: string): boolean {
-	return !CLAUDE_ENGINES.has(engine);
-}
-
-export function createRunCost(): RunCost {
-	return { inputTokens: 0, outputTokens: 0, totalCost: 0, byPhase: {} };
-}
-
-export function addTokens(
-	cost: RunCost,
-	inputTokens: number,
-	outputTokens: number,
-	config: Config,
-	phase?: Phase,
-): void {
-	if (!estimatedTokensWarned && isEstimatedTokens(config.engine)) {
-		debugLog(`[cost] Token counts for engine "${config.engine}" are estimated — budget enforcement is approximate`);
-		estimatedTokensWarned = true;
-	}
-	cost.inputTokens += inputTokens;
-	cost.outputTokens += outputTokens;
-	cost.totalCost =
-		(cost.inputTokens / 1_000_000) * config.cost.inputPerMillion +
-		(cost.outputTokens / 1_000_000) * config.cost.outputPerMillion;
-
-	if (phase) {
-		const pc = cost.byPhase[phase] ?? { inputTokens: 0, outputTokens: 0, cost: 0 };
-		pc.inputTokens += inputTokens;
-		pc.outputTokens += outputTokens;
-		pc.cost =
-			(pc.inputTokens / 1_000_000) * config.cost.inputPerMillion +
-			(pc.outputTokens / 1_000_000) * config.cost.outputPerMillion;
-		cost.byPhase[phase] = pc;
-	}
-}
-
-export function isBudgetExceeded(cost: RunCost, config: Config): boolean {
-	return config.cost.budget > 0 && cost.totalCost >= config.cost.budget;
-}
+export const formatUsd = (usd: number): string => `$${usd.toFixed(2)}`;
 
 export function formatCost(cost: RunCost): string {
-	return `$${cost.totalCost.toFixed(2)} (${formatTokens(cost.inputTokens)} in / ${formatTokens(cost.outputTokens)} out)`;
+	const phases = Object.entries(cost.byPhase)
+		.map(([phase, usd]) => `${phase} ${formatUsd(usd)}`)
+		.join(", ");
+	return phases ? `${formatUsd(cost.total)} (${phases})` : formatUsd(cost.total);
 }
 
-export function formatPhaseCosts(cost: RunCost): string {
-	const entries = Object.entries(cost.byPhase) as [Phase, PhaseCost][];
-	if (entries.length === 0) return "";
-	const lines: string[] = [];
-	for (const [phase, pc] of entries) {
-		lines.push(`  ${phase}: $${pc.cost.toFixed(2)} (${formatTokens(pc.inputTokens)} in / ${formatTokens(pc.outputTokens)} out)`);
+/** Single mutable cell for a run's spending, shared by parallel workers. */
+export class CostTracker {
+	constructor(
+		private cost: RunCost,
+		private readonly budget: number,
+		private readonly persist: (cost: RunCost) => void,
+	) {}
+
+	get current(): RunCost {
+		return this.cost;
 	}
-	return lines.join("\n");
-}
 
-function formatTokens(n: number): string {
-	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-	return String(n);
+	add(step: AgentStep, usd: number): void {
+		if (!(usd > 0)) return;
+		this.cost = {
+			total: this.cost.total + usd,
+			byPhase: { ...this.cost.byPhase, [step]: (this.cost.byPhase[step] ?? 0) + usd },
+		};
+		this.persist(this.cost);
+	}
+
+	exceeded(): boolean {
+		return this.budget > 0 && this.cost.total >= this.budget;
+	}
+
+	private reserved = 0;
+	private inFlight = 0;
+
+	/**
+	 * Reserve what one agent call may spend, so parallel calls can never add up to more than the budget:
+	 * an equal share of what is neither spent nor reserved. Undefined when the budget is unlimited.
+	 * Pair every call with `release`.
+	 */
+	reserve(workers: number): number | undefined {
+		if (this.budget <= 0) return undefined;
+		const free = Math.max(this.budget - this.cost.total - this.reserved, 0);
+		const share = free / Math.max(workers - this.inFlight, 1);
+		this.reserved += share;
+		this.inFlight++;
+		return share;
+	}
+
+	release(share: number | undefined): void {
+		if (share === undefined) return;
+		this.reserved = Math.max(this.reserved - share, 0);
+		this.inFlight = Math.max(this.inFlight - 1, 0);
+	}
 }
