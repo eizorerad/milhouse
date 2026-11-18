@@ -1,61 +1,89 @@
-/**
- * Utilities — JSON extraction and helpers.
- */
+/** Small helpers shared across modules. */
 
-/**
- * Extract JSON from AI response that may contain markdown code blocks.
- */
-export function extractJson(response: string): string | null {
-	if (!response) return null;
+export const now = (): string => new Date().toISOString();
 
-	// Try: ```json ... ```
-	const jsonBlock = response.match(/```json\s*\n?([\s\S]*?)```/);
-	if (jsonBlock?.[1]) return jsonBlock[1].trim();
+export const sleep = (ms: number): Promise<void> =>
+	new Promise((resolve) => setTimeout(resolve, ms));
 
-	// Try: ``` ... ```
-	const codeBlock = response.match(/```\s*\n?([\s\S]*?)```/);
-	if (codeBlock?.[1]) {
-		const content = codeBlock[1].trim();
-		if (content.startsWith("[") || content.startsWith("{")) return content;
-	}
+/** Text from the agent or the repository, safe to print: no terminal escape sequences or control characters. */
+export function stripControl(text: string): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+	return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+}
 
-	// Try: raw JSON (starts with [ or {)
-	const trimmed = response.trim();
-	if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-		// Find the matching closing bracket
-		const open = trimmed[0];
-		const close = open === "[" ? "]" : "}";
-		let depth = 0;
-		for (let i = 0; i < trimmed.length; i++) {
-			if (trimmed[i] === '"') {
-				i++;
-				while (i < trimmed.length && trimmed[i] !== '"') {
-					if (trimmed[i] === "\\") i++;
-					i++;
-				}
-				continue;
-			}
-			if (trimmed[i] === open) depth++;
-			if (trimmed[i] === close) depth--;
-			if (depth === 0) return trimmed.slice(0, i + 1);
+export function errorMessage(err: unknown): string {
+	return stripControl(err instanceof Error ? err.message : String(err));
+}
+
+export function generateId(prefix: string): string {
+	return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Last `max` characters of a text, trimmed (command output, stderr). */
+export function tail(text: string, max = 2000): string {
+	const trimmed = text.trim();
+	return trimmed.length <= max ? trimmed : `…${trimmed.slice(-max)}`;
+}
+
+/** Run `fn` over `items` with at most `size` calls in flight. Results keep the input order. */
+export async function mapPool<T, R>(
+	items: readonly T[],
+	size: number,
+	fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let next = 0;
+	const worker = async () => {
+		while (next < items.length) {
+			const index = next++;
+			results[index] = await fn(items[index], index);
 		}
-	}
+	};
+	await Promise.all(Array.from({ length: Math.min(Math.max(size, 1), items.length) }, worker));
+	return results;
+}
 
+/** Index of the bracket that closes the one at `start`, or -1. String contents are skipped. */
+function closingIndex(text: string, start: number): number {
+	const open = text[start];
+	const close = open === "{" ? "}" : "]";
+	let depth = 0;
+	let inString = false;
+	for (let i = start; i < text.length; i++) {
+		const c = text[i];
+		if (inString) {
+			if (c === "\\") i++;
+			else if (c === '"') inString = false;
+		} else if (c === '"') inString = true;
+		else if (c === open) depth++;
+		else if (c === close && --depth === 0) return i;
+	}
+	return -1;
+}
+
+/** First parseable JSON object or array in free-form model output (fenced or not). */
+export function extractJson(text: string): string | null {
+	let start = text.search(/[[{]/);
+	while (start !== -1) {
+		const end = closingIndex(text, start);
+		if (end !== -1) {
+			const candidate = text.slice(start, end + 1);
+			try {
+				JSON.parse(candidate);
+				return candidate;
+			} catch {
+				// Not JSON (e.g. a bracket in prose) — try the next opening bracket.
+			}
+		}
+		const next = text.slice(start + 1).search(/[[{]/);
+		start = next === -1 ? -1 : start + 1 + next;
+	}
 	return null;
 }
 
-/**
- * Generate a unique ID with optional prefix.
- */
-export function generateId(prefix = "P"): string {
-	const ts = Date.now().toString(36);
-	const rand = Math.random().toString(36).substring(2, 8);
-	return `${prefix}-${ts}-${rand}`;
-}
-
-/**
- * Current ISO timestamp.
- */
-export function now(): string {
-	return new Date().toISOString();
+/** Parse model output as JSON (structured output or fenced block). Throws a short error. */
+export function parseJson<T>(text: string, what: string): T {
+	const json = extractJson(text);
+	if (!json) throw new Error(`${what}: no JSON in the response (got: ${tail(text, 120)})`);
+	return JSON.parse(json) as T;
 }

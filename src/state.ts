@@ -1,339 +1,268 @@
-/**
- * State — RunStore class. One class for all state operations.
- * All paths encapsulated. All operations go through here.
- */
+/** Run state: JSON files under .milhouse/runs/<id>/. Writes are atomic; corrupt files fail loudly. */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type {
-	Issue,
-	Phase,
-	RunCost,
-	RunMeta,
-	RunStatus,
-	RunStoreInterface,
-	Task,
-} from "./types.ts";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { emptyCost } from "./cost.ts";
+import type { Issue, Phase, RunCost, RunMeta, RunStatus, Task } from "./types.ts";
+import { errorMessage, generateId, now } from "./util.ts";
 
-function now(): string {
-	return new Date().toISOString();
+export const STATE_DIR = ".milhouse";
+
+/** Keep runtime files out of git without touching the user's own .gitignore. */
+export function ensureIgnoreFile(workDir: string): void {
+	const path = join(workDir, STATE_DIR, ".gitignore");
+	if (existsSync(path)) return;
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, "runs/\nwork/\nlock\n");
 }
 
 function readJson<T>(path: string, fallback: T): T {
 	if (!existsSync(path)) return fallback;
 	try {
 		return JSON.parse(readFileSync(path, "utf-8")) as T;
-	} catch {
-		return fallback;
+	} catch (err) {
+		throw new Error(`Corrupt state file ${path}: ${errorMessage(err)}. Fix or delete it.`);
 	}
 }
 
 function writeJson(path: string, data: unknown): void {
-	const dir = join(path, "..");
-	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	writeFileSync(path, JSON.stringify(data, null, 2));
+	mkdirSync(dirname(path), { recursive: true });
+	// A fresh name, created exclusively: never follow a path somebody planted in the repository.
+	const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+	writeFileSync(tmp, JSON.stringify(data, null, 2), { flag: "wx" });
+	renameSync(tmp, path);
 }
 
-function readTextFile(path: string): string | null {
-	if (!existsSync(path)) return null;
-	try {
-		return readFileSync(path, "utf-8");
-	} catch {
-		return null;
-	}
-}
+/** Run ids become paths and ref names, so only this shape is ever accepted. */
+const RUN_ID = /^run-[A-Za-z0-9_-]+$/;
 
-function randomId(): string {
-	return `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`;
-}
-
-function datestamp(): string {
-	return new Date().toISOString().slice(0, 10).replace(/-/g, "");
-}
-
-export interface RunsIndex {
-	runs: Array<{
-		id: string;
-		scope?: string;
-		created_at: string;
-		phase: string;
-		status?: RunStatus;
-	}>;
-}
-
-function makeDefaultMeta(runId: string, scope?: string): RunMeta {
-	return {
-		id: runId,
-		scope,
-		phase: "scan",
-		status: "running",
-		last_completed_phase: undefined,
-		issues_found: 0,
-		issues_validated: 0,
-		tasks_total: 0,
-		tasks_completed: 0,
-		tasks_failed: 0,
-		created_at: now(),
-		updated_at: now(),
-	};
-}
-
-export class RunStore implements RunStoreInterface {
+export class RunStore {
 	constructor(
 		readonly workDir: string,
 		readonly runId: string,
-	) {}
-
-	// ─── Paths ─────────────────────────────────────────────────────
-
-	private get dir() {
-		return join(this.workDir, ".milhouse", "runs", this.runId);
-	}
-	private get stateDir() {
-		return join(this.dir, "state");
-	}
-	private get plansDir() {
-		return join(this.dir, "plans");
+	) {
+		if (!RUN_ID.test(runId)) throw new Error(`Invalid run id "${runId}".`);
 	}
 
-	// ─── Issues ────────────────────────────────────────────────────
+	/**
+	 * Tip of the accepted work of this run. A ref outside refs/heads: unlike a branch it cannot be
+	 * checked out or force-moved by an agent running git in the worktree.
+	 */
+	get ref(): string {
+		return `refs/milhouse/${this.runId}`;
+	}
+
+	/** Worktree where exec works. Its HEAD is detached; accepted work is recorded in `ref`. */
+	get worktree(): string {
+		return join(this.workDir, STATE_DIR, "work", this.runId);
+	}
+
+	private file(name: string): string {
+		return join(this.workDir, STATE_DIR, "runs", this.runId, name);
+	}
+
+	// ─── Issues & tasks ──────────────────────────────────────────────
 
 	loadIssues(): Issue[] {
-		return readJson<Issue[]>(join(this.stateDir, "issues.json"), []);
+		return readJson<Issue[]>(this.file("issues.json"), []);
 	}
 
 	saveIssues(issues: Issue[]): void {
-		writeJson(join(this.stateDir, "issues.json"), issues);
+		writeJson(this.file("issues.json"), issues);
 	}
 
-	/**
-	 * @deprecated Not concurrency-safe — uses non-atomic load→modify→save.
-	 * Use the batch pattern instead: loadIssues() → modify in-memory → saveIssues().
-	 */
-	updateIssue(id: string, update: Partial<Issue>): void {
-		const issues = this.loadIssues();
-		const idx = issues.findIndex((i) => i.id === id);
-		if (idx >= 0) {
-			issues[idx] = { ...issues[idx], ...update, updated_at: now() };
-			this.saveIssues(issues);
-		}
+	updateIssue(id: string, patch: Partial<Issue>): void {
+		this.saveIssues(this.loadIssues().map((i) => (i.id === id ? { ...i, ...patch } : i)));
 	}
-
-	// ─── Tasks ─────────────────────────────────────────────────────
 
 	loadTasks(): Task[] {
-		return readJson<Task[]>(join(this.stateDir, "tasks.json"), []);
+		return readJson<Task[]>(this.file("tasks.json"), []);
 	}
 
 	saveTasks(tasks: Task[]): void {
-		writeJson(join(this.stateDir, "tasks.json"), tasks);
+		writeJson(this.file("tasks.json"), tasks);
 	}
 
-	/**
-	 * @deprecated Not concurrency-safe — uses non-atomic load→modify→save.
-	 * Use the batch pattern instead: loadTasks() → modify in-memory → saveTasks().
-	 */
-	updateTask(id: string, update: Partial<Task>): void {
-		const tasks = this.loadTasks();
-		const idx = tasks.findIndex((t) => t.id === id);
-		if (idx >= 0) {
-			tasks[idx] = { ...tasks[idx], ...update, updated_at: now() };
-			this.saveTasks(tasks);
-		}
+	updateTasks(ids: Iterable<string>, patch: Partial<Task>): void {
+		const selected = new Set(ids);
+		this.saveTasks(this.loadTasks().map((t) => (selected.has(t.id) ? { ...t, ...patch } : t)));
 	}
 
-	// ─── Run Meta ──────────────────────────────────────────────────
+	// ─── Meta ────────────────────────────────────────────────────────
 
 	loadMeta(): RunMeta {
-		const defaults = makeDefaultMeta(this.runId);
-		const meta = readJson<Partial<RunMeta>>(join(this.dir, "meta.json"), defaults);
-		return {
-			...defaults,
-			...meta,
-			id: meta.id ?? this.runId,
-			created_at: meta.created_at ?? defaults.created_at,
-			updated_at: meta.updated_at ?? defaults.updated_at,
-			status: meta.status ?? defaults.status,
-		};
+		const meta = readJson<RunMeta | null>(this.file("meta.json"), null);
+		if (!meta) throw new Error(`Run "${this.runId}" has no meta.json.`);
+		return meta;
 	}
 
-	saveMeta(meta: RunMeta): void {
-		writeJson(join(this.dir, "meta.json"), meta);
-		this.syncIndex(meta);
+	private patchMeta(patch: Partial<RunMeta>): void {
+		writeJson(this.file("meta.json"), { ...this.loadMeta(), ...patch, updated_at: now() });
 	}
 
-	updatePhase(phase: string): void {
-		const meta = this.loadMeta();
-		meta.phase = phase;
-		meta.updated_at = now();
-		this.saveMeta(meta);
-	}
-
-	updateStats(stats: Partial<RunMeta>): void {
-		const meta = this.loadMeta();
-		Object.assign(meta, stats, { updated_at: now() });
-		this.saveMeta(meta);
+	/** After a merge the run continues from the merged state. */
+	setBase(sha: string): void {
+		this.patchMeta({ base_sha: sha });
 	}
 
 	startPhase(phase: Phase): void {
-		const meta = this.loadMeta();
-		meta.phase = phase;
-		meta.status = "running";
-		meta.updated_at = now();
-		this.saveMeta(meta);
+		this.patchMeta({ phase, status: "running" });
 	}
 
 	completePhase(phase: Phase): void {
-		const meta = this.loadMeta();
-		meta.phase = phase;
-		meta.status = "running";
-		meta.last_completed_phase = phase;
-		meta.updated_at = now();
-		this.saveMeta(meta);
+		this.patchMeta({ done: [...new Set([...this.loadMeta().done, phase])] });
 	}
 
-	stopRun(phase: string, status: Extract<RunStatus, "failed" | "stopped">): void {
-		const meta = this.loadMeta();
-		meta.phase = phase;
-		meta.status = status;
-		meta.updated_at = now();
-		this.saveMeta(meta);
+	finish(status: RunStatus): void {
+		this.patchMeta({ status });
 	}
 
-	completeRun(): void {
-		const meta = this.loadMeta();
-		meta.phase = "completed";
-		meta.status = "completed";
-		meta.updated_at = now();
-		this.saveMeta(meta);
-	}
-
-	refreshStats(): void {
-		const issues = this.loadIssues();
-		const tasks = this.loadTasks();
-
-		this.updateStats({
-			issues_found: issues.length,
-			issues_validated: issues.filter((issue) => issue.status !== "UNVALIDATED").length,
-			tasks_total: tasks.length,
-			tasks_completed: tasks.filter((task) => task.status === "done").length,
-			tasks_failed: tasks.filter((task) => task.status === "failed").length,
-		});
-	}
-
-	// ─── Plans ─────────────────────────────────────────────────────
-
-	savePlan(issueId: string, content: string): void {
-		if (!existsSync(this.plansDir)) mkdirSync(this.plansDir, { recursive: true });
-		writeFileSync(join(this.plansDir, `${issueId}.md`), content);
-	}
-
-	loadPlan(issueId: string): string | null {
-		return readTextFile(join(this.plansDir, `${issueId}.md`));
-	}
-
-	// ─── Cost ─────────────────────────────────────────────────────
+	// ─── Cost ────────────────────────────────────────────────────────
 
 	loadCost(): RunCost {
-		return readJson<RunCost>(join(this.stateDir, "cost.json"), {
-			inputTokens: 0,
-			outputTokens: 0,
-			totalCost: 0,
-			byPhase: {},
-		});
+		return readJson<RunCost>(this.file("cost.json"), emptyCost());
 	}
 
 	saveCost(cost: RunCost): void {
-		writeJson(join(this.stateDir, "cost.json"), cost);
+		writeJson(this.file("cost.json"), cost);
 	}
 
-	// ─── Verification ──────────────────────────────────────────────
+	// ─── Runs ────────────────────────────────────────────────────────
 
-	saveVerification(data: unknown): void {
-		writeJson(join(this.stateDir, "verification.json"), data);
-	}
-
-	loadVerification(): unknown {
-		return readJson<unknown>(join(this.stateDir, "verification.json"), null);
-	}
-
-	// ─── Static Constructors ───────────────────────────────────────
-
-	private syncIndex(meta: RunMeta): void {
-		const indexPath = join(this.workDir, ".milhouse", "runs-index.json");
-		const index = readJson<RunsIndex>(indexPath, { runs: [] });
-		const entry = index.runs.find((run) => run.id === this.runId);
-		if (!entry) return;
-		entry.phase = meta.phase;
-		entry.status = meta.status;
-		writeJson(indexPath, index);
-	}
-
-	static create(workDir: string, scope?: string): RunStore {
-		const runId = `run-${datestamp()}-${randomId()}`;
-		const store = new RunStore(workDir, runId);
-
-		mkdirSync(store.stateDir, { recursive: true });
-		mkdirSync(store.plansDir, { recursive: true });
-
-		store.saveMeta(makeDefaultMeta(runId, scope));
-
-		// Update runs index
-		const indexPath = join(workDir, ".milhouse", "runs-index.json");
-		const index = readJson<RunsIndex>(indexPath, { runs: [] });
-		index.runs.push({ id: runId, scope, created_at: now(), phase: "scan", status: "running" });
-		writeJson(indexPath, index);
-
+	static create(
+		workDir: string,
+		scope: string | undefined,
+		base: { branch: string; sha: string },
+	): RunStore {
+		ensureIgnoreFile(workDir);
+		const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+		const store = new RunStore(workDir, generateId(`run-${stamp}`));
+		const meta: RunMeta = {
+			id: store.runId,
+			scope,
+			status: "running",
+			phase: "scan",
+			done: [],
+			base_branch: base.branch,
+			base_sha: base.sha,
+			created_at: now(),
+			updated_at: now(),
+		};
+		writeJson(store.file("meta.json"), meta);
 		return store;
 	}
 
+	/** All runs, oldest first. */
+	static list(workDir: string): RunMeta[] {
+		const root = join(workDir, STATE_DIR, "runs");
+		if (!existsSync(root)) return [];
+		return readdirSync(root)
+			.filter((name) => RUN_ID.test(name))
+			.map((name) => new RunStore(workDir, name))
+			.filter((store) => existsSync(store.file("meta.json")))
+			.map((store) => ({ ...store.loadMeta(), id: store.runId })) // the directory name is the id
+			.sort((a, b) => a.created_at.localeCompare(b.created_at));
+	}
+
 	static latest(workDir: string): RunStore | null {
-		const indexPath = join(workDir, ".milhouse", "runs-index.json");
-		const index = readJson<RunsIndex>(indexPath, { runs: [] });
-		if (index.runs.length === 0) return null;
-		const last = index.runs[index.runs.length - 1];
-		return new RunStore(workDir, last.id);
+		const last = RunStore.list(workDir).at(-1);
+		return last ? new RunStore(workDir, last.id) : null;
 	}
 
 	static byId(workDir: string, runId: string): RunStore {
-		const runDir = join(workDir, ".milhouse", "runs", runId);
-		if (!existsSync(runDir)) {
+		const store = RUN_ID.test(runId) ? new RunStore(workDir, runId) : undefined;
+		if (!store || !existsSync(store.file("meta.json"))) {
 			throw new Error(`Run "${runId}" not found. Use --list-runs to see available runs.`);
 		}
-		return new RunStore(workDir, runId);
+		return store;
 	}
 
-	static exists(workDir: string, runId: string): boolean {
-		return existsSync(join(workDir, ".milhouse", "runs", runId, "meta.json"));
+	/** Remove finished runs older than `days`. Stopped runs stay: they can be resumed. */
+	static clean(workDir: string, days: number): string[] {
+		const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+		const old = RunStore.list(workDir).filter(
+			(run) =>
+				(run.status === "completed" || run.status === "failed") &&
+				new Date(run.created_at).getTime() < cutoff,
+		);
+		for (const run of old) {
+			rmSync(join(workDir, STATE_DIR, "runs", run.id), { recursive: true, force: true });
+		}
+		return old.map((run) => run.id);
 	}
+}
 
-	static listRuns(workDir: string): RunsIndex["runs"] {
-		const indexPath = join(workDir, ".milhouse", "runs-index.json");
-		const index = readJson<RunsIndex>(indexPath, { runs: [] });
-		return index.runs;
+function isAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM";
 	}
+}
 
-	static cleanRuns(workDir: string, maxAgeDays: number): { removed: string[]; kept: number } {
-		const indexPath = join(workDir, ".milhouse", "runs-index.json");
-		const index = readJson<RunsIndex>(indexPath, { runs: [] });
-		const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-		const removed: string[] = [];
-		const kept: typeof index.runs = [];
+/** A takeover that has been going on this long was abandoned by a crashed starter. */
+const STALE_TAKEOVER_MS = 10_000;
 
-		for (const run of index.runs) {
-			const isTerminal = run.status === "completed" || run.status === "failed";
-			const createdMs = new Date(run.created_at).getTime();
-			if (isTerminal && createdMs < cutoff) {
-				const runDir = join(workDir, ".milhouse", "runs", run.id);
-				if (existsSync(runDir)) rmSync(runDir, { recursive: true, force: true });
-				removed.push(run.id);
-			} else {
-				kept.push(run);
-			}
+/** One milhouse per repository at a time. Returns the release function (also runs on exit). */
+export function acquireLock(workDir: string): () => void {
+	const path = join(workDir, STATE_DIR, "lock");
+	const takeover = `${path}.takeover`;
+	mkdirSync(dirname(path), { recursive: true });
+
+	for (let attempt = 0; attempt < 50; attempt++) {
+		try {
+			writeFileSync(path, String(process.pid), { flag: "wx" });
+			const release = () => {
+				process.off("exit", release);
+				rmSync(path, { force: true });
+			};
+			process.once("exit", release);
+			return release;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 		}
 
-		index.runs = kept;
-		writeJson(indexPath, index);
-		return { removed, kept: kept.length };
+		let holder: string;
+		try {
+			holder = readFileSync(path, "utf-8");
+		} catch {
+			continue; // released in the meantime
+		}
+		const pid = Number(holder);
+		if (Number.isInteger(pid) && pid > 0 && isAlive(pid)) {
+			throw new Error(`Another milhouse is running in this repository (pid ${pid}).`);
+		}
+
+		// The holder is dead. Only one starter at a time may clear its lock: two starters that both saw
+		// the stale lock would otherwise delete each other's fresh one and both run.
+		try {
+			mkdirSync(takeover);
+		} catch {
+			const started = statSync(takeover, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+			if (Date.now() - started > STALE_TAKEOVER_MS) {
+				rmSync(takeover, { recursive: true, force: true });
+			} else {
+				Bun.sleepSync(20);
+			}
+			continue;
+		}
+		try {
+			if (readFileSync(path, "utf-8") === holder) rmSync(path, { force: true });
+		} catch {
+			// already gone
+		} finally {
+			rmSync(takeover, { recursive: true, force: true });
+		}
 	}
+	throw new Error("Could not acquire the milhouse lock.");
 }

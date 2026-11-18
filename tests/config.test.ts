@@ -1,170 +1,104 @@
-/**
- * Tests for config loading.
- */
-
-import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ConfigError, loadConfig } from "../src/config.ts";
+import { CONFIG_TEMPLATE, ConfigError, DEFAULTS, deepMerge, loadConfig } from "../src/config.ts";
+import { cleanupTempDirs, tempDir } from "./helpers.ts";
+
+afterEach(cleanupTempDirs);
+
+function projectWith(configSource?: string): string {
+	const dir = tempDir();
+	if (configSource !== undefined) {
+		mkdirSync(join(dir, ".milhouse"));
+		writeFileSync(join(dir, ".milhouse", "config.ts"), configSource);
+	}
+	return dir;
+}
 
 describe("loadConfig", () => {
-	let tempDir: string;
-
-	beforeEach(() => {
-		tempDir = join(tmpdir(), `milhouse-config-test-${Date.now()}`);
-		mkdirSync(join(tempDir, ".milhouse"), { recursive: true });
+	it("returns the defaults without a config file", async () => {
+		expect(await loadConfig(projectWith())).toEqual(DEFAULTS);
 	});
 
-	afterEach(() => {
-		rmSync(tempDir, { recursive: true, force: true });
-	});
-
-	it("warns and returns defaults when config has a runtime error", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `throw new Error("broken config");`);
-
-		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const config = await loadConfig(tempDir);
-
-			expect(warnSpy).toHaveBeenCalledTimes(1);
-			const msg = warnSpy.mock.calls[0][0] as string;
-			expect(msg).toContain("Failed to load config");
-			expect(msg).toContain(configPath);
-			expect(msg).toContain("Using defaults");
-
-			expect(config.engine).toBe("claude");
-			expect(config.failFast).toBe(true);
-		} finally {
-			warnSpy.mockRestore();
-		}
-	});
-
-	it("merges valid user config with defaults", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { engine: "gemini", model: "pro" };`);
-
-		const config = await loadConfig(tempDir);
-
-		expect(config.engine).toBe("gemini");
-		expect(config.model).toBe("pro");
-		expect(config.failFast).toBe(true);
-	});
-
-	it("applies CLI overrides on top of user config", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { engine: "gemini" };`);
-
-		const config = await loadConfig(tempDir, { model: "opus" });
-
-		expect(config.engine).toBe("gemini");
+	it("merges the user config over the defaults, key by key", async () => {
+		const dir = projectWith(
+			`export default { model: "opus", phases: { exec: { retries: 5 } }, neverTouch: [".env*"] };`,
+		);
+		const config = await loadConfig(dir);
 		expect(config.model).toBe("opus");
+		expect(config.phases.exec.retries).toBe(5);
+		expect(config.phases.exec.model).toBe(""); // untouched sibling survives
+		expect(config.phases.validate.workers).toBe(5);
+		expect(config.neverTouch).toEqual([".env*"]);
 	});
 
-	it("throws ConfigError for invalid engine", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { engine: "gpt4" };`);
-
-		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
+	it("applies CLI overrides last", async () => {
+		const dir = projectWith(`export default { model: "opus" };`);
+		const config = await loadConfig(dir, { model: "haiku", phases: { validate: { workers: 2 } } });
+		expect(config.model).toBe("haiku");
+		expect(config.phases.validate.workers).toBe(2);
+		expect(config.phases.plan.workers).toBe(5);
 	});
 
-	it("throws ConfigError for invalid pipeline entry", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { pipeline: ["scan", "bogus"] };`);
-
-		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
+	it("fails on a config that cannot be loaded instead of silently using defaults", async () => {
+		const dir = projectWith("export default {{{ not typescript");
+		await expect(loadConfig(dir)).rejects.toThrow(ConfigError);
 	});
 
-	it("throws ConfigError for negative workers", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, "export default { phases: { scan: { workers: -1, retries: 2 } } };");
-
-		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
-	});
-
-	it("throws ConfigError for negative budget", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(
-			configPath,
-			"export default { cost: { inputPerMillion: 5, outputPerMillion: 25, budget: -5 } };",
+	it("rejects unknown keys at any depth (a typo must not silently disable a rule)", async () => {
+		const dir = projectWith(
+			`export default { neverTouches: ["x"], budgetLimit: 5, phases: { exec: { workers: 3 } } };`,
 		);
-
-		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error).toBeInstanceOf(ConfigError);
+		expect(error.message).toContain("neverTouches");
+		expect(error.message).toContain("budgetLimit");
+		expect(error.message).toContain("phases.exec.workers");
 	});
 
-	it("throws ConfigError for negative retries", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(
-			configPath,
-			"export default { phases: { validate: { workers: 5, retries: -1 } } };",
+	it("rejects values of the wrong type", async () => {
+		const dir = projectWith(`export default { budget: "lots", failFast: "yes", neverTouch: "x" };`);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error.message).toContain("budget must be a number");
+		expect(error.message).toContain("failFast must be a boolean");
+		expect(error.message).toContain("neverTouch must be an array of strings");
+	});
+
+	it("rejects out-of-range numbers", async () => {
+		const dir = projectWith(
+			"export default { budget: -1, phases: { exec: { retries: -2 }, plan: { workers: 0 } } };",
 		);
-
-		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error.message).toContain("budget must be >= 0");
+		expect(error.message).toContain("phases.exec.retries");
+		expect(error.message).toContain("phases.plan.workers");
 	});
 
-	it("throws ConfigError for negative budget", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(
-			configPath,
-			`export default { cost: { inputPerMillion: 5, outputPerMillion: 25, budget: -5 } };`,
-		);
-
-		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
-	});
-
-	it("throws ConfigError for negative retries", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(
-			configPath,
-			`export default { phases: { validate: { workers: 5, retries: -1 } } };`,
-		);
-
-		expect(loadConfig(tempDir)).rejects.toThrow(ConfigError);
-	});
-
-	it("warns on unknown top-level key", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { engine: "claude", unknownKey: true };`);
-
-		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const config = await loadConfig(tempDir);
-			expect(config.engine).toBe("claude");
-			expect(warnSpy).toHaveBeenCalled();
-			const msgs = warnSpy.mock.calls.map((c) => c[0] as string);
-			expect(msgs.some((m) => m.includes("unknownKey"))).toBe(true);
-		} finally {
-			warnSpy.mockRestore();
+	it("requires the pipeline to list known phases once, in order", async () => {
+		for (const pipeline of [`["exec", "scan"]`, `["scan", "verify"]`, `["scan", "scan"]`]) {
+			const dir = projectWith(`export default { pipeline: ${pipeline} };`);
+			await expect(loadConfig(dir)).rejects.toThrow(/pipeline must list phases/);
 		}
+		const ok = projectWith(`export default { pipeline: ["scan", "validate", "plan"] };`);
+		expect((await loadConfig(ok)).pipeline).toEqual(["scan", "validate", "plan"]);
 	});
 
-	it("accepts valid config with engine 'gemini'", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { engine: "gemini" };`);
-
-		const config = await loadConfig(tempDir);
-		expect(config.engine).toBe("gemini");
+	it("rejects a config that does not export an object", async () => {
+		const dir = projectWith("export default 42;");
+		await expect(loadConfig(dir)).rejects.toThrow(/must export a config object/);
 	});
 
-	it("accepts empty pipeline array", async () => {
-		const configPath = join(tempDir, ".milhouse", "config.ts");
-		writeFileSync(configPath, `export default { pipeline: [] };`);
-
-		const config = await loadConfig(tempDir);
-		expect(config.pipeline).toEqual([]);
+	it("accepts the template written by --init", async () => {
+		const dir = projectWith(CONFIG_TEMPLATE);
+		expect(await loadConfig(dir)).toEqual(DEFAULTS);
 	});
+});
 
-	it("returns defaults when no config file exists", async () => {
-		const emptyDir = join(tmpdir(), `milhouse-noconfig-${Date.now()}`);
-		mkdirSync(emptyDir, { recursive: true });
-
-		try {
-			const config = await loadConfig(emptyDir);
-			expect(config.engine).toBe("claude");
-			expect(config.model).toBe("sonnet");
-		} finally {
-			rmSync(emptyDir, { recursive: true, force: true });
-		}
+describe("deepMerge", () => {
+	it("does not mutate its inputs and replaces arrays", () => {
+		const base = { a: { b: 1, c: [1] }, d: 1 };
+		const merged = deepMerge(base, { a: { c: [2, 3] } }, { d: undefined });
+		expect(merged).toEqual({ a: { b: 1, c: [2, 3] }, d: 1 });
+		expect(base).toEqual({ a: { b: 1, c: [1] }, d: 1 });
 	});
 });

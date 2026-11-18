@@ -1,230 +1,135 @@
-/**
- * Runner — execute one phase: load items → parallel AI calls → parse → save.
- * Handles retry, concurrency, worktrees (for exec), and cost tracking.
- * Shows live spinner/progress during AI calls.
- */
+/** Runs one phase: load the items, process them (in parallel where configured) with retries, record each result. */
 
-import pLimit from "p-limit";
-import { addTokens } from "./cost.ts";
-import { execute } from "./engine.ts";
-import {
-	cleanupDeferredWorktrees,
-	cleanupWorktree,
-	createWorktree,
-	mergeCompletedBranches,
-} from "./git.ts";
-import { hasCrossIssueDeps } from "./phases/exec.ts";
+import type { CostTracker } from "./cost.ts";
+import { EngineError, runAgent } from "./engine.ts";
 import type { RunStore } from "./state.ts";
-import type { Config, IssueGroup, PhaseConfig, PhaseResult, RunCost } from "./types.ts";
-import { ParallelSpinner, Spinner, log, theme } from "./ui.ts";
+import type { AgentStep, Config, Phase } from "./types.ts";
+import { Progress, log } from "./ui.ts";
+import { errorMessage, mapPool, sleep } from "./util.ts";
 
-/**
- * Run a single phase with parallel execution, retry, and live progress.
- */
-export async function runPhase<TItem, TResult>(
-	phase: PhaseConfig<TItem, TResult>,
-	store: RunStore,
-	config: Config,
-	runCost: RunCost,
-): Promise<PhaseResult<TResult>[]> {
-	const startTime = Date.now();
-	const phaseOpts = config.phases[phase.name];
-	let workers = Math.max(1, phaseOpts?.workers ?? 1);
-	const maxRetries = Math.max(0, phaseOpts?.retries ?? 2);
-	const model = phaseOpts?.model ?? config.model;
+export type Outcome<T> =
+	| { ok: true; value: T }
+	/** `skipped`: never attempted (the budget was used up), so there is nothing to record. */
+	| { ok: false; error: string; skipped?: boolean };
 
-	// 1. Load items
-	const isExec = phase.name === "exec";
-	const items = await phase.loadItems(store, config);
-	if (items.length === 0) {
-		log.warn(`[${phase.name}] No items to process`);
-		return [];
-	}
-
-	if (isExec && workers > 1 && hasCrossIssueDeps(items as unknown as IssueGroup[])) {
-		log.warn("[exec] Cross-issue dependencies detected — serializing to enforce ordering.");
-		workers = 1;
-	}
-
-	log.info(`[${phase.name}] ${items.length} item(s), ${workers} worker(s)`);
-
-	// 2. Execute with live UI
-	const limit = pLimit(workers);
-	const isSingle = items.length === 1;
-
-	// Choose spinner type based on item count
-	const spinner = isSingle ? new Spinner(`${phase.name} -- processing...`) : null;
-	const parallel = !isSingle
-		? new ParallelSpinner(Math.min(workers, items.length), items.length, phase.name)
-		: null;
-
-	// Start the spinner
-	if (spinner) spinner.start();
-	if (parallel) parallel.start();
-
-	const failedCleanups: string[] = [];
-
-	const results = await Promise.all(
-		items.map((item, idx) =>
-			limit(async (): Promise<PhaseResult<TResult>> => {
-				const itemId = getItemId(item, idx);
-				const slot = parallel?.acquireSlot(itemId);
-
-				// For exec phase: create worktree
-				let workDir = store.workDir;
-				if (isExec) {
-					try {
-						if (parallel && slot != null) parallel.updateSlot(slot, "worktree");
-						if (spinner) spinner.update(`${phase.name} -- creating worktree...`);
-						workDir = await createWorktree(item as unknown as IssueGroup, store.workDir);
-					} catch (err) {
-						if (parallel && slot != null) parallel.releaseSlot(slot);
-						return {
-							item,
-							result: undefined as unknown as TResult,
-							success: false,
-							error: `Worktree failed: ${err instanceof Error ? err.message : String(err)}`,
-							tokens: { response: "", inputTokens: 0, outputTokens: 0 },
-						};
-					}
-				}
-
-				// Retry loop
-				let lastError = "";
-				let lastProc: { kill(): void; readonly exited: Promise<number> } | undefined;
-				for (let attempt = 0; attempt <= maxRetries; attempt++) {
-					try {
-						if (parallel && slot != null) {
-							parallel.updateSlot(slot, attempt > 0 ? `retry ${attempt}` : "running");
-						}
-						if (spinner) {
-							spinner.update(
-								attempt > 0
-									? `${phase.name} -- retry ${attempt}/${maxRetries}...`
-									: `${phase.name} -- running AI...`,
-							);
-						}
-
-						const prompt = phase.buildPrompt(item, store, config);
-						const { result: aiResult, proc } = await execute(prompt, workDir, config, {
-							model,
-							jsonSchema: phase.schema,
-							maxTurns: phase.maxTurns,
-							timeout: phase.timeout,
-						});
-						lastProc = proc;
-
-						// Track cost
-						addTokens(runCost, aiResult.inputTokens, aiResult.outputTokens, config, phase.name);
-						store.saveCost(runCost);
-
-						if (parallel && slot != null) parallel.updateSlot(slot, "parsing");
-						if (spinner) spinner.update(`${phase.name} -- parsing response...`);
-
-						const parsed = phase.parseResponse(aiResult.response, item);
-
-						// Kill subprocess and cleanup worktree on success
-						if (isExec) {
-							try {
-								proc.kill();
-							} catch {}
-							await proc.exited.catch(() => {});
-							if (parallel && slot != null) parallel.updateSlot(slot, "cleanup");
-							const cleaned = await cleanupWorktree(workDir, store.workDir);
-							if (!cleaned) {
-								failedCleanups.push(workDir);
-							}
-						}
-
-						if (parallel && slot != null) parallel.releaseSlot(slot);
-
-						return {
-							item,
-							result: parsed,
-							success: true,
-							tokens: aiResult,
-						};
-					} catch (err) {
-						lastError = err instanceof Error ? err.message : String(err);
-						log.debug(`[${phase.name}] Full error: ${lastError}`);
-						const warnMsg = `${theme.warning("!")} [${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`;
-						if (spinner) spinner.writeLine(warnMsg);
-						else if (parallel) parallel.writeLine(warnMsg);
-						else
-							log.warn(
-								`[${phase.name}] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${lastError.slice(0, 200)}`,
-							);
-						if (attempt < maxRetries) {
-							await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
-						}
-					}
-				}
-
-				// All retries failed — kill subprocess and cleanup worktree
-				if (isExec) {
-					if (lastProc) {
-						try {
-							lastProc.kill();
-						} catch {}
-						await lastProc.exited.catch(() => {});
-					}
-					const cleaned = await cleanupWorktree(workDir, store.workDir);
-					if (!cleaned) {
-						failedCleanups.push(workDir);
-					}
-				}
-
-				if (parallel && slot != null) parallel.releaseSlot(slot);
-
-				return {
-					item,
-					result: undefined as unknown as TResult,
-					success: false,
-					error: lastError,
-					tokens: { response: "", inputTokens: 0, outputTokens: 0 },
-				};
-			}),
-		),
-	);
-
-	// 3. Stop spinner with result
-	const succeeded = results.filter((r) => r.success).length;
-	const duration = Date.now() - startTime;
-
-	if (spinner) {
-		if (succeeded > 0) spinner.success(`${phase.name} complete (${succeeded}/${results.length})`);
-		else spinner.fail(`${phase.name} failed`);
-	}
-	if (parallel) {
-		if (succeeded > 0) parallel.success(`${phase.name} complete`);
-		else parallel.fail(`${phase.name} failed`);
-	}
-
-	// 4. For exec: merge completed branches, then retry deferred cleanups
-	if (isExec) {
-		await mergeCompletedBranches(results, store.workDir);
-		await cleanupDeferredWorktrees(failedCleanups, store.workDir);
-	}
-
-	// 5. Save results
-	await phase.saveResults(results, store);
-
-	// 6. Summary line
-	log.summary(succeeded, results.length, runCost.totalCost, duration);
-
-	return results;
+export interface AskOptions {
+	/** Step to charge and whose model to use. Defaults to the running phase. */
+	step?: AgentStep;
+	cwd?: string;
+	schema?: object;
+	maxTurns?: number;
+	timeoutMs?: number;
+	/** Default "read". */
+	tools?: "read" | "all";
 }
 
-/** Extract a short identifier from an item for spinner display */
-function getItemId(item: unknown, index: number): string {
-	if (typeof item === "object" && item !== null) {
-		const obj = item as Record<string, unknown>;
-		// Issue
-		if (typeof obj.id === "string") return obj.id;
-		// IssueGroup
-		if (typeof obj.issueId === "string") return obj.issueId;
-		// ScanInput
-		if (typeof obj.scope === "string") return `scope-${index}`;
+export interface Ctx {
+	store: RunStore;
+	config: Config;
+	/** 0 for the first attempt. */
+	attempt: number;
+	/** Error of the previous attempt. Phases feed it back to the agent. */
+	lastError?: string;
+	ask(prompt: string, options?: AskOptions): Promise<string>;
+}
+
+export interface PhaseDef<TItem, TValue> {
+	name: Exclude<Phase, "merge">;
+	loadItems(store: RunStore, config: Config): TItem[] | Promise<TItem[]>;
+	label(item: TItem): string;
+	/** Do the work for one item. Throw to fail the attempt; the runner retries with the error as feedback. */
+	run(item: TItem, ctx: Ctx): Promise<TValue>;
+	/** Persist the final result of one item. Called as soon as the item is done. */
+	record(item: TItem, outcome: Outcome<TValue>, store: RunStore): void | Promise<void>;
+}
+
+/** Throw to fail an item without further attempts (retrying cannot help). */
+export class GiveUp extends Error {}
+
+/** Throw to leave an item untouched for now: nothing is recorded, --resume picks it up again. */
+export class Skip extends Error {}
+
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const retryDelayMs = (): number => Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 2000);
+const firstLine = (text: string): string => text.split("\n")[0].slice(0, 160);
+
+export async function runPhase<TItem, TValue>(
+	def: PhaseDef<TItem, TValue>,
+	store: RunStore,
+	config: Config,
+	cost: CostTracker,
+): Promise<Outcome<TValue>[]> {
+	const items = await def.loadItems(store, config);
+	if (items.length === 0) {
+		log.info(`${def.name}: nothing to do`);
+		return [];
 	}
-	return `item-${index}`;
+	const options = config.phases[def.name];
+	const workers = options.workers ?? 1;
+	const progress = new Progress(def.name, items.length);
+
+	/** Calls the agent for the running phase. Parallel workers share what is left of the budget. */
+	const ask = async (prompt: string, o: AskOptions = {}): Promise<string> => {
+		const step = o.step ?? def.name;
+		const allowance = cost.reserve(workers);
+		try {
+			if (allowance !== undefined && allowance <= 0) {
+				throw new EngineError("the budget is used up", 0, true);
+			}
+			const result = await runAgent(prompt, {
+				cwd: o.cwd ?? store.workDir,
+				model: config.phases[step].model || config.model,
+				schema: o.schema,
+				maxTurns: o.maxTurns,
+				timeoutMs: o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+				tools: o.tools ?? "read",
+				maxBudgetUsd: allowance,
+			});
+			cost.add(step, result.costUsd);
+			log.debug(`${step}: agent call cost $${result.costUsd.toFixed(4)}`);
+			return result.text;
+		} catch (err) {
+			if (err instanceof EngineError) cost.add(step, err.costUsd);
+			throw err;
+		} finally {
+			cost.release(allowance);
+		}
+	};
+
+	const attempts = async (item: TItem, label: string): Promise<Outcome<TValue>> => {
+		let lastError: string | undefined;
+		for (let attempt = 0; attempt <= options.retries; attempt++) {
+			if (cost.exceeded()) {
+				const error = lastError
+					? `${lastError}\n(stopped: the budget is used up)`
+					: "budget exhausted";
+				return { ok: false, error, skipped: attempt === 0 };
+			}
+			try {
+				return { ok: true, value: await def.run(item, { store, config, attempt, lastError, ask }) };
+			} catch (err) {
+				if (err instanceof Skip) return { ok: false, error: err.message, skipped: true };
+				lastError = errorMessage(err);
+				progress.note(
+					`${label}: attempt ${attempt + 1}/${options.retries + 1} failed: ${firstLine(lastError)}`,
+				);
+				if (err instanceof GiveUp || (err instanceof EngineError && err.fatal)) break;
+				if (err instanceof EngineError && attempt < options.retries) {
+					await sleep(retryDelayMs() * (attempt + 1));
+				}
+			}
+		}
+		return { ok: false, error: lastError ?? "failed" };
+	};
+
+	const outcomes = await mapPool(items, workers, async (item) => {
+		const label = def.label(item);
+		progress.begin(label);
+		const outcome = await attempts(item, label);
+		if (outcome.ok || !outcome.skipped) await def.record(item, outcome, store);
+		progress.end(label, outcome.ok, outcome.ok ? "" : firstLine(outcome.error));
+		return outcome;
+	});
+	progress.stop();
+	return outcomes;
 }

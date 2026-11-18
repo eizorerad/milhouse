@@ -1,275 +1,135 @@
-/**
- * Engine — spawn AI CLI tool, parse output. No middleware. No adapters.
- *
- * One function: execute(prompt, workDir, config, opts)
- */
+/** The agent: one `claude -p` process per call. The CLI reports its own cost in USD. */
 
-import type { Config, EngineResult, ExecuteResult } from "./types.ts";
+import { run } from "./proc.ts";
+import { extractJson, tail } from "./util.ts";
 
-// Inline debug log to avoid circular dependency
-const debugLog = (msg: string) => {
-	if (process.env.VERBOSE === "1") console.log(`… ${msg}`);
-};
-
-/** Max prompt length for CLI arg (avoid OS limits on Windows) */
-const MAX_ARG_PROMPT = 12_000;
-
-interface ExecuteOpts {
+export interface AgentOptions {
+	cwd: string;
 	model?: string;
-	jsonSchema?: Record<string, unknown>;
+	/** JSON schema for the answer (structured output). */
+	schema?: object;
 	maxTurns?: number;
-	/** Timeout in milliseconds. Default: 10 minutes. */
-	timeout?: number;
+	timeoutMs: number;
+	/** "read": Read/Grep/Glob only. "all": every built-in tool with permissions bypassed (exec only). */
+	tools: "read" | "all";
+	/** Cap for this single call in USD. The CLI stops after the turn that crosses it. */
+	maxBudgetUsd?: number;
 }
 
-interface EngineSpec {
-	command: string;
-	buildArgs(prompt: string, opts?: ExecuteOpts): string[];
-	parseOutput(raw: string): EngineResult;
-	usesStdin(prompt: string): boolean;
+export interface AgentResult {
+	text: string;
+	costUsd: number;
 }
 
-/**
- * Parse Claude stream-json format to extract response and tokens.
- *
- * When --json-schema is used, Claude puts the validated JSON in the
- * `structured_output` field of the result message. The `result` field
- * contains narrative text. We prefer structured_output.
- */
-function parseClaudeStreamJson(raw: string): EngineResult {
-	let response = "";
-	let structuredOutput = "";
-	let inputTokens = 0;
-	let outputTokens = 0;
-
-	for (const line of raw.split("\n")) {
-		const trimmed = line.trim();
-		if (!trimmed) continue;
-		try {
-			const obj = JSON.parse(trimmed);
-
-			// Collect text from assistant messages
-			if (obj.type === "assistant" && obj.message?.content) {
-				for (const block of obj.message.content) {
-					if (block.type === "text") response += block.text;
-				}
-			}
-
-			// Collect text from content_block_delta
-			if (obj.type === "content_block_delta" && obj.delta?.text) {
-				response += obj.delta.text;
-			}
-
-			// Result message
-			if (obj.type === "result") {
-				// Prefer structured_output (from --json-schema)
-				if (obj.structured_output !== undefined && obj.structured_output !== null) {
-					structuredOutput =
-						typeof obj.structured_output === "string"
-							? obj.structured_output
-							: JSON.stringify(obj.structured_output);
-				}
-
-				// Also capture result text as fallback
-				if (obj.result) {
-					response = typeof obj.result === "string" ? obj.result : JSON.stringify(obj.result);
-				}
-			}
-
-			// Token usage
-			if (obj.type === "result" && obj.usage) {
-				inputTokens = obj.usage.input_tokens ?? 0;
-				outputTokens = obj.usage.output_tokens ?? 0;
-			}
-			if (obj.usage) {
-				inputTokens = Math.max(inputTokens, obj.usage.input_tokens ?? 0);
-				outputTokens = Math.max(outputTokens, obj.usage.output_tokens ?? 0);
-			}
-		} catch {
-			// Not JSON, might be plain text output
-			if (!response && trimmed.length > 0) {
-				response += trimmed + "\n";
-			}
-		}
+export class EngineError extends Error {
+	constructor(
+		message: string,
+		/** What the failed call cost. It is real money even though the call failed. */
+		readonly costUsd = 0,
+		/** Retrying cannot help (the per-call budget is used up). */
+		readonly fatal = false,
+	) {
+		super(message);
+		this.name = "EngineError";
 	}
-
-	// Prefer structured output (from --json-schema) over narrative text
-	const finalResponse = structuredOutput || response;
-
-	return { response: finalResponse.trim(), inputTokens, outputTokens };
 }
 
-/**
- * Simple text-based output parser (unused engines fallback).
- */
-function parseTextOutput(raw: string): EngineResult {
-	return { response: raw.trim(), inputTokens: 0, outputTokens: 0 };
+/** What a call that timed out is counted as: it cannot report its own cost. */
+const UNKNOWN_COST_USD = 1;
+
+export const claudeBinary = (): string => process.env.MILHOUSE_CLAUDE || "claude";
+
+export function buildArgs(
+	opts: Pick<AgentOptions, "model" | "schema" | "maxTurns" | "tools" | "maxBudgetUsd">,
+): string[] {
+	// --setting-sources user: the repository's own .claude/settings.json (hooks, env, API base URL) is
+	// never loaded. -p skips the trust prompt, so a repository could otherwise run code in read-only phases.
+	const args = [
+		"-p",
+		"--output-format",
+		"json",
+		"--setting-sources",
+		"user",
+		"--strict-mcp-config",
+		"--no-session-persistence",
+	];
+	if (opts.model) args.push("--model", opts.model);
+	if (opts.schema) args.push("--json-schema", JSON.stringify(opts.schema));
+	if (opts.maxTurns) args.push("--max-turns", String(opts.maxTurns));
+	if (opts.maxBudgetUsd !== undefined) args.push("--max-budget-usd", opts.maxBudgetUsd.toFixed(4));
+	// --strict-mcp-config above: the user's MCP servers (mail, payments, ...) never reach an agent.
+	args.push(
+		...(opts.tools === "read" ? ["--tools", "Read,Grep,Glob"] : ["--dangerously-skip-permissions"]),
+	);
+	return args;
 }
 
-/**
- * Parse Gemini CLI output for token usage metadata.
- * Gemini CLI may output lines like: prompt_token_count: 123, candidates_token_count: 456
- * Falls back to character-based estimation (chars/4) if not found.
- */
-export function parseGeminiOutput(raw: string): EngineResult {
-	const response = raw.trim();
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let foundUsage = false;
+/** Agent commits must never wait for a signing prompt or a credential question. */
+const agentEnv = (): NodeJS.ProcessEnv => ({
+	...process.env,
+	CI: "true",
+	NO_COLOR: "1",
+	GIT_TERMINAL_PROMPT: "0",
+	GIT_CONFIG_COUNT: "1",
+	GIT_CONFIG_KEY_0: "commit.gpgsign",
+	GIT_CONFIG_VALUE_0: "false",
+});
 
-	for (const line of raw.split("\n")) {
-		const promptMatch = line.match(/prompt_token_count\s*[:=]\s*(\d+)/);
-		if (promptMatch) {
-			inputTokens = Number.parseInt(promptMatch[1], 10);
-			foundUsage = true;
-		}
-		const candidatesMatch = line.match(/candidates_token_count\s*[:=]\s*(\d+)/);
-		if (candidatesMatch) {
-			outputTokens = Number.parseInt(candidatesMatch[1], 10);
-			foundUsage = true;
-		}
-	}
-
-	if (!foundUsage && response.length > 0) {
-		outputTokens = Math.ceil(response.length / 4);
-		debugLog("[engine] Gemini token usage not found in output, using character-based estimation");
-	}
-
-	return { response, inputTokens, outputTokens };
-}
-
-/**
- * Estimate token usage from Aider text output.
- * Aider does not report tokens — uses character-length heuristic.
- */
-export function parseAiderOutput(raw: string): EngineResult {
-	const response = raw.trim();
-	const outputTokens = response.length > 0 ? Math.ceil(response.length / 4) : 0;
-	debugLog("[engine] Aider token counts are estimated from response length");
-	return { response, inputTokens: 0, outputTokens };
-}
-
-const engines: Record<string, EngineSpec> = {
-	claude: {
-		command: "claude",
-		usesStdin: (prompt) => prompt.length > MAX_ARG_PROMPT,
-		buildArgs(prompt, opts) {
-			const args = [
-				"--output-format",
-				"stream-json",
-				"--verbose",
-				"--dangerously-skip-permissions",
-			];
-			if (opts?.model) args.push("--model", opts.model);
-			if (opts?.jsonSchema) args.push("--json-schema", JSON.stringify(opts.jsonSchema));
-			if (opts?.maxTurns) args.push("--max-turns", String(opts.maxTurns));
-
-			if (prompt.length <= MAX_ARG_PROMPT) {
-				args.push("-p", prompt);
-			} else {
-				args.push(
-					"-p",
-					"Process the instructions provided via standard input exactly as described.",
-				);
-			}
-			return args;
-		},
-		parseOutput: parseClaudeStreamJson,
-	},
-
-	gemini: {
-		command: "gemini",
-		usesStdin: () => false,
-		buildArgs(prompt, opts) {
-			const args: string[] = [];
-			if (opts?.model) args.push("--model", opts.model);
-			args.push(prompt);
-			return args;
-		},
-		parseOutput: parseGeminiOutput,
-	},
-
-	aider: {
-		command: "aider",
-		usesStdin: () => false,
-		buildArgs(prompt, opts) {
-			const args = ["--message", prompt, "--yes-always", "--no-git"];
-			if (opts?.model) args.push("--model", opts.model);
-			return args;
-		},
-		parseOutput: parseAiderOutput,
-	},
+type ResultEvent = {
+	subtype?: string;
+	is_error?: boolean;
+	result?: unknown;
+	structured_output?: unknown;
+	errors?: unknown;
+	total_cost_usd?: number;
 };
 
-/**
- * Execute a prompt against the configured AI engine.
- */
-export async function execute(
-	prompt: string,
-	workDir: string,
-	config: Config,
-	opts?: ExecuteOpts,
-): Promise<ExecuteResult> {
-	const spec = engines[config.engine];
-	if (!spec) {
-		throw new Error(
-			`Unknown engine: ${config.engine}. Available: ${Object.keys(engines).join(", ")}`,
+function parseResult(stdout: string): ResultEvent | null {
+	const json = extractJson(stdout);
+	if (!json) return null;
+	const parsed: unknown = JSON.parse(json);
+	const events = Array.isArray(parsed) ? parsed : [parsed];
+	const result = events.findLast((e) => e && typeof e === "object" && e.type === "result");
+	return (result as ResultEvent | undefined) ?? null;
+}
+
+export async function runAgent(prompt: string, opts: AgentOptions): Promise<AgentResult> {
+	const out = await run(claudeBinary(), buildArgs(opts), {
+		cwd: opts.cwd,
+		env: agentEnv(),
+		input: prompt,
+		timeoutMs: opts.timeoutMs,
+	});
+
+	if (out.timedOut) {
+		// The real cost is unknown. Count an estimate: nothing would hide the money, the whole allowance
+		// (all that is left, for a sequential step) would stop the run for a call that may have cost little.
+		throw new EngineError(
+			`agent timed out after ${Math.round(opts.timeoutMs / 1000)}s (its cost is unknown, counted as an estimate)`,
+			Math.min(opts.maxBudgetUsd ?? UNKNOWN_COST_USD, UNKNOWN_COST_USD),
 		);
 	}
-
-	const model = opts?.model ?? config.model;
-	const args = spec.buildArgs(prompt, { ...opts, model });
-	const pipeStdin = spec.usesStdin(prompt);
-
-	const timeout = opts?.timeout ?? 10 * 60 * 1000; // Default: 10 minutes
-
-	debugLog(
-		`[engine] ${spec.command} ${args.slice(0, 3).join(" ")}... (timeout: ${Math.round(timeout / 1000)}s)`,
-	);
-
-	const proc = Bun.spawn([spec.command, ...args], {
-		cwd: workDir,
-		env: { ...process.env, CI: "true", NO_COLOR: "1" },
-		stdin: pipeStdin ? "pipe" : "ignore",
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-
-	// Write prompt to stdin if needed
-	if (pipeStdin && proc.stdin) {
-		proc.stdin.write(prompt);
-		proc.stdin.end();
+	const result = parseResult(out.stdout);
+	if (!result) {
+		throw new EngineError(`claude exited with ${out.code} and no result. ${tail(out.stderr, 500)}`);
 	}
 
-	// Race: output vs timeout
-	let timerId: ReturnType<typeof setTimeout> | undefined;
-	const timeoutPromise = new Promise<never>((_, reject) => {
-		timerId = setTimeout(() => {
-			try {
-				proc.kill();
-			} catch {}
-			reject(new Error(`Engine ${spec.command} timed out after ${Math.round(timeout / 1000)}s`));
-		}, timeout);
-	});
-
-	const outputPromise = (async () => {
-		const [stdout, stderr] = await Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-		]);
-		const exitCode = await proc.exited;
-
-		if (exitCode !== 0) {
-			debugLog(`[engine] full stderr:\n${stderr}`);
-			throw new Error(`Engine ${spec.command} failed (exit ${exitCode}): ${stderr.slice(0, 500)}`);
-		}
-
-		return spec.parseOutput(stdout);
-	})();
-
-	const result = await Promise.race([outputPromise, timeoutPromise]).finally(() => {
-		if (timerId !== undefined) clearTimeout(timerId);
-	});
-
-	return { result, proc };
+	const costUsd = typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0;
+	if (result.is_error === true || out.code !== 0) {
+		const errors = Array.isArray(result.errors) ? result.errors.map(String) : [];
+		const detail =
+			[...errors, result.result].filter(Boolean).join("; ") ||
+			tail(out.stderr, 500) ||
+			String(result.subtype);
+		throw new EngineError(
+			`agent failed: ${detail}`,
+			costUsd,
+			result.subtype === "error_max_budget_usd",
+		);
+	}
+	const text =
+		result.structured_output !== undefined && result.structured_output !== null
+			? JSON.stringify(result.structured_output)
+			: String(result.result ?? "");
+	return { text, costUsd };
 }

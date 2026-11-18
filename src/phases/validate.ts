@@ -1,94 +1,106 @@
-/**
- * Validate phase — validate each issue with evidence.
- */
+/** validate: check each finding against the code. A verdict other than FALSE needs evidence that exists. */
 
-import { buildValidatePrompt, VALIDATE_SCHEMA } from "../prompts/validate.ts";
-import type { Issue, IssueStatus, PhaseConfig, PhaseResult } from "../types.ts";
-import { printIssueList } from "../ui.ts";
-import { extractJson } from "../util.ts";
+import { verifyEvidence } from "../gates.ts";
+import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
+import type { PhaseDef } from "../runner.ts";
+import type { Config, Evidence, Issue, IssueStatus } from "../types.ts";
+import { parseJson } from "../util.ts";
 
-interface ValidateResult {
-	issue_id: string;
-	status: IssueStatus;
-	confidence?: string;
-	summary?: string;
-	corrected_description?: string;
-	evidence?: Array<{ type: string; file?: string; line_start?: number; line_end?: number; output?: string }>;
+const MINUTE = 60_000;
+const VERDICTS = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] as const;
+
+export interface Verdict {
+	status: (typeof VERDICTS)[number];
+	corrected_description: string;
+	evidence: Evidence[];
 }
 
-export const validatePhase: PhaseConfig<Issue, ValidateResult> = {
+export const VALIDATE_SCHEMA = {
+	type: "object",
+	properties: {
+		status: { type: "string", enum: VERDICTS },
+		summary: { type: "string" },
+		corrected_description: { type: "string" },
+		evidence: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					file: { type: "string" },
+					line_start: { type: "number" },
+					line_end: { type: "number" },
+					snippet: { type: "string" },
+				},
+				required: ["file", "line_start", "line_end", "snippet"],
+				additionalProperties: false,
+			},
+		},
+	},
+	required: ["status", "summary", "corrected_description", "evidence"],
+	additionalProperties: false,
+} as const;
+
+export function validatePrompt(issue: Issue, config: Config, lastError?: string): string {
+	return prompt(
+		role(
+			"Issue Validator",
+			"You check one reported work item against the actual code. You can only read files.",
+		),
+		describeIssue(issue),
+		context(config),
+		section(
+			"Task",
+			[
+				"Look for evidence in the code and decide the status:",
+				"- CONFIRMED: real and actionable as described",
+				"- FALSE: not real, or not needed",
+				"- PARTIAL: real, but scope or severity differ (describe the correct scope in corrected_description)",
+				"- MISDIAGNOSED: the need is real, but the cause or the right approach differs (say so in corrected_description)",
+				"",
+				"Every status except FALSE needs at least one evidence entry: the file, the line range and a verbatim snippet copied from those lines.",
+				"Milhouse opens every cited file and checks the lines and the snippet, so cite only what you have read.",
+			].join("\n"),
+		),
+		feedback(lastError),
+	);
+}
+
+export const validatePhase: PhaseDef<Issue, Verdict> = {
 	name: "validate",
-	schema: VALIDATE_SCHEMA as Record<string, unknown>,
-	maxTurns: 15,
-	timeout: 5 * 60 * 1000, // 5 min per issue
 
-	loadItems(store) {
-		return store.loadIssues().filter((i: Issue) => i.status === "UNVALIDATED");
-	},
+	loadItems: (store) => store.loadIssues().filter((i) => i.status === "UNVALIDATED"),
 
-	buildPrompt(issue) {
-		return buildValidatePrompt(issue);
-	},
+	label: (issue) => issue.title.slice(0, 50),
 
-	parseResponse(response, item) {
-		// Try direct JSON.parse first (structured_output from --json-schema is clean JSON)
-		// biome-ignore lint: parsed needs any for JSON.parse compatibility
-		let parsed: any;
-		try {
-			parsed = JSON.parse(response);
-		} catch {
-			// Fallback: extract JSON from markdown/text response
-			const jsonStr = extractJson(response);
-			if (!jsonStr) return { issue_id: item.id, status: "UNVALIDATED" as IssueStatus, summary: "No JSON" };
-			parsed = JSON.parse(jsonStr);
+	async run(issue, ctx) {
+		const text = await ctx.ask(validatePrompt(issue, ctx.config, ctx.lastError), {
+			schema: VALIDATE_SCHEMA,
+			maxTurns: 30,
+			timeoutMs: 5 * MINUTE,
+		});
+		const verdict = parseJson<Verdict>(text, "Validate");
+		if (!VERDICTS.includes(verdict.status))
+			throw new Error(`Validate: unknown status "${verdict.status}"`);
+		if (verdict.status === "FALSE") return { ...verdict, evidence: [] };
+
+		const cited = Array.isArray(verdict.evidence) ? verdict.evidence : [];
+		if (!ctx.config.gates.evidence) return { ...verdict, evidence: cited };
+		const evidence = verifyEvidence(ctx.store.workDir, cited);
+		if (evidence.length === 0) {
+			throw new Error(
+				"Validate: none of the cited evidence holds up (file missing, lines out of range or snippet not found). Cite real files, line ranges and verbatim snippets.",
+			);
 		}
-		const validStatuses: IssueStatus[] = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"];
-		const status = validStatuses.includes(parsed.status) ? parsed.status : "UNVALIDATED";
+		return { ...verdict, evidence };
+	},
 
-		return {
-			issue_id: item.id,
+	record(issue, outcome, store) {
+		if (!outcome.ok) return; // stays UNVALIDATED and is retried on --resume
+		const status: IssueStatus = outcome.value.status;
+		store.updateIssue(issue.id, {
 			status,
-			confidence: parsed.confidence,
-			summary: parsed.summary,
-			corrected_description: parsed.corrected_description,
-			evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
-		};
-	},
-
-	saveResults(results, store) {
-		// Batch update: load all issues once, apply all changes, save once.
-		// This avoids the race condition where parallel updateIssue() calls
-		// overwrite each other (read-modify-write on the same file).
-		const allIssues: Issue[] = store.loadIssues();
-		const issueMap = new Map<string, Issue>(allIssues.map((i: Issue) => [i.id, i]));
-		let validated = 0;
-
-		for (const r of results) {
-			if (!r.success || r.result.status === "UNVALIDATED") continue;
-			const v = r.result;
-			const originalIssue = r.item as Issue;
-			const issue = issueMap.get(originalIssue.id);
-			if (!issue) continue;
-
-			const newEvidence = (v.evidence ?? []).map(e => ({
-				type: e.type as "file" | "log" | "command",
-				file: e.file,
-				line_start: e.line_start,
-				line_end: e.line_end,
-				output: e.output,
-			}));
-
-			issue.status = v.status;
-			issue.corrected_description = v.corrected_description;
-			issue.evidence = [...issue.evidence, ...newEvidence];
-			issue.updated_at = new Date().toISOString();
-			validated++;
-		}
-
-		// Single write with all updates
-		store.saveIssues(allIssues);
-		if (validated > 0) store.refreshStats();
-
-		printIssueList(allIssues);
+			corrected_description: outcome.value.corrected_description || undefined,
+			evidence: outcome.value.evidence,
+		});
 	},
 };

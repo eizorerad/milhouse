@@ -1,66 +1,44 @@
 {
 	"name": "milhouse-cli",
-	"version": "0.3.0",
-	"description": "Correctness-first AI coding orchestrator - Evidence-based diagnostics, WBS planning, and iterative execution",
+	"version": "0.4.0",
+	"description": "Correctness-first AI coding orchestrator: it investigates before it acts and verifies before it merges.",
 	"type": "module",
-	"packageManager": "pnpm@9.15.0",
-	"main": "./bin.js",
 	"bin": {
-		"milhouse": "./bin.js"
+		"milhouse": "src/index.ts"
 	},
 	"files": [
-		"dist",
 		"src",
-		"bin.js",
-		"README.md"
+		"README.md",
+		"LICENSE"
 	],
 	"scripts": {
 		"dev": "bun run src/index.ts",
-		"build": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile dist/milhouse-linux-x64 && bun build src/index.ts --compile --target=bun-darwin-arm64 --outfile dist/milhouse-darwin-arm64 && bun build src/index.ts --compile --target=bun-darwin-x64 --outfile dist/milhouse-darwin-x64 && bun build src/index.ts --compile --target=bun-windows-x64 --outfile dist/milhouse-windows-x64.exe",
-		"build:linux": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile dist/milhouse-linux-x64",
-		"build:mac-arm": "bun build src/index.ts --compile --target=bun-darwin-arm64 --outfile dist/milhouse-darwin-arm64",
-		"build:mac-x64": "bun build src/index.ts --compile --target=bun-darwin-x64 --outfile dist/milhouse-darwin-x64",
-		"build:windows": "bun build src/index.ts --compile --target=bun-windows-x64 --outfile dist/milhouse-windows-x64.exe",
+		"build": "bun build src/index.ts --compile --outfile dist/milhouse",
 		"test": "bun test",
-		"test:watch": "bun test --watch",
-		"test:coverage": "bun test --coverage",
-		"lint": "biome check .",
-		"lint:fix": "biome check --write .",
-		"format": "biome format --write .",
 		"typecheck": "tsc --noEmit",
-		"clean": "rm -rf dist node_modules .bun-build*",
-		"clean:state": "node scripts/clean-state.mjs",
-		"prepare": "echo 'Ready to build'",
-		"prepublishOnly": "bun run build",
-		"check:byte-identical": "node scripts/byte-identical-check.mjs",
-		"check:similarity": "node scripts/similarity-check.mjs",
-		"check:tokens": "node scripts/forbidden-tokens-check.mjs",
-		"check:independence": "npm run check:byte-identical && npm run check:similarity && npm run check:tokens",
-		"smoke-test": "node scripts/smoke-test.mjs",
-		"test:golden": "bun test tests/golden/",
-		"test:golden:update": "UPDATE_SNAPSHOTS=1 bun test tests/golden/",
-		"check:safety": "npm run test && npm run typecheck && npm run lint && npm run test:golden && npm run check:independence"
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"check": "bun run typecheck && bun run lint && bun test"
 	},
 	"keywords": [
 		"ai",
-		"coding",
-		"automation",
-		"claude",
-		"correctness",
-		"planner",
-		"executor",
-		"evidence-based",
-		"wbs",
+		"claude-code",
+		"coding-agent",
+		"orchestrator",
+		"verification",
 		"cli"
 	],
-	"author": "",
+	"author": "Leonid Klarov",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/milhouse/milhouse"
+		"url": "git+https://github.com/eizorerad/milhouse.git"
+	},
+	"homepage": "https://github.com/eizorerad/milhouse#readme",
+	"engines": {
+		"bun": ">=1.1.0"
 	},
 	"dependencies": {
-		"p-limit": "^7.2.0",
 		"picocolors": "^1.1.1"
 	},
 	"devDependencies": {
@@ -68,9 +46,5 @@
 		"@types/bun": "^1.1.0",
 		"bun-types": "^1.3.9",
 		"typescript": "^5.9.3"
-	},
-	"engines": {
-		"node": ">=18.0.0",
-		"pnpm": ">=9.0.0"
 	}
 }

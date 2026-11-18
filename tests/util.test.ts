@@ -1,98 +1,72 @@
-/**
- * Tests for utility functions.
- */
-
 import { describe, expect, it } from "bun:test";
-import { extractJson, generateId, now } from "../src/util.ts";
+import { extractJson, mapPool, parseJson, sleep, tail } from "../src/util.ts";
 
 describe("extractJson", () => {
-	it("extracts from ```json code block", () => {
-		const input = "Here's the result:\n\n```json\n{\"key\": \"value\"}\n```\n\nDone.";
-		expect(extractJson(input)).toBe('{"key": "value"}');
+	it("returns raw JSON as is", () => {
+		expect(extractJson('{"a":1}')).toBe('{"a":1}');
+		expect(extractJson("[1,2]")).toBe("[1,2]");
 	});
 
-	it("extracts from ``` code block", () => {
-		const input = "```\n[1, 2, 3]\n```";
-		expect(extractJson(input)).toBe("[1, 2, 3]");
+	it("finds JSON inside a fenced block with prose around it", () => {
+		const text = 'Here you go:\n```json\n{"items": [{"title": "x"}]}\n```\nDone.';
+		expect(JSON.parse(extractJson(text) as string)).toEqual({ items: [{ title: "x" }] });
 	});
 
-	it("extracts raw JSON object", () => {
-		expect(extractJson('{"a": 1}')).toBe('{"a": 1}');
+	it("is not fooled by brackets and backticks inside strings", () => {
+		const text = '{"code": "if (a[0]) { return `x`; } // ``` not a fence", "ok": true}';
+		expect(JSON.parse(extractJson(text) as string).ok).toBe(true);
 	});
 
-	it("extracts raw JSON array", () => {
-		expect(extractJson("[1, 2]")).toBe("[1, 2]");
+	it("skips a bracket in prose and finds the real JSON after it", () => {
+		const text = 'Use the {thing} like so: {"status": "CONFIRMED"}';
+		expect(extractJson(text)).toBe('{"status": "CONFIRMED"}');
 	});
 
-	it("handles nested JSON", () => {
-		const input = '{"a": {"b": [1, 2]}, "c": 3}';
-		expect(extractJson(input)).toBe(input);
+	it("handles escaped quotes", () => {
+		expect(JSON.parse(extractJson('{"a": "say \\"hi\\" }"}') as string).a).toBe('say "hi" }');
 	});
 
-	it("returns null for no JSON", () => {
-		expect(extractJson("No JSON here.")).toBeNull();
-	});
-
-	it("returns null for empty string", () => {
+	it("returns null when there is no JSON", () => {
+		expect(extractJson("no json here")).toBeNull();
+		expect(extractJson('{"broken": ')).toBeNull();
 		expect(extractJson("")).toBeNull();
 	});
+});
 
-	it("ignores non-JSON code blocks", () => {
-		const input = "```\nhello world\n```";
-		expect(extractJson(input)).toBeNull();
+describe("parseJson", () => {
+	it("parses and returns the value", () => {
+		expect(parseJson<{ a: number }>('x {"a": 1}', "Test").a).toBe(1);
 	});
 
-	it("handles square brackets inside string values", () => {
-		const input = '{"msg": "use arr[0]"}';
-		expect(extractJson(input)).toBe(input);
-	});
-
-	it("handles curly braces inside string values", () => {
-		const input = '{"msg": "obj{key}"}';
-		expect(extractJson(input)).toBe(input);
-	});
-
-	it("handles escaped quotes inside string values", () => {
-		const input = '{"msg": "say \\"hi\\""}';
-		expect(extractJson(input)).toBe(input);
-	});
-
-	it("handles array with string elements containing brackets", () => {
-		const input = '["arr[0]", "obj{x}"]';
-		expect(extractJson(input)).toBe(input);
-	});
-
-	it("handles top-level closing delimiters inside string values", () => {
-		const input = '{"msg": "}"}';
-		expect(extractJson(input)).toBe(input);
-	});
-
-	it("handles top-level closing delimiters inside array strings", () => {
-		const input = '["]"]';
-		expect(extractJson(input)).toBe(input);
+	it("throws a short, labelled error", () => {
+		expect(() => parseJson("nothing", "Scan")).toThrow(/Scan: no JSON/);
 	});
 });
 
-describe("generateId", () => {
-	it("generates with default prefix", () => {
-		const id = generateId();
-		expect(id).toMatch(/^P-[a-z0-9]+-[a-z0-9]+$/);
+describe("mapPool", () => {
+	it("keeps the input order and never exceeds the pool size", async () => {
+		let running = 0;
+		let peak = 0;
+		const results = await mapPool([30, 10, 20, 5, 1], 2, async (ms, index) => {
+			running++;
+			peak = Math.max(peak, running);
+			await sleep(ms);
+			running--;
+			return index;
+		});
+		expect(results).toEqual([0, 1, 2, 3, 4]);
+		expect(peak).toBe(2);
 	});
 
-	it("generates with custom prefix", () => {
-		const id = generateId("T");
-		expect(id.startsWith("T-")).toBe(true);
-	});
-
-	it("generates unique IDs", () => {
-		const ids = new Set(Array.from({ length: 100 }, () => generateId()));
-		expect(ids.size).toBe(100);
+	it("handles an empty list and a pool size below one", async () => {
+		expect(await mapPool([], 3, async (x) => x)).toEqual([]);
+		expect(await mapPool([1, 2], 0, async (x) => x * 2)).toEqual([2, 4]);
 	});
 });
 
-describe("now", () => {
-	it("returns ISO string", () => {
-		const ts = now();
-		expect(ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+describe("tail", () => {
+	it("keeps short text and cuts long text from the front", () => {
+		expect(tail("  short  ")).toBe("short");
+		expect(tail("abcdef", 3)).toBe("…def");
 	});
 });

@@ -1,309 +1,117 @@
 # Milhouse
 
-**Correctness-first AI coding orchestrator**
+Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code). It investigates before it acts and verifies before it merges: nothing reaches your branch until it is committed, passes your build/lint/test commands and is approved by a reviewer agent.
 
-Milhouse investigates before it acts and verifies after. Instead of throwing a prompt at an AI and hoping, it runs a structured pipeline: scan the codebase, validate findings with evidence, plan tasks, execute in isolated worktrees, and verify through quality gates.
+## Quick start
 
-## v0.3 — Rewrite from scratch
-
-v0.3 is a complete rewrite. Same pipeline concept, 95% less code.
-
-| | v0.2 | v0.3 |
-|---|---|---|
-| Lines of code | 68,000 | ~3,000 |
-| Files | 242 | 17 |
-| Dependencies | 17 | 2 |
-| Config systems | 4 | 1 |
-| Engine abstractions | 7 | 1 |
-
----
-
-## Quick Start
+Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` CLI, logged in.
 
 ```bash
-# Install from source
-git clone https://github.com/eizorerad/milhouse.git
-cd milhouse
-pnpm install
-pnpm link --global    # makes `milhouse` available everywhere
+git clone https://github.com/eizorerad/milhouse.git && cd milhouse
+bun install && bun link        # puts `milhouse` on your PATH
 
-# Initialize project
-cd your-project
-milhouse --init
-
-# Run full pipeline
+cd your-project                # a git repo, clean working tree, on the branch you want changed
+milhouse --init                # writes .milhouse/config.ts: set commands.test / lint / build
 milhouse "fix authentication bugs"
 ```
 
----
-
-## How It Works
+## How it works
 
 ```
-scan → validate → plan → consolidate → exec → verify
- LI       IV       PL       CDM         EX      TV
+scan → validate → plan → consolidate → exec → merge
 ```
 
-| Phase | Agent | What happens |
-|-------|-------|-------------|
-| **scan** | Lead Investigator | Analyzes codebase, identifies work items (bugs, features, refactors) |
-| **validate** | Issue Validator | Validates each finding with file:line evidence |
-| **plan** | Planner | Generates WBS — tasks with dependencies and acceptance criteria |
-| **consolidate** | Dependency Manager | Deduplicates tasks, resolves cross-issue dependencies, assigns parallel groups |
-| **exec** | Executor | Executes tasks in isolated git worktrees, one per issue |
-| **verify** | Truth Verifier | Runs quality gates, blocks unverified changes |
+| Phase | What happens |
+|---|---|
+| scan | A read-only agent lists work items (bugs, features, refactors) for your scope. |
+| validate | Each item is checked against the code. Milhouse opens every cited file and checks the lines and the snippet itself, so invented evidence is rejected. |
+| plan | Each real issue becomes a few small tasks with acceptance criteria. |
+| consolidate | Duplicate tasks are merged. Dependencies between issues decide the order. |
+| exec | Issues run **one at a time** in a git worktree, each on top of the ones accepted before it (see below). |
+| merge | Accepted work is fast-forwarded into the branch the run started on. |
 
----
+**exec, per issue:** the agent commits one commit per task (`[<task id>] <title>`) → Milhouse runs the gates → a reviewer agent checks the acceptance criteria against the diff → the issue is accepted. Any failure goes back to the agent as feedback for a repair round (`phases.exec.retries`). An issue that still fails is parked on `mh-failed/<issue-id>`, the worktree returns to the accepted state and the next issue carries on, so no issue builds on broken work and every issue is tested on top of all the accepted ones. An issue that depends on a failed one waits.
 
-## CLI
+| Gate (`gates.*`) | Blocks |
+|---|---|
+| `evidence` (validate) | issues whose cited file, lines or snippet do not exist |
+| `placeholder` | new `TODO` / `FIXME` / "not implemented" stubs |
+| `diffHygiene` | trailing whitespace and conflict markers in added lines |
+| `dod` | failing `commands.build` / `lint` / `test`; a reviewer that rejects the acceptance criteria |
+| always on | tasks without a commit, uncommitted leftovers, history that drops accepted commits, any commit touching a `neverTouch` path (renames and merges included) |
 
-```bash
-# Full pipeline
-milhouse "fix auth bugs"                    # Scope from positional args
-milhouse --run --scope "frontend perf"      # Explicit scope
+**merge** tests before it publishes: if your branch moved during the run, the merge commit is built and checked in the run's worktree, and only that tested commit is fast-forwarded into your branch. If the merge conflicts or the checks fail, your branch has not been touched and the work stays accepted, waiting. The run then continues from the merged state, so a later `--resume` builds on it.
 
-# Single phase
-milhouse --scan --scope "security"
-milhouse --validate
-milhouse --plan
-milhouse --exec --workers 5
+## Safety
 
-# Resume after failure
-milhouse --resume
-milhouse --resume --run-id run-20260304-xxx
-
-# Report
-milhouse --report                           # Terminal format
-milhouse --report --format md               # Markdown format
-milhouse --report --run-id run-20260304-xxx # Specific run
-
-# Options
-milhouse --engine gemini "fix bugs"         # Use Gemini CLI
-milhouse --model opus "fix bugs"            # Override model
-milhouse --workers 5 "fix bugs"             # Parallel exec workers
-milhouse -v --run                           # Verbose output
-```
-
----
+- Read-only phases and the reviewer get only `Read`, `Grep` and `Glob`. Your MCP servers (mail, payments, …) are never loaded, and the repository's own `.claude/settings.json` (hooks, env, API URL) is ignored; your user-level Claude settings apply.
+- **exec runs Claude with permissions bypassed**: the agent can run any command as you, inside the run's worktree. Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
+- Your branch changes only in `merge`, and only with accepted work. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
+- Cost comes from Claude's own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`.
+- Ctrl-C, SIGTERM and a closed terminal stop the agents too. After `kill -9` an agent may keep running: check `ps` before resuming.
+- One Milhouse per repository at a time (`.milhouse/lock`).
 
 ## Configuration
 
-`milhouse --init` creates `.milhouse/config.ts`:
+`milhouse --init` writes `.milhouse/config.ts` with every option and its default. The ones that matter:
 
-```typescript
-import type { Config } from "milhouse";
-
-const config: Config = {
-  // AI engine: "claude" | "gemini" | "aider"
-  engine: "claude",
-  model: "sonnet",
-
-  // Pipeline phases (remove to skip)
-  pipeline: ["scan", "validate", "plan", "consolidate", "exec", "verify"],
-
-  // Per-phase settings
-  phases: {
-    scan:        { workers: 1, retries: 2 },
-    validate:    { workers: 5, retries: 2 },
-    plan:        { workers: 5, retries: 3 },
-    consolidate: { workers: 1, retries: 2 },
-    exec:        { workers: 3, retries: 3 },
-    verify:      { workers: 5, retries: 1 },
-  },
-
-  // Project info
-  project: { name: "my-app", language: "typescript", framework: "express", description: "" },
-  commands: { test: "bun test", lint: "biome check", build: "bun run build" },
-
-  // Rules injected into every prompt
-  rules: [
-    "Never modify migration files",
-    "Always use parameterized SQL queries",
-  ],
-
-  // Files agents must never touch
-  boundaries: { neverTouch: ["migrations/**", ".env*"] },
-
-  // Quality gates
-  gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
-
-  // Cost budget ($0 = unlimited)
-  cost: { inputPerMillion: 5, outputPerMillion: 25, budget: 50 },
+```ts
+export default {
+  model: "sonnet",                       // per step: phases.<step>.model
+  budget: 50,                            // USD per run, 0 = unlimited
+  commands: { setup: "bun install", build: "", lint: "bunx biome check .", test: "bun test" },
+  neverTouch: ["migrations/**", ".env*"],
+  rules: ["Use parameterized SQL queries"],
+  pipeline: ["scan", "validate", "plan", "consolidate", "exec"], // no "merge": review the work yourself
+  failFast: false,                       // true: stop after the first phase with a failed item
 };
-
-export default config;
 ```
 
-CLI flags override config: `milhouse --workers 5 --model opus --run`.
+Unknown keys and wrong types are errors, so a typo cannot silently disable a rule. `commands.setup` runs once when the worktree is created; the other commands run on every issue. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
 
----
-
-## AI Engines
-
-Milhouse spawns CLI tools as child processes — no API keys in your config:
-
-| Engine | Command | Notes |
-|--------|---------|-------|
-| **Claude Code** (default) | `claude` | Stream JSON output, token tracking |
-| **Gemini CLI** | `gemini` | Text output |
-| **Aider** | `aider` | Text output, `--yes-always --no-git` |
-
-```bash
-milhouse --engine claude "fix bugs"     # Default
-milhouse --engine gemini "fix bugs"
-milhouse --engine aider "fix bugs"
-```
-
----
-
-## Quality Gates
-
-Every completed task passes through verification gates:
-
-| Gate | What it blocks |
-|------|----------------|
-| **Evidence** | Claims without commit or file:line proof |
-| **Diff Hygiene** | Silent refactors, whitespace changes, unrelated files |
-| **Placeholder** | `TODO`, `FIXME`, `mock`, stub code |
-| **DoD** | Unmet acceptance criteria |
-
-Disable any gate in config: `gates: { placeholder: false }`.
-
----
-
-## Parallel Execution
-
-Exec phase runs issues in parallel using git worktrees:
-
-```bash
-milhouse --exec --workers 5    # 5 issues in parallel
-```
-
-Each issue gets its own branch (`mh/<issue-id>`) and worktree. Branches merge automatically after completion. Failed merges are skipped with `--abort`.
-
----
-
-## Run State
-
-Each run creates a directory under `.milhouse/runs/`:
+## CLI
 
 ```
-.milhouse/
-├── config.ts                   # Your config
-├── runs-index.json             # All runs
-└── runs/
-    └── run-20260304-xxx/
-        ├── meta.json           # Phase, timing, stats
-        ├── state/
-        │   ├── issues.json     # Scanned + validated issues
-        │   ├── tasks.json      # Planned tasks with status
-        │   └── verification.json
-        └── plans/
-            └── P-xxx.md        # Per-issue execution plans
+milhouse "fix auth bugs"        run the whole pipeline; the text is the scope
+milhouse --run                  same, without a scope
+milhouse --resume               continue the latest run (--run-id <id> for another)
+milhouse --scan | --validate | --plan | --consolidate | --exec | --merge
+                                run one phase (all but --scan continue the latest run)
+milhouse --report [--format md] run summary: issues, tasks, failures, cost
+milhouse --list-runs            list runs
+milhouse --clean [--days 30]    delete finished runs
+milhouse --init                 create .milhouse/config.ts
+  --scope <text>  --workers <n>  --model <name>  --run-id <id>  -v  -V  -h
 ```
 
-Resume picks up from the last completed phase:
+Unknown flags are an error; with no arguments you get the help. It works from any subdirectory. The exit code is 0 only if everything that was asked for succeeded.
 
-```bash
-milhouse --resume              # Latest run
-milhouse --resume --run-id run-20260304-xxx
-```
+`--resume` skips finished phases and retries failed items, feeding the old failure back to the agent. A phase counts as finished only when everything before it did. A run continues only on the branch it started on. An issue that was interrupted mid-way starts again from the accepted state. If only the review failed (an outage, the budget), the finished work is kept on its parked branch and only the review is repeated, as long as no other issue was accepted in between.
 
----
-
-## Architecture
+## Run state
 
 ```
-src/
-├── index.ts          CLI entry point (parseArgs)
-├── config.ts         loadConfig + deepMerge + defaults
-├── pipeline.ts       Phase loop with budget gate
-├── runner.ts         Execute one phase: parallel AI calls + retry
-├── engine.ts         Spawn claude/gemini/aider + parse output
-├── state.ts          RunStore: all JSON read/write
-├── git.ts            Worktree create/cleanup/merge
-├── cost.ts           Token counting + budget
-├── report.ts         Run report generation
-├── types.ts          All types in one file
-├── ui.ts             Spinner + colored logger
-├── util.ts           JSON extraction + helpers
-├── prompts/
-│   ├── base.ts       PromptBuilder (shared patterns)
-│   ├── scan.ts       Lead Investigator prompt
-│   ├── validate.ts   Issue Validator prompt
-│   ├── plan.ts       Planner prompt
-│   ├── consolidate.ts Dependency Manager prompt
-│   ├── exec.ts       Executor prompt
-│   └── verify.ts     Truth Verifier prompt
-└── phases/
-    ├── scan.ts       loadItems → prompt → parse → save
-    ├── validate.ts
-    ├── plan.ts
-    ├── consolidate.ts
-    ├── exec.ts
-    └── verify.ts
+.milhouse/config.ts          your config (commit it)
+.milhouse/runs/<run-id>/     meta.json  issues.json  tasks.json  cost.json
+.milhouse/work/<run-id>/     the exec worktree
+refs/milhouse/<run-id>       accepted work; mh-failed/<issue-id> holds failed attempts
 ```
 
-Every phase implements the same interface:
+Everything under `.milhouse/` except `config.ts` is ignored by git (`.milhouse/.gitignore`). `--clean` keeps accepted work that was never merged.
 
-```typescript
-interface PhaseConfig<TItem, TResult> {
-  name: Phase;
-  schema?: Record<string, unknown>;
-  maxTurns?: number;
-  timeout?: number;
-  loadItems(store, config): TItem[];
-  buildPrompt(item, store, config): string;
-  parseResponse(response, item): TResult;
-  saveResults(results, store): void;
-}
-```
+## Upgrading from 0.3
 
----
-
-## Dependencies
-
-```json
-{
-  "dependencies": {
-    "p-limit": "^7.2.0",
-    "picocolors": "^1.1.1"
-  }
-}
-```
-
-Everything else is built-in: `util.parseArgs` for CLI, `Bun.spawn` for processes, `fs` for state.
-
----
+Config: `cost.budget` → `budget`, `boundaries.neverTouch` → `neverTouch`, `engine` and the token prices are gone (Claude Code only, real cost), `phases.<x>.workers` exists only for `validate` and `plan`, and `verify` is now the reviewer step inside `exec`, not a phase. exec is sequential on purpose; `--resolve`, `--exec-workers` and `--phase-workers` went with parallel branches.
 
 ## Development
 
 ```bash
-git clone https://github.com/eizorerad/milhouse.git
-cd milhouse
-pnpm install
-
-# Dev mode
-bun run src/index.ts "fix bugs"
-
-# Tests
-bun test
-
-# Build
-bun run build
-
-# Type check
-pnpm typecheck
+bun install
+bun run check        # typecheck + lint + tests
 ```
 
-Requires [Bun](https://bun.sh) ≥ 1.0.
-
----
+The tests drive the whole pipeline against real git repositories with a fake `claude` (`tests/fixtures/fake-claude.ts`). `MILHOUSE_CLAUDE` points Milhouse at another binary.
 
 ## License
 
 MIT
-
----
-
-**Stop guessing. Start verifying.**

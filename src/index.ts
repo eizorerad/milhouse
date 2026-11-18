@@ -1,279 +1,195 @@
 #!/usr/bin/env bun
-/**
- * Milhouse v0.3 — CLI entry point.
- *
- * Usage:
- *   milhouse "fix auth bugs"           # Full pipeline with scope
- *   milhouse --run                      # Full pipeline
- *   milhouse --scan --scope "bugs"      # Single phase
- *   milhouse --resume                   # Resume from last checkpoint
- *   milhouse --report                   # Show report for latest run
- *   milhouse --resolve                  # AI merge resolver for failed branches
- *   milhouse --init                     # Initialize project
- */
+/** Milhouse CLI entry point. */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { CONFIG_TEMPLATE, loadConfig } from "./config.ts";
+import pkg from "../package.json";
+import { CONFIG_TEMPLATE, ConfigError, DEFAULTS, loadConfig } from "./config.ts";
+import { repoRoot } from "./git.ts";
+import { cleanupRun } from "./phases/merge.ts";
 import { runPipeline } from "./pipeline.ts";
-import { formatReportMarkdown, formatReportTerminal, generateReport } from "./report.ts";
-import { runResolve } from "./resolve.ts";
-import { RunStore } from "./state.ts";
+import { formatReport, generateReport } from "./report.ts";
+import { RunStore, STATE_DIR, ensureIgnoreFile } from "./state.ts";
 import { PHASES, type Phase } from "./types.ts";
-import { log, setVerbose } from "./ui.ts";
+import { log, printBanner, setVerbose } from "./ui.ts";
+import { errorMessage } from "./util.ts";
 
-export interface WorkerFlags {
-	workers?: string;
-	execWorkers?: string;
-	phaseWorkers?: string;
-	engine?: string;
-	model?: string;
-}
-
-export function buildWorkerOverrides(flags: WorkerFlags): Record<string, unknown> {
-	const overrides: Record<string, unknown> = {};
-	if (flags.engine) overrides.engine = flags.engine;
-	if (flags.model) overrides.model = flags.model;
-
-	// --exec-workers (preferred) or --workers (deprecated alias)
-	if (flags.workers && !flags.execWorkers) {
-		log.warn("--workers is deprecated, use --exec-workers instead");
-	}
-	const effectiveExecWorkers = flags.execWorkers ?? flags.workers;
-	if (effectiveExecWorkers) {
-		const w = Number.parseInt(effectiveExecWorkers, 10);
-		if (!Number.isNaN(w)) overrides.phases = { exec: { workers: w } };
-	}
-
-	// --phase-workers validate=8,exec=2,...
-	if (flags.phaseWorkers) {
-		const phasesOverride = (overrides.phases ?? {}) as Record<string, Record<string, unknown>>;
-		for (const pair of flags.phaseWorkers.split(",")) {
-			const [name, countStr] = pair.split("=");
-			if (!PHASES.includes(name as Phase)) {
-				log.warn(`--phase-workers: unknown phase "${name}", skipping`);
-				continue;
-			}
-			const count = Number.parseInt(countStr, 10);
-			if (Number.isNaN(count)) {
-				log.warn(`--phase-workers: invalid count for "${name}", skipping`);
-				continue;
-			}
-			phasesOverride[name] = { ...phasesOverride[name], workers: count };
-		}
-		overrides.phases = phasesOverride;
-	}
-
-	return overrides;
-}
-
-async function main(): Promise<void> {
-	const { values: opts, positionals } = parseArgs({
-		args: process.argv.slice(2),
-		options: {
-			// Pipeline
-			run: { type: "boolean", default: false },
-			resume: { type: "boolean", default: false },
-			resolve: { type: "boolean", default: false },
-			init: { type: "boolean", default: false },
-			report: { type: "boolean", default: false },
-			"list-runs": { type: "boolean", default: false },
-			clean: { type: "boolean", default: false },
-			days: { type: "string" },
-			// Individual phases
-			scan: { type: "boolean", default: false },
-			validate: { type: "boolean", default: false },
-			plan: { type: "boolean", default: false },
-			consolidate: { type: "boolean", default: false },
-			exec: { type: "boolean", default: false },
-			verify: { type: "boolean", default: false },
-			// Options
-			scope: { type: "string" },
-			workers: { type: "string" },
-			"exec-workers": { type: "string" },
-			"phase-workers": { type: "string" },
-			model: { type: "string" },
-			engine: { type: "string" },
-			"run-id": { type: "string" },
-			format: { type: "string" }, // "md" | "terminal"
-			verbose: { type: "boolean", short: "v", default: false },
-			help: { type: "boolean", short: "h", default: false },
-		},
-		allowPositionals: true,
-		strict: false,
-	});
-
-	if (opts.verbose) setVerbose(true);
-
-	if (opts.help) {
-		printHelp();
-		return;
-	}
-
-	// --init
-	if (opts.init) {
-		await initProject();
-		return;
-	}
-
-	// --report
-	if (opts.report) {
-		await showReport(opts["run-id"] as string | undefined, opts.format as string | undefined);
-		return;
-	}
-
-	// --resolve
-	if (opts.resolve) {
-		const workDir = process.cwd();
-		const config = await loadConfig(workDir);
-		await runResolve(config);
-		return;
-	}
-
-	// --list-runs
-	if (opts["list-runs"]) {
-		const runs = RunStore.listRuns(process.cwd());
-		if (runs.length === 0) {
-			console.log("No runs found. Start with: milhouse --run");
-		} else {
-			const pad = (s: string, n: number) => s.padEnd(n);
-			console.log(
-				`${pad("ID", 30)} ${pad("Status", 12)} ${pad("Phase", 16)} ${pad("Scope", 20)} Created`,
-			);
-			console.log("-".repeat(100));
-			for (const run of runs) {
-				console.log(
-					`${pad(run.id, 30)} ${pad(run.status ?? "unknown", 12)} ${pad(run.phase, 16)} ${pad(run.scope ?? "-", 20)} ${run.created_at}`,
-				);
-			}
-		}
-		return;
-	}
-
-	// --clean
-	if (opts.clean) {
-		const days = typeof opts.days === "string" ? Number.parseInt(opts.days, 10) : 30;
-		const result = RunStore.cleanRuns(process.cwd(), days);
-		if (result.removed.length === 0) {
-			console.log("No runs to clean.");
-		} else {
-			console.log(`Removed ${result.removed.length} run(s):`);
-			for (const id of result.removed) console.log(`  - ${id}`);
-		}
-		console.log(`${result.kept} run(s) remaining.`);
-		return;
-	}
-
-	const workDir = process.cwd();
-	const scope = opts.scope ?? (positionals.join(" ") || undefined);
-
-	// Build CLI overrides
-	const overrides = buildWorkerOverrides({
-		workers: typeof opts.workers === "string" ? opts.workers : undefined,
-		execWorkers: typeof opts["exec-workers"] === "string" ? opts["exec-workers"] : undefined,
-		phaseWorkers: typeof opts["phase-workers"] === "string" ? opts["phase-workers"] : undefined,
-		engine: typeof opts.engine === "string" ? opts.engine : undefined,
-		model: typeof opts.model === "string" ? opts.model : undefined,
-	});
-
-	const config = await loadConfig(workDir, overrides);
-
-	// Single phase mode
-	const phaseFlags: Phase[] = ["scan", "validate", "plan", "consolidate", "exec", "verify"];
-	const selectedPhase = phaseFlags.find((p) => opts[p as keyof typeof opts]);
-	if (selectedPhase) {
-		config.pipeline = [selectedPhase];
-	}
-
-	await runPipeline(config, {
-		scope: typeof scope === "string" ? scope : undefined,
-		resume: opts.resume === true,
-		runId: typeof opts["run-id"] === "string" ? opts["run-id"] : undefined,
-	});
-}
-
-async function showReport(runId?: string, format?: string): Promise<void> {
-	const workDir = process.cwd();
-	if (runId && !RunStore.exists(workDir, runId)) {
-		log.error(`Run not found: ${runId}`);
-		return;
-	}
-
-	let store: RunStore | null;
-	try {
-		store = runId ? RunStore.byId(workDir, runId) : RunStore.latest(workDir);
-	} catch (err) {
-		log.error(err instanceof Error ? err.message : String(err));
-		return;
-	}
-
-	if (!store) {
-		log.error("No runs found. Start with: milhouse --run");
-		return;
-	}
-
-	const report = generateReport(store);
-
-	if (format === "md" || format === "markdown") {
-		console.log(formatReportMarkdown(report));
-	} else {
-		console.log(formatReportTerminal(report));
-	}
-}
-
-async function initProject(): Promise<void> {
-	const dir = join(process.cwd(), ".milhouse");
-	const configPath = join(dir, "config.ts");
-
-	if (existsSync(configPath)) {
-		log.warn(".milhouse/config.ts already exists");
-		return;
-	}
-
-	mkdirSync(dir, { recursive: true });
-	writeFileSync(configPath, CONFIG_TEMPLATE);
-	log.success("Created .milhouse/config.ts");
-}
-
-function printHelp(): void {
-	console.log(`
-milhouse v0.3 — Correctness-first AI coding orchestrator
+const HELP = `milhouse v${pkg.version} — correctness-first AI coding orchestrator (runs on Claude Code)
 
 Usage:
-  milhouse "fix auth bugs"              Full pipeline with scope
-  milhouse --run                        Full pipeline
-  milhouse --scan --scope "bugs"        Single phase
-  milhouse --resume                     Resume from checkpoint
-  milhouse --resolve                    AI merge resolver for failed branches
-  milhouse --report                     Show latest run report
-  milhouse --report --format md         Report as markdown
-  milhouse --list-runs                  List all runs with status
-  milhouse --clean                      Remove old completed/failed runs
-  milhouse --clean --days 7             Clean runs older than 7 days
-  milhouse --init                       Initialize project
-
-Pipeline:
-  scan → validate → plan → consolidate → exec → verify
+  milhouse "fix auth bugs"        Run the whole pipeline; the text is the scope
+  milhouse --run                  Run the whole pipeline
+  milhouse --resume               Continue the latest run (--run-id <id> for another one)
+  milhouse --scan|--validate|--plan|--consolidate|--exec|--merge
+                                  Run one phase (all but --scan continue the latest run)
+  milhouse --report [--format md] Show a run report
+  milhouse --list-runs            List runs
+  milhouse --clean [--days 30]    Delete finished runs older than N days
+  milhouse --init                 Create .milhouse/config.ts
 
 Options:
-  --scope <text>      Focus area for scan
-  --engine <name>     AI engine (claude, gemini, aider)
-  --model <name>      Model override
-  --exec-workers <n>  Parallel workers for exec phase
-  --phase-workers <p>=<n>[,...]
-                      Set workers per phase (e.g., validate=8,exec=2)
-  --run-id <id>       Specific run ID
-  --format <fmt>      Report format: terminal (default) | md
-  --days <n>          Max age in days for --clean (default: 30)
-  -v, --verbose       Verbose output
-  -h, --help          Show help
-`);
+  --scope <text>   What to look for (same as the positional text)
+  --workers <n>    Parallel agents for validate and plan
+  --model <name>   Claude model for every step
+  --run-id <id>    Pick the run for --resume, --report and single phases
+  -v, --verbose    Debug output
+  -V, --version    Print the version
+  -h, --help       Print this help
+
+Pipeline: scan -> validate -> plan -> consolidate -> exec -> merge
+exec implements one issue at a time in a worktree and accepts it only after the checks and the review pass.`;
+
+const flag = { type: "boolean", default: false } as const;
+
+const OPTIONS = {
+	run: flag,
+	resume: flag,
+	init: flag,
+	report: flag,
+	"list-runs": flag,
+	clean: flag,
+	scan: flag,
+	validate: flag,
+	plan: flag,
+	consolidate: flag,
+	exec: flag,
+	merge: flag,
+	days: { type: "string" },
+	scope: { type: "string" },
+	workers: { type: "string" },
+	model: { type: "string" },
+	"run-id": { type: "string" },
+	format: { type: "string" },
+	verbose: { type: "boolean", short: "v", default: false },
+	version: { type: "boolean", short: "V", default: false },
+	help: { type: "boolean", short: "h", default: false },
+} as const;
+
+class UsageError extends Error {}
+
+function positiveInt(value: string | undefined, name: string): number | undefined {
+	if (value === undefined) return undefined;
+	const n = Number(value);
+	if (!Number.isInteger(n) || n < 1) throw new UsageError(`${name} must be a positive integer`);
+	return n;
 }
 
-if (import.meta.main) {
-	main().catch((err) => {
-		log.error(err instanceof Error ? err.message : String(err));
-		process.exit(1);
-	});
+/** CLI flags as config overrides. --model beats the per-step models too; --workers only affects parallel steps. */
+function cliOverrides(
+	model: string | undefined,
+	workers: number | undefined,
+): Record<string, unknown> {
+	if (!model && !workers) return {};
+	const phases = Object.fromEntries(
+		Object.entries(DEFAULTS.phases).map(([step, options]) => [
+			step,
+			{
+				...(model && { model }),
+				...(workers && options.workers !== undefined && { workers }),
+			},
+		]),
+	);
+	return { ...(model && { model }), phases };
 }
+
+function initProject(workDir: string): void {
+	const configPath = join(workDir, STATE_DIR, "config.ts");
+	mkdirSync(join(workDir, STATE_DIR), { recursive: true });
+	ensureIgnoreFile(workDir);
+	if (existsSync(configPath)) {
+		log.warn(`${configPath} already exists`);
+		return;
+	}
+	writeFileSync(configPath, CONFIG_TEMPLATE);
+	log.success(
+		`Created ${STATE_DIR}/config.ts. Set commands.test/lint/build so exec can check its work.`,
+	);
+}
+
+function selectRun(workDir: string, runId?: string): RunStore {
+	const store = runId ? RunStore.byId(workDir, runId) : RunStore.latest(workDir);
+	if (!store) throw new UsageError("There are no runs yet. Start one with: milhouse --run");
+	return store;
+}
+
+async function main(argv: string[]): Promise<number> {
+	const { values, positionals } = parseArgs({
+		args: argv,
+		options: OPTIONS,
+		allowPositionals: true,
+		strict: true,
+	});
+	const workDir = await repoRoot(process.cwd()); // works from any subdirectory
+	setVerbose(values.verbose);
+
+	const phaseFlags = PHASES.filter((phase) => values[phase]);
+	if (phaseFlags.length > 1) throw new UsageError(`Pick one phase, got: ${phaseFlags.join(", ")}`);
+	const only: Phase | undefined = phaseFlags[0];
+	const scope = values.scope ?? (positionals.join(" ").trim() || undefined);
+	const runIntent = Boolean(values.run || values.resume || only || scope);
+
+	if (values.version) {
+		console.log(pkg.version);
+		return 0;
+	}
+	if (
+		values.help ||
+		!(runIntent || values.init || values.report || values["list-runs"] || values.clean)
+	) {
+		console.log(HELP);
+		return 0;
+	}
+
+	if (values.init) {
+		initProject(workDir);
+		return 0;
+	}
+
+	if (values["list-runs"]) {
+		const runs = RunStore.list(workDir);
+		if (runs.length === 0) console.log("No runs yet.");
+		for (const run of runs)
+			console.log(`${run.id}  ${run.status.padEnd(9)} ${run.phase.padEnd(12)} ${run.scope ?? "-"}`);
+		return 0;
+	}
+	if (values.report) {
+		const format = values.format === "md" ? "md" : "terminal";
+		console.log(formatReport(generateReport(selectRun(workDir, values["run-id"])), format));
+		return 0;
+	}
+	if (values.clean) {
+		const removed = RunStore.clean(workDir, positiveInt(values.days, "--days") ?? 30);
+		for (const id of removed) await cleanupRun(new RunStore(workDir, id)); // unmerged work is kept
+		console.log(
+			removed.length > 0
+				? `Removed ${removed.length} run(s):\n${removed.join("\n")}`
+				: "Nothing to clean.",
+		);
+		return 0;
+	}
+
+	const workers = positiveInt(values.workers, "--workers");
+	const config = await loadConfig(workDir, cliOverrides(values.model, workers));
+	printBanner(pkg.version);
+	const ok = await runPipeline(config, {
+		workDir,
+		scope,
+		only,
+		runId: values["run-id"],
+		resume: values.resume || values["run-id"] !== undefined,
+	});
+	return ok ? 0 : 1;
+}
+
+main(process.argv.slice(2)).then(
+	(code) => process.exit(code),
+	(err) => {
+		const usage =
+			err instanceof UsageError ||
+			(err as NodeJS.ErrnoException).code?.startsWith("ERR_PARSE_ARGS");
+		log.error(errorMessage(err));
+		if (usage) console.error('Run "milhouse --help" for usage.');
+		process.exit(err instanceof ConfigError || usage ? 2 : 1);
+	},
+);
