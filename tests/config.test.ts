@@ -1,19 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { CONFIG_TEMPLATE, ConfigError, DEFAULTS, deepMerge, loadConfig } from "../src/config.ts";
-import { cleanupTempDirs, tempDir } from "./helpers.ts";
+import { cleanupTempDirs, projectWith } from "./helpers.ts";
 
 afterEach(cleanupTempDirs);
-
-function projectWith(configSource?: string): string {
-	const dir = tempDir();
-	if (configSource !== undefined) {
-		mkdirSync(join(dir, ".milhouse"));
-		writeFileSync(join(dir, ".milhouse", "config.ts"), configSource);
-	}
-	return dir;
-}
 
 describe("loadConfig", () => {
 	it("returns the defaults without a config file", async () => {

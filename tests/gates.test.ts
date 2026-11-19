@@ -12,6 +12,7 @@ import {
 import {
 	cleanupTempDirs,
 	git,
+	goneWithin,
 	makeRepo,
 	readFile,
 	tempDir,
@@ -140,16 +141,7 @@ describe("runChecks and what a check leaves behind", () => {
 		const dir = tempDir();
 		expect(await runChecks(dir, { test: "sleep 30 & echo $! > watcher.pid" })).toBeNull();
 		const pid = Number(readFile(dir, "watcher.pid").trim());
-		let gone = false;
-		for (let waited = 0; waited < 2_000 && !gone; waited += 25) {
-			try {
-				process.kill(pid, 0);
-				await Bun.sleep(25);
-			} catch {
-				gone = true;
-			}
-		}
-		expect(gone).toBe(true);
+		expect(await goneWithin(pid, 2_000)).toBe(true);
 	});
 
 	it("does not pass on the caller's GIT_DIR to the checks", async () => {

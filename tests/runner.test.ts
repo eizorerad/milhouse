@@ -7,6 +7,7 @@ import { sleep } from "../src/util.ts";
 import {
 	BASE,
 	cleanupTempDirs,
+	flag,
 	resetFakeAgentEnv,
 	tempDir,
 	testConfig,
@@ -183,7 +184,7 @@ describe("runPhase and the agent", () => {
 		const { store, config, cost } = setup({ phases: { validate: { workers: 2 } } }, 10);
 		const def = phase((_n, ctx) => ctx.ask("## Role: Planner"), [1, 2]);
 		await runPhase(def, store, config, cost);
-		const caps = fake.journal().map((call) => call.args[call.args.indexOf("--max-budget-usd") + 1]);
+		const caps = fake.journal().map((call) => flag(call.args, "--max-budget-usd"));
 		expect(caps).toEqual(["5.0000", "5.0000"]);
 	});
 
@@ -211,7 +212,7 @@ describe("runPhase and the agent", () => {
 			return "ok";
 		});
 		await runPhase(def, store, config, cost);
-		const models = fake.journal().map((call) => call.args[call.args.indexOf("--model") + 1]);
+		const models = fake.journal().map((call) => flag(call.args, "--model"));
 		expect(models).toEqual(["sonnet", "opus"]);
 		expect(Object.keys(cost.current.byPhase).sort()).toEqual(["validate", "verify"]);
 	});

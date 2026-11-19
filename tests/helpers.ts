@@ -10,6 +10,7 @@ import { type PipelineOptions, runPipeline } from "../src/pipeline.ts";
 import { run } from "../src/proc.ts";
 import { RunStore } from "../src/state.ts";
 import type { Config, Issue, Task } from "../src/types.ts";
+import { sleep } from "../src/util.ts";
 
 export const FAKE_AGENT = resolve(import.meta.dir, "fixtures/fake-agent.ts");
 
@@ -60,6 +61,16 @@ export async function makeRepo(dir = tempDir()): Promise<string> {
 	await git(dir, "config", "user.name", "Test");
 	await git(dir, "config", "commit.gpgsign", "false");
 	await commitFile(dir, "src/app.ts", "export const app = 1;\nexport const two = 2;\n", "initial");
+	return dir;
+}
+
+/** A temporary project directory, with `.milhouse/config.ts` holding `configSource` if there is one. */
+export function projectWith(configSource?: string): string {
+	const dir = tempDir();
+	if (configSource !== undefined) {
+		mkdirSync(join(dir, ".milhouse"));
+		writeFileSync(join(dir, ".milhouse", "config.ts"), configSource);
+	}
 	return dir;
 }
 
@@ -146,6 +157,42 @@ export const calls = (fake: FakeAgent, role: string) =>
 /** Commit subjects on main, newest first. */
 export const mainSubjects = async (repo: string): Promise<string[]> =>
 	(await git(repo, "log", "--format=%s", "main")).split("\n");
+
+/** The value that follows `name` in a command line, such as the model an agent was given. */
+export const flag = (args: string[], name: string): string | undefined =>
+	args[args.indexOf(name) + 1];
+
+/** The CLI's entry point, for tests that start it as a user would. */
+export const ENTRY = resolve(import.meta.dir, "../src/index.ts");
+
+/** Run the real CLI in `cwd`, without colours. */
+export const milhouse = (cwd: string, ...args: string[]) =>
+	run("bun", [ENTRY, ...args], { cwd, env: { ...process.env, NO_COLOR: "1" }, timeoutMs: 120_000 });
+
+/** Whether a process is still there (signal 0 only checks, it sends nothing). */
+export const alive = (pid: number): boolean => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+/** Wait until `condition` holds, checking every 50 ms, for at most `ms`. */
+export async function waitFor(condition: () => boolean, ms = 15_000): Promise<void> {
+	const deadline = Date.now() + ms;
+	while (!condition() && Date.now() < deadline) await sleep(50);
+}
+
+/** Whether the process is gone within `ms`, checking every 25 ms. */
+export async function goneWithin(pid: number, ms: number): Promise<boolean> {
+	for (let waited = 0; waited < ms; waited += 25) {
+		if (!alive(pid)) return true;
+		await Bun.sleep(25);
+	}
+	return !alive(pid);
+}
 
 /** Where a run that a unit test creates starts: a branch and a made-up commit, no repository. */
 export const BASE = { branch: "main", sha: "abc" };

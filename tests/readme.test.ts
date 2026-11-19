@@ -1,18 +1,19 @@
 /** The README's examples are what people paste: they have to load, and a run has to do what they say. */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { deepMerge, loadConfig, stepHarness, stepModel } from "../src/config.ts";
 import type { AgentStep, Config } from "../src/types.ts";
 import {
 	calls,
 	cleanupTempDirs,
+	flag,
 	go,
 	makeRepo,
+	projectWith,
 	resetFakeAgentEnv,
 	silenceConsole,
-	tempDir,
 	useFakeAgent,
 } from "./helpers.ts";
 
@@ -32,15 +33,6 @@ function exampleAfter(heading: string): string {
 	const open = README.indexOf("```ts\n", from) + "```ts\n".length;
 	return README.slice(open, README.indexOf("\n```", open));
 }
-
-function projectWith(config: string): string {
-	const dir = tempDir();
-	mkdirSync(join(dir, ".milhouse"), { recursive: true });
-	writeFileSync(join(dir, ".milhouse", "config.ts"), config);
-	return dir;
-}
-
-const flag = (args: string[], name: string): string | undefined => args[args.indexOf(name) + 1];
 
 describe('the README example "One agent per step"', () => {
 	const example = () => exampleAfter("### One agent per step");

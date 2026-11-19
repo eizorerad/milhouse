@@ -3,32 +3,30 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import pkg from "../package.json";
 import { ensureWorktree, isDirty, refExists } from "../src/git.ts";
 import { acquireLock } from "../src/lock.ts";
-import { run } from "../src/proc.ts";
 import { RunStore } from "../src/state.ts";
-import { sleep } from "../src/util.ts";
 import {
+	ENTRY,
+	alive,
 	cleanupTempDirs,
+	flag,
 	git,
 	isAscii,
 	makeRepo,
+	milhouse,
 	resetFakeAgentEnv,
 	tempDir,
 	useFakeAgent,
+	waitFor,
 } from "./helpers.ts";
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
 });
-
-const ENTRY = resolve(import.meta.dir, "../src/index.ts");
-
-const milhouse = (cwd: string, ...args: string[]) =>
-	run("bun", [ENTRY, ...args], { cwd, env: { ...process.env, NO_COLOR: "1" }, timeoutMs: 120_000 });
 
 describe("arguments", () => {
 	it("prints the help without arguments, with --help and with -h", async () => {
@@ -203,7 +201,7 @@ describe("a full run through the CLI", () => {
 			'export default { model: "sonnet", phases: { verify: { model: "haiku" } } };',
 		);
 		expect((await milhouse(repo, "--model", "opus-x", "--run")).code).toBe(0);
-		const models = fake.journal().map((call) => call.args[call.args.indexOf("--model") + 1]);
+		const models = fake.journal().map((call) => flag(call.args, "--model"));
 		expect(models.length).toBeGreaterThan(5);
 		expect(new Set(models)).toEqual(new Set(["opus-x"]));
 	});
@@ -236,20 +234,6 @@ describe("a full run through the CLI", () => {
 		expect(result.stderr).toContain("not a git repository");
 	});
 });
-
-const alive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
-};
-
-async function waitFor(condition: () => boolean, ms = 15_000): Promise<void> {
-	const deadline = Date.now() + ms;
-	while (!condition() && Date.now() < deadline) await sleep(50);
-}
 
 describe("interruption", () => {
 	const exitCodes = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;

@@ -16,6 +16,7 @@ import {
 	readFile,
 	resetFakeAgentEnv,
 	silenceConsole,
+	tempDir,
 	testConfig,
 	useFakeAgent,
 	writeFile,
@@ -507,10 +508,10 @@ describe("preflight", () => {
 	it("explains what is wrong before spending anything", async () => {
 		const fake = useFakeAgent({});
 
-		const notRepo = (await import("./helpers.ts")).tempDir();
+		const notRepo = tempDir();
 		await expect(go(notRepo)).rejects.toThrow(/not a git repository/);
 
-		const empty = (await import("./helpers.ts")).tempDir();
+		const empty = tempDir();
 		await git(empty, "init", "-q");
 		await expect(go(empty)).rejects.toThrow(/no commits/);
 

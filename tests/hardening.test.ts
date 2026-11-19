@@ -1,7 +1,7 @@
 /** Unit tests for the safety and consistency fixes found by review. */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CostTracker, emptyCost } from "../src/cost.ts";
 import { runChecks } from "../src/gates.ts";
@@ -159,7 +159,7 @@ describe("run ids", () => {
 		symlinkSync(victim, join(runDir, "tasks.json.tmp"));
 		store.saveTasks([makeTask("T1")]);
 		expect(store.loadTasks()).toHaveLength(1);
-		expect(require("node:fs").readFileSync(victim, "utf-8")).toBe("precious");
+		expect(readFileSync(victim, "utf-8")).toBe("precious");
 	});
 });
 

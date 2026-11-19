@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { agentSteps, stepHarness, stepModel } from "../src/config.ts";
 import { requireAgents } from "../src/pipeline.ts";
 import { run } from "../src/proc.ts";
@@ -10,9 +10,11 @@ import {
 	calls,
 	captureConsole,
 	cleanupTempDirs,
+	flag,
 	go,
 	latest,
 	makeRepo,
+	milhouse,
 	readFile,
 	resetFakeAgentEnv,
 	testConfig,
@@ -25,8 +27,6 @@ afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
 });
-
-const flag = (args: string[], name: string): string | undefined => args[args.indexOf(name) + 1];
 
 describe("the whole pipeline on Codex", () => {
 	it("scans, validates, plans, executes, reviews and merges through `codex exec`", async () => {
@@ -256,14 +256,6 @@ describe("a failure that every call would share", () => {
 });
 
 describe("the CLI", () => {
-	const ENTRY = resolve(import.meta.dir, "../src/index.ts");
-	const milhouse = (cwd: string, ...args: string[]) =>
-		run("bun", [ENTRY, ...args], {
-			cwd,
-			env: { ...process.env, NO_COLOR: "1" },
-			timeoutMs: 120_000,
-		});
-
 	it("--harness codex runs every step on Codex, whatever the config says", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
