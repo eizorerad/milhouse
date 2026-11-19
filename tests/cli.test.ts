@@ -235,7 +235,7 @@ describe("a full run through the CLI", () => {
 	});
 });
 
-describe("--harness", () => {
+describe("harness and model on the command line", () => {
 	it("--harness codex runs every step on Codex, whatever the config says", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();

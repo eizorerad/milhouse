@@ -163,8 +163,10 @@ export const calls = (fake: FakeAgent, role: string) =>
 	fake.journal().filter((c) => c.role === role);
 
 /** The value that follows `name` in a command line, such as the model an agent was given. */
-export const flag = (args: string[], name: string): string | undefined =>
-	args[args.indexOf(name) + 1];
+export const flag = (args: string[], name: string): string | undefined => {
+	const at = args.indexOf(name);
+	return at < 0 ? undefined : args[at + 1];
+};
 
 // ─── Pipeline runs ───────────────────────────────────────────────────
 

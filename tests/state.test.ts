@@ -9,7 +9,7 @@ afterEach(cleanupTempDirs);
 /** Where this file's own runs start; the first test checks that it is recorded as given. */
 const START = { branch: "main", sha: "abc123" };
 
-/** The issues of these tests are not validated yet; issues and tasks are titled by what they are. */
+/** Issues titled "Issue <id>" that are not validated yet; tasks titled "Task <id>". */
 const issue = (id: string) => makeIssue(id, { title: `Issue ${id}`, status: "UNVALIDATED" });
 const task = (id: string) => makeTask(id, { title: `Task ${id}` });
 

@@ -145,11 +145,10 @@ describe("runPhase", () => {
 });
 
 describe("runPhase edge cases", () => {
-	/** One worker and two retries: what these cases run with. */
-	const oneWorker = { phases: { validate: { retries: 2, workers: 1 } } };
+	const oneWorkerTwoRetries = { phases: { validate: { retries: 2, workers: 1 } } };
 
 	it("leaves a skipped item alone: nothing is recorded and it is not a failure to retry", async () => {
-		const { store, config, cost } = setup(oneWorker);
+		const { store, config, cost } = setup(oneWorkerTwoRetries);
 		const def = phase(
 			async (n) => {
 				if (n === 1) throw new Skip("waiting for something");
@@ -164,7 +163,7 @@ describe("runPhase edge cases", () => {
 	});
 
 	it("keeps the real error when the budget runs out between attempts", async () => {
-		const { store, config, cost } = setup(oneWorker, 0.5);
+		const { store, config, cost } = setup(oneWorkerTwoRetries, 0.5);
 		const def = phase(async () => {
 			cost.add("validate", 1); // this attempt spends the whole budget and fails
 			throw new Error("tests failed: boom");
@@ -180,7 +179,7 @@ describe("runPhase edge cases", () => {
 
 	it("refuses to start an agent call without budget instead of spawning one that cannot run", async () => {
 		const fake = useFakeAgent({});
-		const { store, config, cost } = setup(oneWorker, 1);
+		const { store, config, cost } = setup(oneWorkerTwoRetries, 1);
 		const def = phase(async (_n, ctx) => {
 			cost.add("validate", 1); // budget gone before the call
 			return ctx.ask("## Role: Planner");
@@ -191,7 +190,7 @@ describe("runPhase edge cases", () => {
 	});
 
 	it("strips terminal escape sequences from error messages it reports", async () => {
-		const { store, config, cost } = setup(oneWorker);
+		const { store, config, cost } = setup(oneWorkerTwoRetries);
 		const def = phase(async () => {
 			throw new Error("bad \u001b[2J news");
 		});
