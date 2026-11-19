@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RunStore } from "../src/state.ts";
 import type { Issue, Task } from "../src/types.ts";
@@ -96,7 +96,10 @@ describe("RunStore", () => {
 		const dir = tempDir();
 		const store = RunStore.create(dir, undefined, BASE);
 		store.saveIssues([issue("P1")]);
-		expect(existsSync(join(dir, ".milhouse", "runs", store.runId, "issues.json.tmp"))).toBe(false);
+		// The temporary name is random, so look at what is in the directory, not for a name.
+		const files = readdirSync(join(dir, ".milhouse", "runs", store.runId));
+		expect(files.filter((name) => name.endsWith(".tmp"))).toEqual([]);
+		expect(files).toContain("issues.json");
 	});
 
 	it("lists runs oldest first, finds the latest and looks runs up by id", async () => {
