@@ -47,7 +47,11 @@ export function findPlaceholders(added: AddedLine[]): string[] {
 export async function runChecks(
 	cwd: string,
 	commands: Record<string, string>,
-	{ timeoutMs = COMMAND_TIMEOUT_MS, reap = true }: { timeoutMs?: number; reap?: boolean } = {},
+	{
+		timeoutMs = COMMAND_TIMEOUT_MS,
+		reap = true,
+		passed,
+	}: { timeoutMs?: number; reap?: boolean; passed?: string[] } = {},
 ): Promise<string | null> {
 	for (const [label, command] of Object.entries(commands)) {
 		if (!command.trim()) continue;
@@ -59,7 +63,10 @@ export async function runChecks(
 			env: { ...withoutGitRouting(process.env), CI: "true" },
 		});
 		// A shell can exit 0 while a child it started keeps running; a timeout is a failure either way.
-		if (result.code === 0 && !result.timedOut) continue;
+		if (result.code === 0 && !result.timedOut) {
+			passed?.push(`${label}: \`${command}\` (exit 0)`);
+			continue;
+		}
 		const why = result.timedOut
 			? `timed out after ${Math.round(timeoutMs / 1000)}s`
 			: `exit code ${result.code}`;
@@ -76,10 +83,11 @@ export async function runChecks(
 export async function runProjectChecks(
 	dir: string,
 	commands: Config["commands"],
+	passed?: string[],
 ): Promise<string | null> {
 	const before = await revParse(dir, "HEAD");
 	const { build, lint, test } = commands;
-	const failure = await runChecks(dir, { build, lint, test });
+	const failure = await runChecks(dir, { build, lint, test }, { passed });
 	await gitOrThrow(dir, "clean", "-fd"); // what the commands generated: the tree was clean before them
 	if (failure) return failure;
 	if ((await revParse(dir, "HEAD")) !== before) {

@@ -66,6 +66,7 @@ interface Work {
 	base: string;
 	/** Tip of the accepted work: this issue's commits lie after it. */
 	accepted: string;
+	passedChecks: string[];
 }
 
 /** First problem with the work (written as instructions for the agent), or null when it passes. */
@@ -112,7 +113,7 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 		}
 	}
 	if (config.gates.dod) {
-		const failure = await runProjectChecks(work.dir, config.commands);
+		const failure = await runProjectChecks(work.dir, config.commands, work.passedChecks);
 		if (failure) return failure;
 	}
 	return null;
@@ -147,7 +148,7 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 		diffStat(work.dir, work.accepted),
 		diffPatch(work.dir, work.accepted),
 	]);
-	const text = reviewPrompt(group, stat, patch, ctx.config);
+	const text = reviewPrompt(group, stat, patch, ctx.config, work.passedChecks);
 	let verdicts: ReviewVerdict[] | undefined;
 	let failure = "";
 	for (let attempt = 0; attempt <= ctx.config.phases.verify.retries && !verdicts; attempt++) {
@@ -274,7 +275,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		const accepted = await revParse(store.workDir, store.ref);
 		const previous = ctx.lastError ?? group.tasks.find((t) => t.error)?.error;
 		if (ctx.attempt === 0) await startFromAccepted(ctx, group, accepted, previous);
-		const work: Work = { dir: store.worktree, base, accepted };
+		const work: Work = { dir: store.worktree, base, accepted, passedChecks: [] };
 		await implement(ctx, group, work, previous);
 
 		const failure = await checkWork(work, group, config);

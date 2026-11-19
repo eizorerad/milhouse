@@ -157,6 +157,18 @@ describe("what each step is told", () => {
 });
 
 describe("what the pipeline tells you", () => {
+	it("validates against the saved scope and prints the verdict and reason", async () => {
+		const fake = useFakeAgent({ status: { "Add greeting": "FALSE" } });
+		const repo = await makeRepo();
+		const scope = "Only fix the Pages deployment";
+		await go(repo, testConfig(), { only: "scan", scope });
+		await go(repo, testConfig(), { only: "validate" });
+		for (const role of ["Lead Investigator", "Issue Validator"]) {
+			expect(calls(fake, role)[0].prompt).toContain(`## Focus\n${scope}`);
+		}
+		expect(output.map((line) => line.trim())).toContain("Add greeting - FALSE: ok");
+	});
+
 	it("says at the start which agent runs every step, so a surprise shows before it costs money", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
@@ -190,10 +202,13 @@ describe("what the pipeline tells you", () => {
 	});
 
 	it("warns that only the reviewer checks the work when no command is configured", async () => {
-		useFakeAgent({});
+		const fake = useFakeAgent({});
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(true);
 		expect(output.join("\n")).toContain("No build, lint or test command");
+		expect(calls(fake, "Truth Verifier")[0].prompt).toContain(
+			"No build, lint or test command was run.",
+		);
 
 		output.length = 0;
 		const repo2 = await makeRepo();

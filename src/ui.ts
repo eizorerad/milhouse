@@ -89,7 +89,8 @@ export class Progress {
 		if (index >= 0) this.active.splice(index, 1);
 		this.done++;
 		const mark = ok ? pc.green("+") : pc.red("x");
-		this.print(`${mark} ${text(id)}${note ? pc.dim(` - ${text(note)}`) : ""}`);
+		const label = ok && note ? text(id) : `${mark} ${text(id)}`;
+		this.print(`${label}${note ? pc.dim(` - ${text(note)}`) : ""}`);
 	}
 
 	note(message: string): void {

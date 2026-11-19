@@ -114,14 +114,6 @@ describe("happy path", () => {
 		expect(store.loadTasks().every((t) => t.status === "merged")).toBe(true);
 	});
 
-	it("passes the scope to the scan and remembers it", async () => {
-		const fake = useFakeAgent({});
-		const repo = await makeRepo();
-		await go(repo, testConfig(), { scope: "focus on auth" });
-		expect(calls(fake, "Lead Investigator")[0].prompt).toContain("focus on auth");
-		expect(latest(repo).loadMeta().scope).toBe("focus on auth");
-	});
-
 	it("completes cleanly when the scan finds nothing", async () => {
 		const fake = useFakeAgent({ scan: [] });
 		const repo = await makeRepo();
@@ -187,9 +179,14 @@ describe("repair loop", () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
 		// `ls *.txt` only succeeds inside the worktree, where the executor's files are.
-		const config = testConfig({ commands: { build: "true", test: "ls *.txt" } });
+		const config = testConfig({
+			commands: { setup: "true", build: "true", lint: " ", test: "ls *.txt" },
+		});
 		expect(await go(repo, config)).toBe(true);
 		expect(calls(fake, "Executor")).toHaveLength(1);
+		expect(calls(fake, "Truth Verifier")[0].prompt).toContain(
+			"## Project check results\n- build: `true` (exit 0)\n- test: `ls *.txt` (exit 0)\n\n",
+		);
 
 		const failing = testConfig({ commands: { test: "echo broken >&2; exit 1" } });
 		const repo2 = await makeRepo();

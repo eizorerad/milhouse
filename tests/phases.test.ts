@@ -473,11 +473,11 @@ describe("prompts", () => {
 
 	it("gives the reviewer the diff, truncating huge ones", () => {
 		const g = group("P1", [task("T-1", { acceptance: ["does x"] })]);
-		const small = reviewPrompt(g, " a.ts | 1 +", "+added", config);
+		const small = reviewPrompt(g, " a.ts | 1 +", "+added", config, []);
 		expect(small).toContain("+added");
 		expect(small).toContain("does x");
 		expect(small).not.toContain("truncated");
-		const huge = reviewPrompt(g, "stat", "+".repeat(200_000), config);
+		const huge = reviewPrompt(g, "stat", "+".repeat(200_000), config, []);
 		expect(huge).toContain("truncated");
 		expect(huge.length).toBeLessThan(150_000);
 	});

@@ -42,6 +42,7 @@ export interface PhaseDef<TItem, TValue> {
 	name: Exclude<Phase, "merge">;
 	loadItems(store: RunStore, config: Config): TItem[] | Promise<TItem[]>;
 	label(item: TItem): string;
+	resultNote?(value: TValue): string;
 	/** Do the work for one item. Throw to fail the attempt; the runner retries with the error as feedback. */
 	run(item: TItem, ctx: Ctx): Promise<TValue>;
 	/** Persist the final result of one item. Called as soon as the item is done. */
@@ -159,7 +160,11 @@ export async function runPhase<TItem, TValue>(
 		const outcome = await attempts(item, label);
 		if (!outcome.ok && outcome.systemic) stopped ??= outcome.error;
 		if (outcome.ok || !outcome.skipped) await def.record(item, outcome, store);
-		progress.end(label, outcome.ok, outcome.ok ? "" : firstLine(outcome.error));
+		progress.end(
+			label,
+			outcome.ok,
+			outcome.ok ? def.resultNote?.(outcome.value) : firstLine(outcome.error),
+		);
 		return outcome;
 	});
 	progress.stop();

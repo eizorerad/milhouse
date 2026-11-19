@@ -74,16 +74,21 @@ export function reviewPrompt(
 	stat: string,
 	patch: string,
 	config: Config,
+	passedChecks: string[],
 ): string {
 	const truncated = patch.length > MAX_PATCH_CHARS;
 	return prompt(
 		role(
 			"Truth Verifier",
-			"You review the changes made for one work item. You can read files but not run commands: Milhouse already ran the project's checks and they passed.",
+			"You review the changes made for one work item. You can read files but not run commands.",
 		),
 		describeIssue(group.issue),
 		context(config),
 		section("Tasks to verify", group.tasks.map(taskBlock).join("\n\n")),
+		section(
+			"Project check results",
+			bullets(passedChecks) || "No build, lint or test command was run.",
+		),
 		section("Changed files", stat),
 		section(
 			truncated ? "Patch (truncated: read the changed files for the rest)" : "Patch",

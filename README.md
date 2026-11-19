@@ -24,10 +24,10 @@ scan → validate → plan → consolidate → exec → merge
 | Phase | What happens |
 |---|---|
 | scan | A read-only agent lists work items (bugs, features, refactors) for your scope. |
-| validate | Each item is checked against the code. Milhouse opens every cited file and checks the lines and the snippet itself, so invented evidence is rejected. |
+| validate | Each item is checked against the code and the run's scope. Milhouse checks the cited snippets and prints the verdict with a short reason. |
 | plan | Each real issue becomes a few small tasks with acceptance criteria. |
 | consolidate | Duplicate tasks are merged. Dependencies between issues decide the order. |
-| exec | Issues run **one at a time** in a git worktree, each on top of the ones accepted before it (see below). |
+| exec | Issues run **one at a time** in a git worktree, each on top of the ones accepted before it. The reviewer sees which build, lint and test commands passed, or that none ran. |
 | merge | Accepted work is fast-forwarded into the branch the run started on. |
 
 **exec, per issue:** the agent commits one commit per task (`[<task id>] <title>`) → Milhouse runs the gates → a reviewer agent checks the acceptance criteria against the diff → the issue is accepted. Any failure goes back to the agent as feedback for a repair round (`phases.exec.retries`). An issue that still fails is parked on `mh-failed/<issue-id>`, its worktree is thrown away (a failed attempt may have installed dependencies the next issue would silently build on) and the next issue carries on from a fresh one, so no issue builds on broken work and every issue is tested on top of all the accepted ones. An issue that depends on a failed one waits.
