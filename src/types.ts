@@ -1,6 +1,11 @@
 /** Shared types: config and the domain model. */
 
 export const PHASES = ["scan", "validate", "plan", "consolidate", "exec", "merge"] as const;
+/** The coding agents Milhouse can drive. */
+export const HARNESS_NAMES = ["claude", "codex"] as const;
+export type HarnessName = (typeof HARNESS_NAMES)[number];
+/** The model used when the config names none. Codex: whatever the user's own Codex config says. */
+export const DEFAULT_MODEL: Record<HarnessName, string> = { claude: "sonnet", codex: "" };
 export type Phase = (typeof PHASES)[number];
 /** Steps that call the agent. `verify` is the reviewer that runs inside `exec`, once per issue. */
 export type AgentStep = Exclude<Phase, "merge"> | "verify";
@@ -8,14 +13,21 @@ export type RunStatus = "running" | "completed" | "failed" | "stopped";
 
 export interface StepOptions {
 	retries: number;
-	/** Empty string = use the global model. */
+	/** Empty string = the global model (when the step runs on the global harness) or the harness default. */
 	model: string;
+	/** Empty string = the global harness. */
+	harness: HarnessName | "";
 	/** Parallel agents. Only for steps that run items in parallel (validate, plan). */
 	workers?: number;
 }
 
 export interface Config {
+	/** The agent that runs every step that does not name its own. */
+	harness: HarnessName;
+	/** Model of the global harness. Empty = that harness's default. */
 	model: string;
+	/** Extra command-line arguments for each harness. Trusted: they are part of the config file. */
+	harnessArgs: Record<HarnessName, string[]>;
 	pipeline: Phase[];
 	/** Stop after the first phase with a failed item. Otherwise continue with what worked. */
 	failFast: boolean;
@@ -95,6 +107,9 @@ export interface RunMeta {
 }
 
 export interface RunCost {
+	/** USD, from harnesses that report it (Claude). */
 	total: number;
 	byPhase: Partial<Record<AgentStep, number>>;
+	/** Tokens of calls whose cost is not reported in USD (Codex). Absent in runs made before Codex was supported. */
+	tokens?: { input: number; output: number };
 }

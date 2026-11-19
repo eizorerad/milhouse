@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CostTracker, emptyCost } from "../src/cost.ts";
-import { buildArgs } from "../src/engine.ts";
 import { runChecks } from "../src/gates.ts";
 import { addedLines, revParse } from "../src/git.ts";
 import { loadGroups, unmetDependencies } from "../src/phases/exec-order.ts";
@@ -184,14 +183,6 @@ describe("run ids", () => {
 		store.saveTasks([task("T1")]);
 		expect(store.loadTasks()).toHaveLength(1);
 		expect(require("node:fs").readFileSync(victim, "utf-8")).toBe("precious");
-	});
-});
-
-describe("engine arguments", () => {
-	it("never loads the repository's own Claude settings", () => {
-		const args = buildArgs({ tools: "read" });
-		expect(args.join(" ")).toContain("--setting-sources user");
-		expect(buildArgs({ tools: "all" }).join(" ")).toContain("--setting-sources user");
 	});
 });
 

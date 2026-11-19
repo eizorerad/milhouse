@@ -9,7 +9,7 @@ import { run } from "../src/proc.ts";
 import { RunStore } from "../src/state.ts";
 import type { Config } from "../src/types.ts";
 
-export const FAKE_CLAUDE = resolve(import.meta.dir, "fixtures/fake-claude.ts");
+export const FAKE_AGENT = resolve(import.meta.dir, "fixtures/fake-agent.ts");
 
 const created: string[] = [];
 
@@ -79,6 +79,7 @@ export function testConfig(overrides: Record<string, unknown> = {}): Config {
 export interface FakeAgent {
 	stateDir: string;
 	journal(): Array<{
+		harness: "claude" | "codex";
 		role: string;
 		issueTitle: string;
 		args: string[];
@@ -90,9 +91,10 @@ export interface FakeAgent {
 /** Point the engine at the fake agent. Returns accessors for what it saw. */
 export function useFakeAgent(scenario: Record<string, unknown> = {}): FakeAgent {
 	const stateDir = tempDir("milhouse-fake-");
-	process.env.MILHOUSE_CLAUDE = FAKE_CLAUDE;
-	process.env.FAKE_CLAUDE_STATE = stateDir;
-	process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify(scenario);
+	process.env.MILHOUSE_CLAUDE = FAKE_AGENT;
+	process.env.MILHOUSE_CODEX = FAKE_AGENT;
+	process.env.FAKE_AGENT_STATE = stateDir;
+	process.env.FAKE_AGENT_SCENARIO = JSON.stringify(scenario);
 	process.env.MILHOUSE_RETRY_DELAY_MS = "1";
 	return {
 		stateDir,
@@ -121,8 +123,9 @@ export const isAscii = (text: string): boolean =>
 export function resetFakeAgentEnv(): void {
 	for (const key of [
 		"MILHOUSE_CLAUDE",
-		"FAKE_CLAUDE_STATE",
-		"FAKE_CLAUDE_SCENARIO",
+		"MILHOUSE_CODEX",
+		"FAKE_AGENT_STATE",
+		"FAKE_AGENT_SCENARIO",
 		"MILHOUSE_RETRY_DELAY_MS",
 	]) {
 		delete process.env[key];

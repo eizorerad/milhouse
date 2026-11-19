@@ -64,6 +64,34 @@ describe("loadConfig", () => {
 		expect(error.message).toContain("neverTouch must be an array of strings");
 	});
 
+	it("accepts the two harnesses, globally and per step, with their extra arguments", async () => {
+		const dir = projectWith(
+			`export default { harness: "codex", harnessArgs: { codex: ["-p", "work"] }, phases: { verify: { harness: "claude", model: "haiku" } } };`,
+		);
+		const config = await loadConfig(dir);
+		expect(config.harness).toBe("codex");
+		expect(config.harnessArgs).toEqual({ claude: [], codex: ["-p", "work"] });
+		expect(config.phases.verify.harness).toBe("claude");
+		expect(config.phases.scan.harness).toBe(""); // the global one
+	});
+
+	it("rejects a harness that does not exist, and extra arguments that are not a list of strings", async () => {
+		const dir = projectWith(
+			`export default { harness: "gemini", harnessArgs: { codex: "-p work" }, phases: { scan: { harness: "aider" } } };`,
+		);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error).toBeInstanceOf(ConfigError);
+		expect(error.message).toContain("harnessArgs.codex must be an array of strings");
+		const typed = projectWith(
+			`export default { harness: "gemini", phases: { scan: { harness: "aider" } } };`,
+		);
+		const second = await loadConfig(typed).catch((e) => e);
+		expect(second.message).toContain("harness must be one of claude, codex");
+		expect(second.message).toContain("phases.scan.harness");
+		const unknown = projectWith("export default { harnessArgs: { gemini: [] } };");
+		expect((await loadConfig(unknown).catch((e) => e)).message).toContain("harnessArgs.gemini");
+	});
+
 	it("rejects out-of-range numbers", async () => {
 		const dir = projectWith(
 			"export default { budget: -1, phases: { exec: { retries: -2 }, plan: { workers: 0 } } };",

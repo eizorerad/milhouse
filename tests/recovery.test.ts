@@ -41,7 +41,7 @@ const TWO_ISSUES = {
 	],
 };
 const setScenario = (scenario: object) => {
-	process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify(scenario);
+	process.env.FAKE_AGENT_SCENARIO = JSON.stringify(scenario);
 };
 const allStatus = (repo: string, status: string) =>
 	latest(repo)

@@ -162,7 +162,10 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 		} catch (err) {
 			// An agent failure (outage, budget) goes back to the runner, which backs off and retries.
 			if (err instanceof EngineError) {
-				throw new EngineError(`${REVIEW_UNAVAILABLE}: ${err.message}`, 0, err.fatal);
+				throw new EngineError(`${REVIEW_UNAVAILABLE}: ${err.message}`, {
+					fatal: err.fatal,
+					systemic: err.systemic,
+				});
 			}
 			throw err;
 		}

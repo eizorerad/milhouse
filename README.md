@@ -1,10 +1,10 @@
 # Milhouse
 
-Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code). It investigates before it acts and verifies before it merges: nothing reaches your branch until it is committed, passes your build/lint/test commands and is approved by a reviewer agent.
+Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code) and [Codex](https://github.com/openai/codex). It investigates before it acts and verifies before it merges: nothing reaches your branch until it is committed, passes your build/lint/test commands and is approved by a reviewer agent.
 
 ## Quick start
 
-Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` CLI, logged in.
+Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` or the `codex` CLI, logged in.
 
 ```bash
 git clone https://github.com/eizorerad/milhouse.git && cd milhouse
@@ -44,13 +44,28 @@ scan → validate → plan → consolidate → exec → merge
 
 ## Safety
 
-- Read-only phases and the reviewer get only `Read`, `Grep` and `Glob`. Your MCP servers (mail, payments, …) are never loaded, and the repository's own `.claude/settings.json` (hooks, env, API URL) is ignored; your user-level Claude settings apply.
-- **exec runs Claude with permissions bypassed**: the agent can run any command as you, inside the run's worktree. Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
+- **Claude:** read-only steps and the reviewer get only `Read`, `Grep` and `Glob`. Your MCP servers (mail, payments, …) are never loaded, and the repository's own `.claude/settings.json` (hooks, env, API URL) is ignored; your user-level Claude settings apply.
+- **Codex:** read-only steps run in Codex's read-only sandbox (nothing can be written), which is not a tool allowlist and does not cover MCP tools. Your Codex configuration applies as it is, MCP servers and plugins included (see Harnesses).
+- **exec runs the agent with permissions bypassed** (`--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex): the agent can run any command as you, inside the run's worktree. Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
 - Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Untracked files in your checkout never block a run. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
 - Your git hooks run for the agents' commits (agents are told to use `--no-verify` if a commit-message rule rejects `[<task id>] <title>`); Milhouse's own commits skip them. `GIT_DIR` and friends inherited from a caller never reach agents or checks, and without a git identity commits use `milhouse <milhouse@localhost>`.
-- Cost comes from Claude's own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`.
+- Claude's cost is its own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`. Codex reports tokens, not dollars: they are counted and shown, but `budget` cannot limit them.
 - Ctrl-C, SIGTERM and a closed terminal stop the agents too. After `kill -9` an agent may keep running: check `ps` before resuming.
 - One Milhouse per checkout at a time (`.milhouse/lock`). A command that never stops printing cannot exhaust memory (only the last 32 MB are kept), and what an agent or a check leaves running in the background is stopped when it finishes.
+
+## Harnesses
+
+Milhouse drives Claude Code (`claude`) or Codex (`codex`). `harness` picks the agent for every step, and any step can name its own: `phases.verify.harness: "codex"` lets Codex review what Claude wrote. `--harness codex` switches a whole run.
+
+| | Claude Code | Codex |
+|---|---|---|
+| model | alias or id, default `sonnet` | what your Codex config says, unless you name one |
+| read-only steps | `Read`/`Grep`/`Glob` only, no MCP servers, no repository settings | read-only sandbox; your Codex config, MCP servers and plugins apply |
+| cost | USD per call, `budget` caps it | tokens only |
+| answer format | enforced by `--json-schema` | asked for in the prompt, checked and retried |
+| extra flags (`harnessArgs`) | `claude: [...]` | `codex: ["-p", "profile"]`, `["--ignore-user-config"]`, ... |
+
+A step uses the model of its own harness: the global `model` does not apply to a step on the other one. `--model` applies to every step on the global harness. A login problem or an unknown model stops the phase at once instead of failing every item three times.
 
 ## Configuration
 
@@ -58,7 +73,8 @@ scan → validate → plan → consolidate → exec → merge
 
 ```ts
 export default {
-  model: "sonnet",                       // per step: phases.<step>.model
+  harness: "claude",                     // or "codex"; per step: phases.<step>.harness
+  model: "",                             // "" = the harness default; per step: phases.<step>.model
   budget: 50,                            // USD per run, 0 = unlimited
   commands: { setup: "bun install", build: "", lint: "bunx biome check .", test: "bun test" },
   neverTouch: ["migrations/**", ".env*"],
@@ -82,7 +98,7 @@ milhouse --report [--format md] run summary: issues, tasks, failures, cost
 milhouse --list-runs            list runs
 milhouse --clean [--days 30]    delete finished runs
 milhouse --init                 create .milhouse/config.ts
-  --scope <text>  --workers <n>  --model <name>  --run-id <id>  -v  -V  -h
+  --scope <text>  --workers <n>  --harness <claude|codex>  --model <name>  --run-id <id>  -v  -V  -h
 ```
 
 Unknown flags are an error; with no arguments you get the help. It works from any subdirectory. The exit code is 0 only if everything that was asked for succeeded.
@@ -111,7 +127,7 @@ bun install
 bun run check        # typecheck + lint + tests
 ```
 
-The tests drive the whole pipeline against real git repositories with a fake `claude` (`tests/fixtures/fake-claude.ts`). `MILHOUSE_CLAUDE` points Milhouse at another binary.
+The tests drive the whole pipeline against real git repositories with a fake agent that speaks both CLIs (`tests/fixtures/fake-agent.ts`). `MILHOUSE_CLAUDE` and `MILHOUSE_CODEX` point Milhouse at other binaries.
 
 ## License
 

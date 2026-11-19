@@ -5,17 +5,24 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import pkg from "../package.json";
-import { CONFIG_TEMPLATE, ConfigError, DEFAULTS, loadConfig } from "./config.ts";
+import { CONFIG_TEMPLATE, ConfigError, DEFAULTS, loadConfig, stepHarness } from "./config.ts";
 import { repoRoot } from "./git.ts";
 import { cleanupRun } from "./phases/merge.ts";
 import { runPipeline } from "./pipeline.ts";
 import { formatReport, generateReport } from "./report.ts";
 import { RunStore, STATE_DIR, ensureIgnoreFile } from "./state.ts";
-import { PHASES, type Phase } from "./types.ts";
+import {
+	type AgentStep,
+	type Config,
+	HARNESS_NAMES,
+	type HarnessName,
+	PHASES,
+	type Phase,
+} from "./types.ts";
 import { log, printBanner, setVerbose } from "./ui.ts";
 import { errorMessage } from "./util.ts";
 
-const HELP = `milhouse v${pkg.version} - correctness-first AI coding orchestrator (runs on Claude Code)
+const HELP = `milhouse v${pkg.version} - correctness-first AI coding orchestrator (drives Claude Code or Codex)
 
 Usage:
   milhouse "fix auth bugs"        Run the whole pipeline; the text is the scope
@@ -31,7 +38,8 @@ Usage:
 Options:
   --scope <text>   What to look for (same as the positional text)
   --workers <n>    Parallel agents for validate and plan
-  --model <name>   Claude model for every step
+  --harness <name> Agent for every step: claude or codex
+  --model <name>   Model for every step (of the steps' harness)
   --run-id <id>    Pick the run for --resume, --report and single phases
   -v, --verbose    Debug output
   -V, --version    Print the version
@@ -58,6 +66,7 @@ const OPTIONS = {
 	days: { type: "string" },
 	scope: { type: "string" },
 	workers: { type: "string" },
+	harness: { type: "string" },
 	model: { type: "string" },
 	"run-id": { type: "string" },
 	format: { type: "string" },
@@ -75,22 +84,44 @@ function positiveInt(value: string | undefined, name: string): number | undefine
 	return n;
 }
 
-/** CLI flags as config overrides. --model beats the per-step models too; --workers only affects parallel steps. */
+function parseHarness(value: string | undefined): HarnessName | undefined {
+	if (value === undefined) return undefined;
+	if (!(HARNESS_NAMES as readonly string[]).includes(value)) {
+		throw new UsageError(`--harness must be one of: ${HARNESS_NAMES.join(", ")}`);
+	}
+	return value as HarnessName;
+}
+
+/** CLI flags as config overrides. --harness beats the per-step choices too; --workers only affects parallel steps. */
 function cliOverrides(
-	model: string | undefined,
+	harness: HarnessName | undefined,
 	workers: number | undefined,
 ): Record<string, unknown> {
-	if (!model && !workers) return {};
+	if (!harness && !workers) return {};
 	const phases = Object.fromEntries(
 		Object.entries(DEFAULTS.phases).map(([step, options]) => [
 			step,
 			{
-				...(model && { model }),
+				...(harness && { harness }),
 				...(workers && options.workers !== undefined && { workers }),
 			},
 		]),
 	);
-	return { ...(model && { model }), phases };
+	return { ...(harness && { harness }), phases };
+}
+
+/**
+ * --model beats the per-step models too, but only for steps on the global harness: a step that runs
+ * on the other one (a Codex reviewer, say) would not understand a Claude model name.
+ */
+function withModel(config: Config, model: string): Config {
+	const phases = Object.fromEntries(
+		Object.entries(config.phases).map(([step, options]) => [
+			step,
+			stepHarness(config, step as AgentStep) === config.harness ? { ...options, model } : options,
+		]),
+	) as Config["phases"];
+	return { ...config, model, phases };
 }
 
 function initProject(workDir: string): void {
@@ -175,7 +206,8 @@ async function main(argv: string[]): Promise<number> {
 	}
 
 	const workers = positiveInt(values.workers, "--workers");
-	const config = await loadConfig(workDir, cliOverrides(values.model, workers));
+	const loaded = await loadConfig(workDir, cliOverrides(parseHarness(values.harness), workers));
+	const config = values.model ? withModel(loaded, values.model) : loaded;
 	printBanner(pkg.version);
 	const ok = await runPipeline(config, {
 		workDir,

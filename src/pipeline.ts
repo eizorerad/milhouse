@@ -1,7 +1,8 @@
 /** The pipeline: preflight, open or resume a run, run the phases in order, finish with an honest status. */
 
+import { agentSteps, stepHarness } from "./config.ts";
 import { CostTracker, formatCost, formatUsd } from "./cost.ts";
-import { claudeBinary } from "./engine.ts";
+import { HARNESSES } from "./engine.ts";
 import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
 import { consolidatePhase } from "./phases/consolidate.ts";
 import { execPhase } from "./phases/exec.ts";
@@ -37,13 +38,19 @@ const RUNNERS: Record<Phase, Runner> = {
 	merge: (store, config) => mergePhase(store, config),
 };
 
-export async function preflight(workDir: string, phases: Phase[]): Promise<void> {
-	// Only merge works without the agent.
-	if (phases.some((phase) => phase !== "merge") && !Bun.which(claudeBinary())) {
-		throw new Error(
-			`"${claudeBinary()}" was not found on PATH. Install Claude Code first: https://claude.com/claude-code`,
-		);
+/** The agents that the steps of `phases` use must be installed. Merge needs none. */
+export function requireAgents(config: Config, phases: Phase[]): void {
+	for (const name of new Set(agentSteps(config, phases).map((step) => stepHarness(config, step)))) {
+		const harness = HARNESSES[name];
+		if (!Bun.which(harness.binary())) {
+			throw new Error(
+				`"${harness.binary()}" was not found on PATH. Install ${harness.label} first: ${harness.installHint}`,
+			);
+		}
 	}
+}
+
+export async function preflight(workDir: string, phases: Phase[]): Promise<void> {
 	if (!(await isRepo(workDir)))
 		throw new Error("This is not a git repository. Run milhouse inside one.");
 	if (!(await hasCommits(workDir)))
@@ -58,12 +65,10 @@ export async function preflight(workDir: string, phases: Phase[]): Promise<void>
 	}
 }
 
-async function openRun(workDir: string, opts: PipelineOptions): Promise<RunStore> {
+/** The run this command continues, or undefined when it starts a new one. */
+async function existingRun(workDir: string, opts: PipelineOptions): Promise<RunStore | undefined> {
 	const continuing = opts.resume || (opts.only !== undefined && opts.only !== "scan");
-	if (!continuing) {
-		const branch = await currentBranch(workDir);
-		return RunStore.create(workDir, opts.scope, { branch, sha: await revParse(workDir, "HEAD") });
-	}
+	if (!continuing) return undefined;
 	const store = opts.runId ? RunStore.byId(workDir, opts.runId) : RunStore.latest(workDir);
 	if (!store) throw new Error("There is no run to continue. Start one with: milhouse --run");
 	// Every phase reads the code of the branch the run started on, and merge writes to it.
@@ -82,16 +87,32 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 
 	const release = acquireLock(workDir);
 	try {
-		const store = await openRun(workDir, opts);
-		const done = store.loadMeta().done;
+		const existing = await existingRun(workDir, opts);
+		const done = existing?.loadMeta().done ?? [];
 		// A full resume skips finished phases; an explicitly requested phase always runs.
 		const todo =
 			opts.only || !opts.resume ? wanted : wanted.filter((phase) => !done.includes(phase));
+		requireAgents(config, todo); // before a new run leaves anything behind
+		const store =
+			existing ??
+			RunStore.create(workDir, opts.scope, {
+				branch: await currentBranch(workDir),
+				sha: await revParse(workDir, "HEAD"),
+			});
 		const cost = new CostTracker(store.loadCost(), config.budget, (c) => store.saveCost(c));
 
 		log.info(`Run ${store.runId}: ${todo.join(" -> ") || "nothing left to do"}`);
 		if (config.budget > 0) {
 			log.info(`Budget ${formatUsd(config.budget)}, spent so far ${formatUsd(cost.current.total)}`);
+		}
+		const unpriced = new Set(
+			agentSteps(config, todo)
+				.map((step) => stepHarness(config, step))
+				.filter((name) => !HARNESSES[name].reportsCost),
+		);
+		if (config.budget > 0 && unpriced.size > 0) {
+			const names = [...unpriced].map((name) => HARNESSES[name].label).join(" and ");
+			log.warn(`The budget cannot limit ${names}: it reports tokens, not dollars.`);
 		}
 		const { build, lint, test } = config.commands;
 		if (todo.includes("exec") && config.gates.dod && !(build || lint || test)) {
@@ -108,8 +129,15 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 			const outcomes = await RUNNERS[phase](store, config, cost);
 			if (outcomes.every((o) => o.ok) && upstreamDone(store, config, phase))
 				store.completePhase(phase);
-			failures += outcomes.filter((o) => !o.ok && !o.skipped).length;
-			for (const outcome of outcomes) if (!outcome.ok && !outcome.skipped) log.error(outcome.error);
+			const failed = outcomes.flatMap((o) => (!o.ok && !o.skipped ? [o] : []));
+			failures += failed.length;
+			for (const error of new Set(failed.map((o) => o.error))) log.error(error);
+			if (failed.some((o) => o.systemic)) {
+				log.warn(
+					"Stopped: every other call would fail the same way. Fix the cause, then run: milhouse --resume",
+				);
+				break;
+			}
 			if (failures > 0 && config.failFast) break;
 		}
 		return await finish(store, config, cost, failures);
