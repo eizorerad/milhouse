@@ -86,6 +86,31 @@ export default {
 
 Unknown keys and wrong types are errors, so a typo cannot silently disable a rule. `commands.setup` runs whenever the worktree is created (also after a failed issue); what it installs must be ignored by git (`node_modules`, `.venv`). The other commands run on every issue and must leave the files alone. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
 
+### One agent per step
+
+Every step has its own `harness`, `model`, `retries` and, for the two steps that run items in parallel, `workers`. A full example for fixing bugs (paste it into `.milhouse/config.ts`, then `milhouse "fix the bugs in src/auth"`):
+
+```ts
+// Claude reads the code and does the work; Codex checks the findings (many at once) and reviews the result.
+export default {
+  harness: "claude",                       // the default for every step that does not say otherwise
+  budget: 20,                              // USD, for the Claude steps (Codex reports tokens, not dollars)
+  harnessArgs: { codex: ["-c", 'model_reasoning_effort="high"'] },
+  phases: {
+    scan:        { model: "opus" },                    // one agent reads the whole repository
+    validate:    { harness: "codex", workers: 8 },     // 8 Codex agents check the findings in parallel
+    plan:        { model: "sonnet", workers: 4 },      // 4 Claude agents plan the issues in parallel
+    consolidate: { model: "haiku" },                   // one cheap agent merges duplicate tasks
+    exec:        { model: "opus", retries: 3 },        // one issue at a time, up to 3 repair rounds
+    verify:      { harness: "codex" },                 // Codex reviews every issue before it is accepted
+  },
+  commands: { setup: "bun install", test: "bun test" },
+  neverTouch: [".env*", "migrations/**"],
+};
+```
+
+`model` is the model of the step's own harness; a Codex step without one uses the model of your Codex config. `workers` exists only for `validate` and `plan`: scan, consolidate and the reviewer are one agent each, and exec is sequential on purpose (every issue is built and checked on top of the ones accepted before it). For a single run, flags override the file: `milhouse --harness codex --workers 3 "..."`.
+
 ## CLI
 
 ```
