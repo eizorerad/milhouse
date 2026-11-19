@@ -2,34 +2,15 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RunStore } from "../src/state.ts";
-import type { Issue, Task } from "../src/types.ts";
-import { cleanupTempDirs, tempDir } from "./helpers.ts";
+import { cleanupTempDirs, makeIssue, makeTask, tempDir } from "./helpers.ts";
 
 afterEach(cleanupTempDirs);
 
 const BASE = { branch: "main", sha: "abc123" };
 
-const issue = (id: string): Issue => ({
-	id,
-	type: "bug",
-	title: `Issue ${id}`,
-	rationale: "r",
-	severity: "HIGH",
-	status: "UNVALIDATED",
-	evidence: [],
-});
-
-const task = (id: string, issueId = "P1"): Task => ({
-	id,
-	issue_id: issueId,
-	title: `Task ${id}`,
-	description: "",
-	files: [],
-	depends_on: [],
-	checks: [],
-	acceptance: [],
-	status: "pending",
-});
+/** The issues of these tests are not validated yet; issues and tasks are titled by what they are. */
+const issue = (id: string) => makeIssue(id, { title: `Issue ${id}`, status: "UNVALIDATED" });
+const task = (id: string) => makeTask(id, { title: `Task ${id}` });
 
 describe("RunStore", () => {
 	it("creates a run with its starting point and ignore file", () => {

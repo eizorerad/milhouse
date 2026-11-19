@@ -11,31 +11,14 @@ import { parseVerdicts } from "../src/phases/exec.ts";
 import { type RawTask, buildTasks, parseTasks } from "../src/phases/plan.ts";
 import { parseItems } from "../src/phases/scan.ts";
 import { context, describeIssue } from "../src/prompts.ts";
-import type { Issue, Severity, Task } from "../src/types.ts";
-import { testConfig } from "./helpers.ts";
+import type { Severity, Task } from "../src/types.ts";
+import { makeIssue, makeTask, testConfig } from "./helpers.ts";
 
-const task = (id: string, over: Partial<Task> = {}): Task => ({
-	id,
-	issue_id: "P1",
-	title: `Title ${id}`,
-	description: "",
-	files: [],
-	depends_on: [],
-	checks: [],
-	acceptance: [],
-	status: "pending",
-	...over,
-});
-
-const issue = (id: string, severity: Severity = "MEDIUM"): Issue => ({
-	id,
-	type: "bug",
-	title: `Issue ${id}`,
-	rationale: "because",
-	severity,
-	status: "CONFIRMED",
-	evidence: [],
-});
+/** Tasks titled "Title <id>"; issues titled "Issue <id>", of MEDIUM severity unless a test says so. */
+const task = (id: string, over: Partial<Task> = {}) =>
+	makeTask(id, { title: `Title ${id}`, ...over });
+const issue = (id: string, severity: Severity = "MEDIUM") =>
+	makeIssue(id, { title: `Issue ${id}`, rationale: "because", severity });
 
 const none = { duplicates: [], cross_dependencies: [] };
 

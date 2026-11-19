@@ -11,13 +11,16 @@ import { execPhase, rejectionReasons } from "../src/phases/exec.ts";
 import { planPhase } from "../src/phases/plan.ts";
 import { type Outcome, type PhaseDef, Skip, runPhase } from "../src/runner.ts";
 import { RunStore } from "../src/state.ts";
-import type { Issue, Task } from "../src/types.ts";
+import type { Issue } from "../src/types.ts";
 import { stripControl } from "../src/util.ts";
 import {
+	BASE,
 	cleanupTempDirs,
 	commitFile,
 	git,
+	makeIssue,
 	makeRepo,
+	makeTask,
 	resetFakeAgentEnv,
 	tempDir,
 	testConfig,
@@ -30,60 +33,34 @@ afterEach(() => {
 	resetFakeAgentEnv();
 });
 
-const BASE = { branch: "main", sha: "abc" };
-
-const task = (id: string, over: Partial<Task> = {}): Task => ({
-	id,
-	issue_id: "P1",
-	title: id,
-	description: "",
-	files: [],
-	depends_on: [],
-	checks: [],
-	acceptance: [],
-	status: "pending",
-	...over,
-});
-
-const issue = (id: string, over: Partial<Issue> = {}): Issue => ({
-	id,
-	type: "bug",
-	title: id,
-	rationale: "r",
-	severity: "HIGH",
-	status: "CONFIRMED",
-	evidence: [],
-	...over,
-});
-
 describe("unmetDependencies", () => {
 	const group = {
-		issue: issue("P2"),
-		tasks: [task("B1", { issue_id: "P2", depends_on: ["A1", "B0", "ghost"] })],
+		issue: makeIssue("P2"),
+		tasks: [makeTask("B1", { issue_id: "P2", depends_on: ["A1", "B0", "ghost"] })],
 	};
 
 	it("lists tasks of other issues that are not verified or merged yet", () => {
-		const all = [task("A1", { status: "failed" }), group.tasks[0]];
+		const all = [makeTask("A1", { status: "failed" }), group.tasks[0]];
 		expect(unmetDependencies(group, all)).toEqual(["A1"]);
-		expect(unmetDependencies(group, [task("A1", { status: "pending" }), group.tasks[0]])).toEqual([
-			"A1",
-		]);
+		expect(
+			unmetDependencies(group, [makeTask("A1", { status: "pending" }), group.tasks[0]]),
+		).toEqual(["A1"]);
 	});
 
 	it("is satisfied by verified and merged tasks, ignores its own tasks and unknown ids", () => {
-		expect(unmetDependencies(group, [task("A1", { status: "verified" }), group.tasks[0]])).toEqual(
-			[],
-		);
-		expect(unmetDependencies(group, [task("A1", { status: "merged" }), group.tasks[0]])).toEqual(
-			[],
-		);
-		const own = { ...group, tasks: [task("B1", { depends_on: ["B0"] }), task("B0")] };
+		expect(
+			unmetDependencies(group, [makeTask("A1", { status: "verified" }), group.tasks[0]]),
+		).toEqual([]);
+		expect(
+			unmetDependencies(group, [makeTask("A1", { status: "merged" }), group.tasks[0]]),
+		).toEqual([]);
+		const own = { ...group, tasks: [makeTask("B1", { depends_on: ["B0"] }), makeTask("B0")] };
 		expect(unmetDependencies(own, own.tasks)).toEqual([]);
 	});
 });
 
 describe("rejectionReasons", () => {
-	const tasks = [task("A", { title: "First" }), task("B", { title: "Second" })];
+	const tasks = [makeTask("A", { title: "First" }), makeTask("B", { title: "Second" })];
 
 	it("passes only an explicit true", () => {
 		const verdicts = [
@@ -105,10 +82,10 @@ describe("planning", () => {
 	it("does not plan an issue again, even when consolidate removed all of its tasks", () => {
 		const store = RunStore.create(tempDir(), undefined, BASE);
 		store.saveIssues([
-			issue("fresh"),
-			issue("planned", { planned: true }),
-			issue("false", { status: "FALSE" }),
-			issue("misdiagnosed", { status: "MISDIAGNOSED" }),
+			makeIssue("fresh"),
+			makeIssue("planned", { planned: true }),
+			makeIssue("false", { status: "FALSE" }),
+			makeIssue("misdiagnosed", { status: "MISDIAGNOSED" }),
 		]);
 		const items = planPhase.loadItems(store, testConfig()) as Issue[];
 		expect(items.map((i) => i.id)).toEqual(["fresh", "misdiagnosed"]);
@@ -116,7 +93,7 @@ describe("planning", () => {
 
 	it("marks the issue as planned when the plan is recorded", () => {
 		const store = RunStore.create(tempDir(), undefined, BASE);
-		store.saveIssues([issue("P1")]);
+		store.saveIssues([makeIssue("P1")]);
 		const raw = {
 			key: "t1",
 			title: "Do it",
@@ -126,7 +103,7 @@ describe("planning", () => {
 			checks: [],
 			acceptance: [],
 		};
-		planPhase.record(issue("P1"), { ok: true, value: [raw] }, store);
+		planPhase.record(makeIssue("P1"), { ok: true, value: [raw] }, store);
 		expect(store.loadIssues()[0].planned).toBe(true);
 		expect(store.loadTasks()).toHaveLength(1);
 		expect(planPhase.loadItems(store, testConfig())).toEqual([]);
@@ -180,7 +157,7 @@ describe("run ids", () => {
 		writeFileSync(victim, "precious");
 		const runDir = join(dir, ".milhouse", "runs", store.runId);
 		symlinkSync(victim, join(runDir, "tasks.json.tmp"));
-		store.saveTasks([task("T1")]);
+		store.saveTasks([makeTask("T1")]);
 		expect(store.loadTasks()).toHaveLength(1);
 		expect(require("node:fs").readFileSync(victim, "utf-8")).toBe("precious");
 	});
@@ -304,7 +281,7 @@ describe("fixes found by the final review", () => {
 
 	it("records a plan idempotently: a crash between the tasks and the planned flag cannot duplicate them", () => {
 		const store = RunStore.create(tempDir(), undefined, BASE);
-		store.saveIssues([issue("P1")]);
+		store.saveIssues([makeIssue("P1")]);
 		const raw = {
 			key: "t1",
 			title: "Do it",
@@ -314,13 +291,13 @@ describe("fixes found by the final review", () => {
 			checks: [],
 			acceptance: [],
 		};
-		planPhase.record(issue("P1"), { ok: true, value: [raw] }, store);
-		planPhase.record(issue("P1"), { ok: true, value: [raw] }, store); // the same plan again
+		planPhase.record(makeIssue("P1"), { ok: true, value: [raw] }, store);
+		planPhase.record(makeIssue("P1"), { ok: true, value: [raw] }, store); // the same plan again
 		expect(store.loadTasks()).toHaveLength(1);
 
 		// A task that already moved on is never replaced.
 		store.updateTasks([store.loadTasks()[0].id], { status: "verified" });
-		planPhase.record(issue("P1"), { ok: true, value: [raw] }, store);
+		planPhase.record(makeIssue("P1"), { ok: true, value: [raw] }, store);
 		expect(
 			store
 				.loadTasks()
@@ -331,21 +308,21 @@ describe("fixes found by the final review", () => {
 
 	it("ignores a dependency on an issue that runs later (a cycle between issues)", () => {
 		const a = {
-			issue: issue("A"),
-			tasks: [task("A2", { issue_id: "A", depends_on: ["B1"] })],
+			issue: makeIssue("A"),
+			tasks: [makeTask("A2", { issue_id: "A", depends_on: ["B1"] })],
 			later: ["B"],
 		};
-		const all = [...a.tasks, task("B1", { issue_id: "B", status: "pending" })];
+		const all = [...a.tasks, makeTask("B1", { issue_id: "B", status: "pending" })];
 		expect(unmetDependencies(a, all)).toEqual([]);
 		expect(unmetDependencies({ ...a, later: [] }, all)).toEqual(["B1"]);
 	});
 
 	it("tells each issue which issues run after it", async () => {
 		const store = RunStore.create(tempDir(), undefined, BASE);
-		store.saveIssues([issue("A", { severity: "HIGH" }), issue("B", { severity: "LOW" })]);
+		store.saveIssues([makeIssue("A", { severity: "HIGH" }), makeIssue("B", { severity: "LOW" })]);
 		store.saveTasks([
-			task("A1", { issue_id: "A", depends_on: ["B1"] }),
-			task("B1", { issue_id: "B", depends_on: ["A1"] }),
+			makeTask("A1", { issue_id: "A", depends_on: ["B1"] }),
+			makeTask("B1", { issue_id: "B", depends_on: ["A1"] }),
 		]);
 		const groups = loadGroups(store);
 		expect(groups.map((g) => [g.issue.id, g.later])).toEqual([
@@ -356,8 +333,8 @@ describe("fixes found by the final review", () => {
 
 	it("keeps the start of a failure message: its prefix tells reviewer outages from real failures", async () => {
 		const store = RunStore.create(tempDir(), undefined, BASE);
-		store.saveTasks([task("T1")]);
-		const group = { issue: issue("P1"), tasks: [task("T1")] };
+		store.saveTasks([makeTask("T1")]);
+		const group = { issue: makeIssue("P1"), tasks: [makeTask("T1")] };
 		const outage = `The review could not be completed: ${"x".repeat(5000)}`;
 		await execPhase.record(group, { ok: false, error: outage }, store);
 		const [stored] = store.loadTasks();
@@ -367,7 +344,7 @@ describe("fixes found by the final review", () => {
 
 	it("records the commit that was accepted for a task", () => {
 		const store = RunStore.create(tempDir(), undefined, BASE);
-		store.saveTasks([task("T1")]);
+		store.saveTasks([makeTask("T1")]);
 		store.updateTasks(["T1"], { sha: "abc123" });
 		expect(store.loadTasks()[0].sha).toBe("abc123");
 	});

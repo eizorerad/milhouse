@@ -9,7 +9,7 @@ import { DEFAULTS, deepMerge } from "../src/config.ts";
 import { type PipelineOptions, runPipeline } from "../src/pipeline.ts";
 import { run } from "../src/proc.ts";
 import { RunStore } from "../src/state.ts";
-import type { Config } from "../src/types.ts";
+import type { Config, Issue, Task } from "../src/types.ts";
 
 export const FAKE_AGENT = resolve(import.meta.dir, "fixtures/fake-agent.ts");
 
@@ -146,6 +146,35 @@ export const calls = (fake: FakeAgent, role: string) =>
 /** Commit subjects on main, newest first. */
 export const mainSubjects = async (repo: string): Promise<string[]> =>
 	(await git(repo, "log", "--format=%s", "main")).split("\n");
+
+/** Where a run that a unit test creates starts: a branch and a made-up commit, no repository. */
+export const BASE = { branch: "main", sha: "abc" };
+
+/** An issue for unit tests: a confirmed HIGH bug titled by its id; `over` says what differs. */
+export const makeIssue = (id: string, over: Partial<Issue> = {}): Issue => ({
+	id,
+	type: "bug",
+	title: id,
+	rationale: "r",
+	severity: "HIGH",
+	status: "CONFIRMED",
+	evidence: [],
+	...over,
+});
+
+/** A task for unit tests: a pending task of issue P1, titled by its id; `over` says what differs. */
+export const makeTask = (id: string, over: Partial<Task> = {}): Task => ({
+	id,
+	issue_id: "P1",
+	title: id,
+	description: "",
+	files: [],
+	depends_on: [],
+	checks: [],
+	acceptance: [],
+	status: "pending",
+	...over,
+});
 
 /** Undo what silenceConsole or captureConsole did to console.log and console.error. */
 function restoreConsole(): void {

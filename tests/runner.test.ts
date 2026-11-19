@@ -5,6 +5,7 @@ import { GiveUp, type Outcome, type PhaseDef, runPhase } from "../src/runner.ts"
 import { RunStore } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
 import {
+	BASE,
 	cleanupTempDirs,
 	resetFakeAgentEnv,
 	tempDir,
@@ -24,7 +25,7 @@ interface Setup {
 }
 
 function setup(configOverrides: Record<string, unknown> = {}, budget = 0): Setup {
-	const store = RunStore.create(tempDir(), undefined, { branch: "main", sha: "abc" });
+	const store = RunStore.create(tempDir(), undefined, BASE);
 	const config = testConfig({ budget, ...configOverrides });
 	return { store, config, cost: new CostTracker(emptyCost(), budget, () => {}) };
 }
