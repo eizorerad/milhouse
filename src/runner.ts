@@ -1,7 +1,9 @@
 /** Runs one phase: load the items, process them (in parallel where configured) with retries, record each result. */
 
+import { stepHarness, stepModel } from "./config.ts";
 import type { CostTracker } from "./cost.ts";
-import { EngineError, runAgent } from "./engine.ts";
+import { EngineError, HARNESSES, runAgent } from "./engine.ts";
+import { section } from "./prompts.ts";
 import type { RunStore } from "./state.ts";
 import type { AgentStep, Config, Phase } from "./types.ts";
 import { Progress, log } from "./ui.ts";
@@ -9,8 +11,11 @@ import { errorMessage, mapPool, sleep } from "./util.ts";
 
 export type Outcome<T> =
 	| { ok: true; value: T }
-	/** `skipped`: never attempted (the budget was used up), so there is nothing to record. */
-	| { ok: false; error: string; skipped?: boolean };
+	/**
+	 * `skipped`: never attempted (the budget was used up, or the phase stopped), so there is nothing to record.
+	 * `systemic`: every other item would fail the same way (not logged in, unknown model), so the run stops.
+	 */
+	| { ok: false; error: string; skipped?: boolean; systemic?: boolean };
 
 export interface AskOptions {
 	/** Step to charge and whose model to use. Defaults to the running phase. */
@@ -71,22 +76,29 @@ export async function runPhase<TItem, TValue>(
 	/** Calls the agent for the running phase. Parallel workers share what is left of the budget. */
 	const ask = async (prompt: string, o: AskOptions = {}): Promise<string> => {
 		const step = o.step ?? def.name;
-		const allowance = cost.reserve(workers);
+		const harness = stepHarness(config, step);
+		// Only a harness that reports dollars can be given an allowance.
+		const allowance = HARNESSES[harness].reportsCost ? cost.reserve(workers) : undefined;
 		try {
 			if (allowance !== undefined && allowance <= 0) {
-				throw new EngineError("the budget is used up", 0, true);
+				throw new EngineError("the budget is used up", { fatal: true });
 			}
-			const result = await runAgent(prompt, {
+			// The step's own rules come last, after the role, the task and the global rules.
+			const stepRules = config.phases[step].rules.map((rule) => `- ${rule}`).join("\n");
+			const extra = section("Extra rules for this step", stepRules);
+			const result = await runAgent(extra ? `${prompt}\n\n${extra}` : prompt, {
+				harness,
 				cwd: o.cwd ?? store.workDir,
-				model: config.phases[step].model || config.model,
+				model: stepModel(config, step),
 				schema: o.schema,
 				maxTurns: o.maxTurns,
 				timeoutMs: o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 				tools: o.tools ?? "read",
 				maxBudgetUsd: allowance,
+				extraArgs: config.harnessArgs[harness],
 			});
-			cost.add(step, result.costUsd);
-			log.debug(`${step}: agent call cost $${result.costUsd.toFixed(4)}`);
+			cost.add(step, result.costUsd, result.tokens);
+			log.debug(`${step}: ${harness} call cost $${result.costUsd.toFixed(4)}`);
 			return result.text;
 		} catch (err) {
 			if (err instanceof EngineError) cost.add(step, err.costUsd);
@@ -96,9 +108,13 @@ export async function runPhase<TItem, TValue>(
 		}
 	};
 
+	let stopped: string | undefined; // set by a failure that every other item would hit as well
+
 	const attempts = async (item: TItem, label: string): Promise<Outcome<TValue>> => {
 		let lastError: string | undefined;
 		for (let attempt = 0; attempt <= options.retries; attempt++) {
+			// Another worker found that every call would fail: calls in flight finish, no new one starts.
+			if (stopped) return { ok: false, error: stopped, skipped: true };
 			if (cost.exceeded()) {
 				const error = lastError
 					? `${lastError}\n(stopped: the budget is used up)`
@@ -113,19 +129,25 @@ export async function runPhase<TItem, TValue>(
 				progress.note(
 					`${label}: attempt ${attempt + 1}/${options.retries + 1} failed: ${firstLine(lastError)}`,
 				);
+				if (err instanceof EngineError && err.systemic) {
+					return { ok: false, error: lastError, systemic: true };
+				}
 				if (err instanceof GiveUp || (err instanceof EngineError && err.fatal)) break;
 				if (err instanceof EngineError && attempt < options.retries) {
-					await sleep(retryDelayMs() * (attempt + 1));
+					// Jitter: parallel workers that failed together must not retry together.
+					await sleep(retryDelayMs() * (attempt + 1) * (0.5 + Math.random()));
 				}
 			}
 		}
 		return { ok: false, error: lastError ?? "failed" };
 	};
 
-	const outcomes = await mapPool(items, workers, async (item) => {
+	const outcomes = await mapPool(items, workers, async (item): Promise<Outcome<TValue>> => {
+		if (stopped) return { ok: false, error: stopped, skipped: true }; // not attempted: --resume takes it up
 		const label = def.label(item);
 		progress.begin(label);
 		const outcome = await attempts(item, label);
+		if (!outcome.ok && outcome.systemic) stopped ??= outcome.error;
 		if (outcome.ok || !outcome.skipped) await def.record(item, outcome, store);
 		progress.end(label, outcome.ok, outcome.ok ? "" : firstLine(outcome.error));
 		return outcome;

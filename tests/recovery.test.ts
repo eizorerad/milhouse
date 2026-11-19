@@ -41,7 +41,7 @@ const TWO_ISSUES = {
 	],
 };
 const setScenario = (scenario: object) => {
-	process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify(scenario);
+	process.env.FAKE_AGENT_SCENARIO = JSON.stringify(scenario);
 };
 const allStatus = (repo: string, status: string) =>
 	latest(repo)
@@ -349,7 +349,9 @@ describe("worktree preparation, artifacts and a branch that changes under the me
 
 		await commitFile(repo, "other.txt", "x", "a commit made meanwhile"); // forces a tested merge commit
 		expect(await go(repo, config, { only: "merge" })).toBe(true);
-		expect(readFile(repo, ".milhouse/work/setup-count")).toBe("ran\nran\n");
+		// Set up when the worktree was recreated, and again on the merged commit: the branch may have
+		// changed what has to be installed (a lockfile), and the checks must see exactly that.
+		expect(readFile(repo, ".milhouse/work/setup-count")).toBe("ran\nran\nran\n");
 	});
 
 	it("runs setup again when an earlier setup never finished", async () => {

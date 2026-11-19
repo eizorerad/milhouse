@@ -4,7 +4,7 @@ import { feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
 import type { Task } from "../types.ts";
 import { log } from "../ui.ts";
-import { parseJson } from "../util.ts";
+import { parseJson, stringList } from "../util.ts";
 
 const MINUTE = 60_000;
 
@@ -64,6 +64,31 @@ export function consolidatePrompt(tasks: Task[], lastError?: string): string {
 		),
 		feedback(lastError),
 	);
+}
+
+/** The consolidator's answer. Both lists must be there (empty when nothing applies); malformed entries are dropped. */
+export function parseConsolidation(text: string): Consolidation {
+	const result = parseJson<{ duplicates?: unknown; cross_dependencies?: unknown }>(
+		text,
+		"Consolidate",
+	);
+	if (!Array.isArray(result.duplicates) || !Array.isArray(result.cross_dependencies)) {
+		throw new Error(
+			"Consolidate: the answer needs `duplicates` and `cross_dependencies` lists (empty when nothing applies)",
+		);
+	}
+	const entries = (list: unknown[]): Array<Record<string, unknown>> =>
+		list.filter(
+			(entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null,
+		);
+	return {
+		duplicates: entries(result.duplicates)
+			.filter((d) => typeof d.keep === "string")
+			.map((d) => ({ keep: d.keep as string, remove: stringList(d.remove) })),
+		cross_dependencies: entries(result.cross_dependencies)
+			.filter((d) => typeof d.task_id === "string")
+			.map((d) => ({ task_id: d.task_id as string, depends_on: stringList(d.depends_on) })),
+	};
 }
 
 /** Follow `from -> to` redirects to the final id. The step limit guards against cycles. */
@@ -143,7 +168,7 @@ export const consolidatePhase: PhaseDef<Task[], Consolidation> = {
 			maxTurns: 20,
 			timeoutMs: 5 * MINUTE,
 		});
-		return parseJson<Consolidation>(text, "Consolidate");
+		return parseConsolidation(text);
 	},
 
 	record(_tasks, outcome, store) {

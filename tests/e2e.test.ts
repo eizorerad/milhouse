@@ -322,7 +322,7 @@ describe("budget and resume", () => {
 		expect(await go(repo)).toBe(false);
 		expect(latest(repo).loadMeta()).toMatchObject({ status: "failed", done: ["scan"] });
 
-		process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify({});
+		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		expect(calls(fake, "Lead Investigator")).toHaveLength(1);
 		expect(calls(fake, "Issue Validator")).toHaveLength(2);
@@ -339,7 +339,7 @@ describe("budget and resume", () => {
 				.every((t) => t.status === "failed"),
 		).toBe(true);
 
-		process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify({});
+		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		const executor = calls(fake, "Executor");
 		expect(executor[executor.length - 1].prompt).toContain("The previous attempt failed");

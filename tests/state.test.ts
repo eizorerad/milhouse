@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { RunStore, acquireLock } from "../src/state.ts";
 import type { Issue, Task } from "../src/types.ts";
@@ -112,7 +119,7 @@ describe("RunStore", () => {
 		expect(RunStore.list(tempDir())).toEqual([]);
 	});
 
-	it("cleans only finished runs older than the cutoff", () => {
+	it("cleans only finished runs older than the cutoff", async () => {
 		const dir = tempDir();
 		const old = RunStore.create(dir, "old", BASE);
 		const stopped = RunStore.create(dir, "stopped", BASE);
@@ -128,7 +135,7 @@ describe("RunStore", () => {
 			meta.created_at = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
 			writeFileSync(metaPath, JSON.stringify(meta));
 		}
-		expect(RunStore.clean(dir, 30)).toEqual([old.runId]);
+		expect((await RunStore.clean(dir, 30)).removed).toEqual([old.runId]);
 		expect(
 			RunStore.list(dir)
 				.map((r) => r.id)
@@ -144,6 +151,15 @@ describe("acquireLock", () => {
 		expect(() => acquireLock(dir)).toThrow(/Another milhouse is running/);
 		release();
 		acquireLock(dir)();
+	});
+
+	it("never shows a lock without its owner, and leaves no temporary file behind", () => {
+		const dir = tempDir();
+		const release = acquireLock(dir);
+		expect(readFileSync(join(dir, ".milhouse", "lock"), "utf-8")).toBe(String(process.pid));
+		expect(readdirSync(join(dir, ".milhouse"))).toEqual(["lock"]);
+		release();
+		expect(readdirSync(join(dir, ".milhouse"))).toEqual([]);
 	});
 
 	it("takes over a stale lock left by a dead process", () => {

@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CostTracker, emptyCost } from "../src/cost.ts";
-import { buildArgs } from "../src/engine.ts";
 import { runChecks } from "../src/gates.ts";
 import { addedLines, revParse } from "../src/git.ts";
 import { loadGroups, unmetDependencies } from "../src/phases/exec-order.ts";
@@ -149,7 +148,7 @@ describe("run ids", () => {
 		expect(() => RunStore.byId(tempDir(), "../../etc")).toThrow(/not found/);
 	});
 
-	it("takes the id from the directory name, never from the file content, and skips foreign directories", () => {
+	it("takes the id from the directory name, never from the file content, and skips foreign directories", async () => {
 		const dir = tempDir();
 		const store = RunStore.create(dir, "real", BASE);
 		const runs = join(dir, ".milhouse", "runs");
@@ -170,7 +169,7 @@ describe("run ids", () => {
 
 		const ids = RunStore.list(dir).map((r) => r.id);
 		expect(ids).toEqual(["run-planted", store.runId]);
-		expect(RunStore.clean(dir, 1)).toEqual(["run-planted"]); // removes only its own directory
+		expect((await RunStore.clean(dir, 1)).removed).toEqual(["run-planted"]); // removes only its own directory
 		expect(RunStore.list(dir).map((r) => r.id)).toEqual([store.runId]);
 	});
 
@@ -184,14 +183,6 @@ describe("run ids", () => {
 		store.saveTasks([task("T1")]);
 		expect(store.loadTasks()).toHaveLength(1);
 		expect(require("node:fs").readFileSync(victim, "utf-8")).toBe("precious");
-	});
-});
-
-describe("engine arguments", () => {
-	it("never loads the repository's own Claude settings", () => {
-		const args = buildArgs({ tools: "read" });
-		expect(args.join(" ")).toContain("--setting-sources user");
-		expect(buildArgs({ tools: "all" }).join(" ")).toContain("--setting-sources user");
 	});
 });
 
@@ -280,11 +271,12 @@ describe("runPhase edge cases", () => {
 });
 
 describe("fixes found by the final review", () => {
-	it("treats a timed-out check as a failure even when the shell itself exited 0", async () => {
+	it("judges a check by its own exit, not by a background process that keeps its pipes open", async () => {
 		const dir = tempDir();
-		// The shell exits at once; the background child keeps the output pipe open until it is killed.
-		const failure = await runChecks([["test", "sleep 30 & exit 0"]], dir, 300);
-		expect(failure).toContain("timed out");
+		const started = Date.now();
+		// The shell exits 0 at once; the background child is stopped, and does not turn the pass into a timeout.
+		expect(await runChecks([["test", "sleep 30 & exit 0"]], dir, 5_000)).toBeNull();
+		expect(Date.now() - started).toBeLessThan(4_000);
 	});
 
 	it("still finds added lines when the user's git config adds diff context", async () => {

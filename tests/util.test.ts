@@ -67,6 +67,6 @@ describe("mapPool", () => {
 describe("tail", () => {
 	it("keeps short text and cuts long text from the front", () => {
 		expect(tail("  short  ")).toBe("short");
-		expect(tail("abcdef", 3)).toBe("…def");
+		expect(tail("abcdef", 3)).toBe("...def");
 	});
 });

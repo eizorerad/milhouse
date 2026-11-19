@@ -9,26 +9,33 @@
 
 import { existsSync } from "node:fs";
 import { EngineError } from "../engine.ts";
-import { findPlaceholders, findWhitespaceProblems, forbiddenFiles, runChecks } from "../gates.ts";
+import {
+	findPlaceholders,
+	findWhitespaceProblems,
+	forbiddenFiles,
+	runProjectChecks,
+} from "../gates.ts";
 import {
 	acceptCommit,
 	addedLines,
 	branchExists,
+	clearIndexLock,
 	commitSubjects,
 	deleteBranch,
 	diffPatch,
 	diffStat,
-	git,
+	gitOrThrow,
 	isAncestor,
 	parkWorktree,
 	resetWorktree,
 	revParse,
 	touchedFiles,
 } from "../git.ts";
+import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
 import type { Config, Task } from "../types.ts";
 import { errorMessage, parseJson, tail } from "../util.ts";
-import { prepareWorktree } from "../worktree.ts";
+import { discardWorktree, prepareWorktree } from "../worktree.ts";
 import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
 import { REVIEW_SCHEMA, bullets, execPrompt, reviewPrompt } from "./exec-prompts.ts";
 
@@ -42,9 +49,15 @@ export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
  */
 const REVIEW_UNAVAILABLE = "The review could not be completed";
 
+/** The executor could not run at all (logged out, unknown model): nothing it did, nothing it can fix. */
+const AGENT_UNAVAILABLE = "The agent could not run";
+
 /** Failures that are not the executor's fault must not be fed back to it as feedback. */
 const blamesAgent = (error: string | undefined): error is string =>
-	error !== undefined && !error.startsWith(REVIEW_UNAVAILABLE) && !error.startsWith("setup failed");
+	error !== undefined &&
+	!error.startsWith(REVIEW_UNAVAILABLE) &&
+	!error.startsWith(AGENT_UNAVAILABLE) &&
+	!error.startsWith("setup failed");
 
 // ─── Checks and review ───────────────────────────────────────────────
 
@@ -74,12 +87,15 @@ export async function checkWork(
 		return `These tasks have no commit with the subject \`[<task id>] <title>\`: ${list}`;
 	}
 
-	const status = await git(work.dir, "status", "--porcelain");
-	if (status.out) {
-		return `Uncommitted changes are left in the worktree. Commit them under the right task or remove them:\n${tail(status.out, 800)}`;
+	// --untracked-files=all: a user's status.showUntrackedFiles=no must not hide a fixture left behind.
+	const status = await gitOrThrow(work.dir, "status", "--porcelain", "--untracked-files=all");
+	if (status) {
+		return `Uncommitted changes are left in the worktree. Commit them under the right task or remove them:\n${tail(status, 800)}`;
 	}
 
-	const forbidden = forbiddenFiles(await touchedFiles(work.dir, work.accepted), config.neverTouch);
+	// .milhouse/ is milhouse's own: its config is executed as code, so no commit may change it.
+	const protectedPaths = [...config.neverTouch, ".milhouse/"];
+	const forbidden = forbiddenFiles(await touchedFiles(work.dir, work.accepted), protectedPaths);
 	if (forbidden.length > 0) {
 		return `Commits touched files that must never be modified: ${forbidden.join(", ")}. Rewrite the history so that no commit after ${tip} touches them (for example git reset --soft ${tip}, restore those files, then commit per task again).`;
 	}
@@ -101,23 +117,8 @@ export async function checkWork(
 		}
 	}
 	if (config.gates.dod) {
-		const { build, lint, test } = config.commands;
-		const failure = await runChecks(
-			[
-				["build", build],
-				["lint", lint],
-				["test", test],
-			],
-			work.dir,
-		);
-		await git(work.dir, "clean", "-fd"); // build output of the checks: the tree was clean before them
+		const failure = await runProjectChecks(work.dir, config.commands);
 		if (failure) return failure;
-		// A fixing linter or a formatter would leave the checks passing against an edit that is not in
-		// the commit being accepted.
-		const changed = await git(work.dir, "status", "--porcelain", "--untracked-files=no");
-		if (changed.out) {
-			return `Running the checks changed tracked files, so what was tested is not what is committed. Commit those changes or make the commands read-only:\n${tail(changed.out, 800)}`;
-		}
 	}
 	return null;
 }
@@ -157,7 +158,7 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 	for (let attempt = 0; attempt <= ctx.config.phases.verify.retries && !verdicts; attempt++) {
 		let answer: string;
 		try {
-			answer = await ctx.ask(text, {
+			answer = await ctx.ask(prompt(text, feedback(failure)), {
 				step: "verify",
 				cwd: work.dir,
 				schema: REVIEW_SCHEMA,
@@ -167,7 +168,10 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 		} catch (err) {
 			// An agent failure (outage, budget) goes back to the runner, which backs off and retries.
 			if (err instanceof EngineError) {
-				throw new EngineError(`${REVIEW_UNAVAILABLE}: ${err.message}`, 0, err.fatal);
+				throw new EngineError(`${REVIEW_UNAVAILABLE}: ${err.message}`, {
+					fatal: err.fatal,
+					systemic: err.systemic,
+				});
 			}
 			throw err;
 		}
@@ -233,6 +237,11 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 				(await branchExists(repo, parked)) &&
 				(await isAncestor(repo, accepted, parked));
 			await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+			if (pickUp) {
+				// The attempt may need what the accepted work lacks (a new dependency): set up at its commit.
+				const failure = await prepareWorktree(store, config, { setupAgain: true });
+				if (failure) throw new GiveUp(failure);
+			}
 		}
 		const work: Work = { dir: store.worktree, base, accepted };
 
@@ -240,11 +249,20 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		const done = group.tasks.filter((t) => doneIds.has(t.id));
 		const problem = blamesAgent(previous) ? previous : undefined;
 		if (done.length < group.tasks.length || problem !== undefined) {
-			await ctx.ask(execPrompt(group, done, config, problem), {
-				cwd: work.dir,
-				tools: "all",
-				timeoutMs: 30 * MINUTE,
-			});
+			try {
+				await ctx.ask(execPrompt(group, done, config, problem), {
+					cwd: work.dir,
+					tools: "all",
+					timeoutMs: 30 * MINUTE,
+				});
+			} catch (err) {
+				// The agent was killed or crashed, perhaps in the middle of a commit.
+				if (err instanceof EngineError) await clearIndexLock(work.dir);
+				if (err instanceof EngineError && err.systemic) {
+					throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, { systemic: true });
+				}
+				throw err;
+			}
 		}
 
 		const failure = await checkWork(work, group, config);
@@ -267,8 +285,22 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 			return;
 		}
 		if (existsSync(store.worktree)) {
-			await parkWorktree(store.workDir, store.worktree, parkBranch(group.issue.id));
-			await resetWorktree(store.worktree, store.ref);
+			try {
+				await parkWorktree(
+					store.workDir,
+					store.worktree,
+					parkBranch(group.issue.id),
+					await revParse(store.workDir, store.ref),
+				);
+			} catch (err) {
+				// What is in the worktree is the only copy of the attempt: leave it alone, and stop everything.
+				throw new Error(
+					`${errorMessage(err)}\nThe attempt is still in ${store.worktree}. Save what you need from it, then run: milhouse --resume (it starts again from the accepted work).`,
+				);
+			}
+			// Not just a reset: a failed attempt may have installed dependencies that the next issue would
+			// silently build on. A fresh worktree (and its setup) starts every issue from what was accepted.
+			await discardWorktree(store);
 		}
 		// Keep the start of the message: markers such as REVIEW_UNAVAILABLE are recognised by their prefix.
 		store.updateTasks(ids, { status: "failed", error: outcome.error.slice(0, 2000) });

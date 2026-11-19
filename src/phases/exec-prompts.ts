@@ -48,8 +48,8 @@ export function execPrompt(
 			"Protocol",
 			[
 				"1. Do the tasks in the order above. For each task: implement it, run its checks, commit.",
-				"2. The commit subject must be exactly `[<task id>] <task title>`, e.g. `[T-abc123] Add input validation`, whatever commit message a task description suggests. Milhouse tracks progress by these subjects: one commit per task. Fixes go in new commits with the id of the task they belong to.",
-				"3. Keep changes minimal and focused. Do not touch unrelated files. No TODO/FIXME or placeholder code.",
+				"2. The commit subject must be exactly `[<task id>] <task title>`, e.g. `[T-abc123] Add input validation`, whatever commit message a task description suggests. Milhouse tracks progress by these subjects: one commit per task. Fixes go in new commits with the id of the task they belong to. If a git hook rejects a commit (a commit-message rule, say), commit with `--no-verify`: Milhouse runs the project's checks itself.",
+				"3. Keep changes minimal and focused. Do not touch unrelated files, and never the `.milhouse/` directory. No TODO/FIXME or placeholder code.",
 				"4. Do not create or switch branches and do not push. HEAD is detached on purpose: just commit.",
 				"5. Finish with a clean worktree: everything committed, no stray files.",
 			].join("\n"),

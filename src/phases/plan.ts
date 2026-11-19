@@ -3,9 +3,11 @@
 import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
 import { ACTIONABLE, type Config, type Issue, type Task } from "../types.ts";
-import { generateId, parseJson } from "../util.ts";
+import { generateId, parseJson, stringList, stripControl } from "../util.ts";
 
 const MINUTE = 60_000;
+/** The prompt asks for 1-5; this only keeps a runaway answer from flooding the later phases. */
+const MAX_TASKS = 10;
 
 export interface RawTask {
 	key: string;
@@ -69,6 +71,35 @@ export function planPrompt(issue: Issue, config: Config, lastError?: string): st
 	);
 }
 
+/**
+ * The planner's tasks, checked here (not later, where a failure would not be retried): what the pipeline
+ * needs must be there, what a model left out is filled in.
+ */
+export function parseTasks(text: string): RawTask[] {
+	const { tasks } = parseJson<{ tasks?: unknown }>(text, "Plan");
+	if (!Array.isArray(tasks) || tasks.length === 0) throw new Error("Plan: the plan has no tasks");
+	const parsed = tasks.slice(0, MAX_TASKS).map((raw, index): RawTask => {
+		const task = (raw ?? {}) as Record<string, unknown>;
+		const title = typeof task.title === "string" ? stripControl(task.title.trim()) : "";
+		const key = typeof task.key === "string" ? task.key.trim() : "";
+		if (!title) throw new Error(`Plan: task ${index + 1} needs a title`);
+		if (!key) throw new Error(`Plan: task ${index + 1} ("${title}") needs a key`);
+		return {
+			key,
+			title,
+			description: typeof task.description === "string" ? task.description : "",
+			files: stringList(task.files),
+			depends_on: stringList(task.depends_on),
+			checks: stringList(task.checks),
+			acceptance: stringList(task.acceptance),
+		};
+	});
+	if (new Set(parsed.map((t) => t.key)).size !== parsed.length) {
+		throw new Error("Plan: task keys must be unique");
+	}
+	return parsed;
+}
+
 /** Turn the planner's tasks into stored tasks: local keys become ids, dependencies only point backwards. */
 export function buildTasks(issueId: string, raw: RawTask[]): Task[] {
 	const ids = new Map(raw.map((task) => [task.key, generateId("T")]));
@@ -105,12 +136,7 @@ export const planPhase: PhaseDef<Issue, RawTask[]> = {
 			maxTurns: 30,
 			timeoutMs: 5 * MINUTE,
 		});
-		const { tasks } = parseJson<{ tasks?: RawTask[] }>(text, "Plan");
-		if (!Array.isArray(tasks) || tasks.length === 0) throw new Error("Plan: the plan has no tasks");
-		if (tasks.some((t) => !t.title?.trim())) throw new Error("Plan: every task needs a title");
-		if (new Set(tasks.map((t) => t.key)).size !== tasks.length)
-			throw new Error("Plan: task keys must be unique");
-		return tasks;
+		return parseTasks(text);
 	},
 
 	record(issue, outcome, store) {

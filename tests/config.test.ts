@@ -64,12 +64,101 @@ describe("loadConfig", () => {
 		expect(error.message).toContain("neverTouch must be an array of strings");
 	});
 
+	it("accepts the two harnesses, globally and per step, with their extra arguments", async () => {
+		const dir = projectWith(
+			`export default { harness: "codex", harnessArgs: { codex: ["-p", "work"] }, phases: { verify: { harness: "claude", model: "haiku" } } };`,
+		);
+		const config = await loadConfig(dir);
+		expect(config.harness).toBe("codex");
+		expect(config.harnessArgs).toEqual({ claude: [], codex: ["-p", "work"] });
+		expect(config.phases.verify.harness).toBe("claude");
+		expect(config.phases.scan.harness).toBe(""); // the global one
+	});
+
+	it("rejects a harness that does not exist, and extra arguments that are not a list of strings", async () => {
+		const dir = projectWith(
+			`export default { harness: "gemini", harnessArgs: { codex: "-p work" }, phases: { scan: { harness: "aider" } } };`,
+		);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error).toBeInstanceOf(ConfigError);
+		expect(error.message).toContain("harnessArgs.codex must be an array of strings");
+		const typed = projectWith(
+			`export default { harness: "gemini", phases: { scan: { harness: "aider" } } };`,
+		);
+		const second = await loadConfig(typed).catch((e) => e);
+		expect(second.message).toContain("harness must be one of claude, codex");
+		expect(second.message).toContain("phases.scan.harness");
+		const unknown = projectWith("export default { harnessArgs: { gemini: [] } };");
+		expect((await loadConfig(unknown).catch((e) => e)).message).toContain("harnessArgs.gemini");
+	});
+
+	it("accepts rules for a single step, and rejects rules that are not a list of strings", async () => {
+		const ok = projectWith(
+			'export default { phases: { exec: { rules: ["Write the failing test first"] } } };',
+		);
+		expect((await loadConfig(ok)).phases.exec.rules).toEqual(["Write the failing test first"]);
+		expect((await loadConfig(projectWith("export default {};"))).phases.exec.rules).toEqual([]);
+		const bad = projectWith('export default { phases: { scan: { rules: "be careful" } } };');
+		expect((await loadConfig(bad).catch((e) => e)).message).toContain(
+			"phases.scan.rules must be an array of strings",
+		);
+	});
+
+	it("rejects extra arguments that would change what Milhouse relies on, and allows the rest", async () => {
+		const dir = projectWith(
+			`export default { harnessArgs: { claude: ["--output-format", "text", "--verbose"], codex: ["-s", "workspace-write", "--output-last-message=out.txt", "-p", "profile"] } };`,
+		);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error).toBeInstanceOf(ConfigError);
+		expect(error.message).toContain('harnessArgs.claude: "--output-format"');
+		expect(error.message).toContain('harnessArgs.codex: "-s"');
+		expect(error.message).toContain('harnessArgs.codex: "--output-last-message"');
+		expect(error.message).not.toContain("--verbose");
+		expect(error.message).not.toContain('"-p"'); // a profile for Codex; for Claude -p is the print mode
+
+		const models = projectWith(
+			'export default { harnessArgs: { claude: ["--model", "x"], codex: ["-m", "x", "--model=y"] } };',
+		);
+		const modelError = (await loadConfig(models).catch((e) => e)).message;
+		expect(modelError).toContain('harnessArgs.claude: "--model"');
+		expect(modelError).toContain('harnessArgs.codex: "-m"');
+		expect(modelError).toContain('harnessArgs.codex: "--model"');
+
+		const attached = projectWith(
+			'export default { harnessArgs: { claude: ["-pfoo"], codex: ["-oanswer.txt", "-sworkspace-write", "--", "-pprofile"] } };',
+		);
+		const attachedError = (await loadConfig(attached).catch((e) => e)).message;
+		expect(attachedError).toContain('harnessArgs.claude: "-p"');
+		expect(attachedError).toContain('harnessArgs.codex: "-o"');
+		expect(attachedError).toContain('harnessArgs.codex: "-s"');
+		expect(attachedError).toContain('harnessArgs.codex: "--"');
+		expect(attachedError.match(/harnessArgs\.codex: "-p"/)).toBeNull();
+
+		const claudePrint = projectWith(`export default { harnessArgs: { claude: ["-p"] } };`);
+		expect((await loadConfig(claudePrint).catch((e) => e)).message).toContain(
+			'harnessArgs.claude: "-p"',
+		);
+		const fine = projectWith(
+			`export default { harnessArgs: { codex: ["-p", "profile", "-c", "x=1"] } };`,
+		);
+		expect((await loadConfig(fine)).harnessArgs.codex).toEqual(["-p", "profile", "-c", "x=1"]);
+	});
+
+	it("rejects a budget that is not a finite number: NaN would switch the limit off, Infinity would break every call", async () => {
+		for (const budget of ["Number.NaN", "Number.POSITIVE_INFINITY", "-Infinity"]) {
+			const dir = projectWith(`export default { budget: ${budget} };`);
+			const error = await loadConfig(dir).catch((e) => e);
+			expect(error).toBeInstanceOf(ConfigError);
+			expect(error.message).toContain("budget must be a finite number >= 0");
+		}
+	});
+
 	it("rejects out-of-range numbers", async () => {
 		const dir = projectWith(
 			"export default { budget: -1, phases: { exec: { retries: -2 }, plan: { workers: 0 } } };",
 		);
 		const error = await loadConfig(dir).catch((e) => e);
-		expect(error.message).toContain("budget must be >= 0");
+		expect(error.message).toContain("budget must be a finite number >= 0");
 		expect(error.message).toContain("phases.exec.retries");
 		expect(error.message).toContain("phases.plan.workers");
 	});
