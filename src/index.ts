@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import pkg from "../package.json";
-import { CONFIG_TEMPLATE, ConfigError, DEFAULTS, loadConfig, stepHarness } from "./config.ts";
+import { CONFIG_TEMPLATE, ConfigError, loadConfig, stepHarness } from "./config.ts";
 import { repoRoot } from "./git.ts";
 import { cleanupRun } from "./phases/merge.ts";
 import { runPipeline } from "./pipeline.ts";
@@ -94,13 +94,7 @@ function parseHarness(value: string | undefined): HarnessName | undefined {
 
 /** --workers as a config override: it only affects the steps that run in parallel. */
 function workerOverrides(workers: number | undefined): Record<string, unknown> {
-	if (!workers) return {};
-	const phases = Object.fromEntries(
-		Object.entries(DEFAULTS.phases)
-			.filter(([, options]) => options.workers !== undefined)
-			.map(([step]) => [step, { workers }]),
-	);
-	return { phases };
+	return workers ? { phases: { validate: { workers }, plan: { workers } } } : {};
 }
 
 /**

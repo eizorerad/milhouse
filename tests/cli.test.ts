@@ -207,6 +207,17 @@ describe("a full run through the CLI", () => {
 		expect(new Set(models)).toEqual(new Set(["opus-x"]));
 	});
 
+	it("--workers sets the parallelism of the two steps that have workers, and of no other", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const result = await milhouse(repo, "--workers", "3", "--run");
+		expect(result.code).toBe(0);
+		const agents = result.stdout.split("\n").find((line) => line.includes("Agents:")) ?? "";
+		expect(agents).toContain("validate claude/sonnet x3");
+		expect(agents).toContain("plan claude/sonnet x3");
+		expect(agents).not.toMatch(/(scan|consolidate|exec|verify) claude\/sonnet x/);
+	});
+
 	it("works from a subdirectory of the repository and keeps its state at the root", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
