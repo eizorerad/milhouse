@@ -33,6 +33,7 @@ import {
 } from "../git.ts";
 import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
+import type { RunStore } from "../state.ts";
 import type { Config, Task } from "../types.ts";
 import { MINUTE, errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
@@ -191,6 +192,64 @@ export function rejectionReasons(verdicts: ReviewVerdict[], tasks: Task[]): stri
 
 // ─── The phase ───────────────────────────────────────────────────────
 
+/** Accepted before but never recorded as done (a crash in between): the recorded commit is in the ref. */
+async function acceptedBefore(group: IssueGroup, store: RunStore): Promise<string | undefined> {
+	const recorded = group.tasks[0]?.sha;
+	if (!recorded || !group.tasks.every((t) => t.sha === recorded)) return undefined;
+	return (await isAncestor(store.workDir, recorded, store.ref)) ? recorded : undefined;
+}
+
+/**
+ * The first attempt starts from the accepted state, so leftovers of an interrupted session never leak into
+ * this issue. Only a parked attempt whose sole problem was the review is picked up again.
+ */
+async function startFromAccepted(
+	ctx: Ctx,
+	group: IssueGroup,
+	accepted: string,
+	previous: string | undefined,
+): Promise<void> {
+	const { store, config } = ctx;
+	const parked = parkBranch(group.issue.id);
+	const pickUp =
+		previous?.startsWith(REVIEW_UNAVAILABLE) &&
+		(await branchExists(store.workDir, parked)) &&
+		(await isAncestor(store.workDir, accepted, parked));
+	await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+	if (pickUp) {
+		// The attempt may need what the accepted work lacks (a new dependency): set up at its commit.
+		const failure = await prepareWorktree(store, config, { setupAgain: true });
+		if (failure) throw new GiveUp(failure);
+	}
+}
+
+/** Ask the executor for what is missing, unless every task is committed and nothing was found wrong with it. */
+async function implement(
+	ctx: Ctx,
+	group: IssueGroup,
+	work: Work,
+	previous: string | undefined,
+): Promise<void> {
+	const doneIds = committedTaskIds(await commitSubjects(work.dir, work.base), group.tasks);
+	const done = group.tasks.filter((t) => doneIds.has(t.id));
+	const problem = blamesAgent(previous) ? previous : undefined;
+	if (done.length === group.tasks.length && problem === undefined) return;
+	try {
+		await ctx.ask(execPrompt(group, done, ctx.config, problem), {
+			cwd: work.dir,
+			tools: "all",
+			timeoutMs: 30 * MINUTE,
+		});
+	} catch (err) {
+		// The agent was killed or crashed, perhaps in the middle of a commit.
+		if (err instanceof EngineError) await clearIndexLock(work.dir);
+		if (err instanceof EngineError && err.systemic) {
+			throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, { systemic: true });
+		}
+		throw err;
+	}
+}
+
 export const execPhase: PhaseDef<IssueGroup, string> = {
 	name: "exec",
 
@@ -200,8 +259,6 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 
 	async run(group, ctx) {
 		const { store, config } = ctx;
-		const repo = store.workDir;
-		const { base_sha: base } = store.loadMeta();
 
 		// What this issue builds on has to be in place; otherwise it would only waste money.
 		const unmet = unmetDependencies(group, store.loadTasks());
@@ -210,54 +267,14 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		const setupFailure = await prepareWorktree(store, config);
 		if (setupFailure) throw new GiveUp(setupFailure);
 
-		// Accepted before but never recorded (a crash in between): the recorded commit is in the ref.
-		const recorded = group.tasks[0]?.sha;
-		if (
-			recorded &&
-			group.tasks.every((t) => t.sha === recorded) &&
-			(await isAncestor(repo, recorded, store.ref))
-		) {
-			return recorded;
-		}
+		const recorded = await acceptedBefore(group, store);
+		if (recorded) return recorded;
 
-		const accepted = await revParse(repo, store.ref);
+		const accepted = await revParse(store.workDir, store.ref);
 		const previous = ctx.lastError ?? group.tasks.find((t) => t.error)?.error;
-		if (ctx.attempt === 0) {
-			// Start from the accepted state, so leftovers of an interrupted session never leak into this
-			// issue. Only a parked attempt whose sole problem was the review is picked up again.
-			const parked = parkBranch(group.issue.id);
-			const pickUp =
-				previous?.startsWith(REVIEW_UNAVAILABLE) &&
-				(await branchExists(repo, parked)) &&
-				(await isAncestor(repo, accepted, parked));
-			await resetWorktree(store.worktree, pickUp ? parked : store.ref);
-			if (pickUp) {
-				// The attempt may need what the accepted work lacks (a new dependency): set up at its commit.
-				const failure = await prepareWorktree(store, config, { setupAgain: true });
-				if (failure) throw new GiveUp(failure);
-			}
-		}
-		const work: Work = { dir: store.worktree, base, accepted };
-
-		const doneIds = committedTaskIds(await commitSubjects(work.dir, base), group.tasks);
-		const done = group.tasks.filter((t) => doneIds.has(t.id));
-		const problem = blamesAgent(previous) ? previous : undefined;
-		if (done.length < group.tasks.length || problem !== undefined) {
-			try {
-				await ctx.ask(execPrompt(group, done, config, problem), {
-					cwd: work.dir,
-					tools: "all",
-					timeoutMs: 30 * MINUTE,
-				});
-			} catch (err) {
-				// The agent was killed or crashed, perhaps in the middle of a commit.
-				if (err instanceof EngineError) await clearIndexLock(work.dir);
-				if (err instanceof EngineError && err.systemic) {
-					throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, { systemic: true });
-				}
-				throw err;
-			}
-		}
+		if (ctx.attempt === 0) await startFromAccepted(ctx, group, accepted, previous);
+		const work: Work = { dir: store.worktree, base: store.loadMeta().base_sha, accepted };
+		await implement(ctx, group, work, previous);
 
 		const failure = await checkWork(work, group, config);
 		if (failure) throw new Error(failure);
@@ -267,7 +284,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 			group.tasks.map((t) => t.id),
 			{ sha: checked },
 		); // before the ref moves: a crash in between is recognised on resume
-		await acceptCommit(repo, store.ref, checked);
+		await acceptCommit(store.workDir, store.ref, checked);
 		return checked;
 	},
 
