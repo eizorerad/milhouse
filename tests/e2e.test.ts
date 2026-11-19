@@ -203,6 +203,8 @@ describe("repair loop", () => {
 		const config = testConfig({ gates: { dod: false }, commands: { test: "exit 1" } });
 		expect(await go(repo, config)).toBe(true);
 		expect(calls(fake, "Truth Verifier")).toHaveLength(0);
+		expect(await mainSubjects(repo)).toEqual(["initial"]);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 
 	it("lets a gate be switched off", async () => {
@@ -372,6 +374,47 @@ describe("single phases", () => {
 });
 
 describe("merge", () => {
+	it("needs a project check on the merge commit when the original branch has diverged", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await go(repo, noMerge());
+		const moved = await commitFile(repo, "other.txt", "new work", "meanwhile");
+		for (const config of [
+			testConfig({ gates: { dod: false } }),
+			testConfig({ commands: { test: "" } }),
+		]) {
+			expect(await go(repo, config, { resume: true })).toBe(true);
+			expect(await git(repo, "rev-parse", "HEAD")).toBe(moved);
+			expect(allStatus(repo, "verified")).toBe(true);
+		}
+		expect(
+			await go(repo, testConfig({ commands: { test: "test ! -f other.txt" } }), { resume: true }),
+		).toBe(false);
+		expect(await git(repo, "rev-parse", "HEAD")).toBe(moved);
+		expect(
+			await go(repo, testConfig({ commands: { test: "test -f other.txt" } }), { resume: true }),
+		).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
+	});
+
+	it("does not use an earlier SHA's checks for a tip with no recorded check", async () => {
+		useFakeAgent(TWO_ISSUES);
+		const repo = await makeRepo();
+		await go(repo, noMerge());
+		const store = latest(repo);
+		const tip = await git(repo, "rev-parse", store.ref);
+		const tipTasks = store.loadTasks().filter((t) => t.sha === tip);
+		store.updateTasks(
+			tipTasks.map((t) => t.id),
+			{ checks_passed: undefined },
+		); // older run format
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		expect(await mainSubjects(repo)).toEqual(["initial"]);
+		await git(repo, "merge", "--ff-only", store.ref); // already integrated by the user
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
+	});
+
 	it("leaves verified work on its branch when merge is not in the pipeline, and merges it later", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();

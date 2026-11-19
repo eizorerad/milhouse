@@ -440,7 +440,7 @@ describe("prompts", () => {
 	});
 
 	it("is empty for an empty config (no stray headings)", () => {
-		expect(context(testConfig())).toBe("");
+		expect(context(testConfig({ commands: { test: "" } }))).toBe("");
 	});
 
 	it("describes an issue with its corrected description and evidence", () => {

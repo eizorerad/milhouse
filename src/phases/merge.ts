@@ -1,12 +1,12 @@
 /**
  * merge: bring the verified work of the run into the branch the run started from. No AI involved.
  *
- * Nothing reaches the user's branch before it was tested: when the branch moved during the run, the merge
- * commit is built and checked in the run's worktree, and only that tested commit is fast-forwarded into
- * the branch. If anything fails, the branch has not been touched.
+ * Automatic merge requires project checks on the commit that lands. An explicit --merge can accept
+ * unchecked work, but a conflict or a failed check still leaves the branch untouched.
  */
 
 import { existsSync } from "node:fs";
+import { projectChecksEnabled } from "../config.ts";
 import { runProjectChecks } from "../gates.ts";
 import {
 	acceptCommit,
@@ -25,15 +25,13 @@ import type { Config, Task } from "../types.ts";
 import { log } from "../ui.ts";
 import { prepareWorktree } from "../worktree.ts";
 
-/** The commit to publish: the accepted tip itself, or a merge commit that was built and tested first. */
-async function candidate(
+/** Build the merge commit in the worktree and run its configured checks before publishing it. */
+async function mergeCandidate(
 	store: RunStore,
 	config: Config,
 	head: string,
 	tip: string,
 ): Promise<{ sha: string } | { error: string }> {
-	if (await isAncestor(store.workDir, head, tip)) return { sha: tip }; // same base: tested already
-
 	const setupFailure = await prepareWorktree(store, config);
 	if (setupFailure) {
 		return { error: `The worktree for the merge could not be prepared:\n${setupFailure}` };
@@ -100,13 +98,14 @@ async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | 
 	return { baseBranch, head, tip };
 }
 
-/** Move the user's branch to a commit that was tested: the tip itself, or a merge commit built and checked first. */
-async function publishTested(
+/** Publish the accepted tip or a new merge commit. Only an explicit --merge may land unchecked work. */
+async function publishWork(
 	store: RunStore,
 	config: Config,
 	verified: Task[],
 	{ baseBranch, head, tip }: Ready,
-): Promise<{ sha: string } | { error: string }> {
+	allowUnchecked: boolean,
+): Promise<{ sha: string } | { error: string; skipped?: boolean }> {
 	const repo = store.workDir;
 	// About to move the user's branch: to a commit that was reviewed, not to one a restored ref points at.
 	const reviewed = new Set(verified.flatMap((t) => (t.sha ? [t.sha] : [])));
@@ -118,7 +117,19 @@ async function publishTested(
 					: `The accepted tip of this run (${tip.slice(0, 8)}) is none of the commits that were reviewed, so nothing was merged. Inspect ${store.ref}; it was changed outside Milhouse.`,
 		};
 	}
-	const result = await candidate(store, config, head, tip);
+	const fastForward = await isAncestor(repo, head, tip);
+	const tipChecked = verified.some((t) => t.sha === tip && t.checks_passed);
+	if (!tipChecked || (!fastForward && !projectChecksEnabled(config))) {
+		const reason = !tipChecked
+			? "No passing project check was recorded for the accepted commit."
+			: "No project check will run on the new merge commit.";
+		if (!allowUnchecked) {
+			log.warn(`Automatic merge deferred. ${reason}`);
+			return { error: reason, skipped: true };
+		}
+		log.warn(`Explicit merge requested. ${reason}`);
+	}
+	const result = fastForward ? { sha: tip } : await mergeCandidate(store, config, head, tip);
 	if ("error" in result) return result;
 	// The checks can take minutes: publish only if the branch is exactly where it was when they began.
 	const unchanged =
@@ -139,7 +150,11 @@ async function publishTested(
 	return result;
 }
 
-export async function mergePhase(store: RunStore, config: Config): Promise<Outcome<string>[]> {
+export async function mergePhase(
+	store: RunStore,
+	config: Config,
+	allowUnchecked: boolean,
+): Promise<Outcome<string>[]> {
 	const verified = store.loadTasks().filter((t) => t.status === "verified");
 	if (verified.length === 0) {
 		log.info("merge: no verified work to merge");
@@ -154,8 +169,8 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 	let landed = head; // already contains the work when the tip is an ancestor of the branch
 	let how = "";
 	if (!(await isAncestor(repo, tip, head))) {
-		const published = await publishTested(store, config, verified, ready);
-		if ("error" in published) return fail(published.error);
+		const published = await publishWork(store, config, verified, ready, allowUnchecked);
+		if ("error" in published) return [{ ok: false, ...published }];
 		landed = published.sha;
 		how = landed === tip ? "" : " with a merge commit";
 	}

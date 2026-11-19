@@ -79,6 +79,7 @@ export function projectWith(configSource?: string): string {
 export function testConfig(overrides: Record<string, unknown> = {}): Config {
 	const base = deepMerge(DEFAULTS as unknown as Record<string, unknown>, {
 		budget: 0,
+		commands: { test: "git diff --check HEAD^ HEAD" },
 		phases: {
 			scan: { retries: 0 },
 			validate: { retries: 0 },

@@ -195,8 +195,12 @@ describe("a full run through the CLI", () => {
 		await milhouse(repo, "--init");
 
 		const result = await milhouse(repo, "improve the greeting");
-		expect(result.stdout).toContain("Pipeline complete");
 		expect(result.code).toBe(0);
+		const store = RunStore.latest(repo) as RunStore;
+		expect(result.stdout).toContain(`milhouse --merge --run-id ${store.runId}`);
+		expect(await git(repo, "log", "--format=%s", "main")).toBe("initial");
+		expect((await milhouse(repo, "--report")).stdout).toContain("2 verified");
+		expect((await milhouse(repo, "--merge", "--run-id", store.runId)).code).toBe(0);
 
 		const list = await milhouse(repo, "--list-runs");
 		expect(list.stdout).toContain("completed");
@@ -256,7 +260,8 @@ describe("a full run through the CLI", () => {
 		expect(result.code).toBe(0);
 		expect(existsSync(join(repo, ".milhouse", "runs"))).toBe(true);
 		expect(existsSync(join(repo, "src", ".milhouse"))).toBe(false);
-		expect((await milhouse(join(repo, "src"), "--list-runs")).stdout).toContain("completed");
+		const store = RunStore.latest(repo) as RunStore;
+		expect((await milhouse(join(repo, "src"), "--list-runs")).stdout).toContain(store.runId);
 	});
 
 	it("explains a missing repository", async () => {

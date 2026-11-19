@@ -47,7 +47,7 @@ Options:
   -h, --help       Print this help
 
 Pipeline: scan -> validate -> plan -> consolidate -> exec -> merge
-exec implements one issue at a time in a worktree and accepts it only after the checks and the review pass.`;
+Automatic merge needs a passing build, lint or test. Unchecked work waits for an explicit --merge.`;
 
 const flag = { type: "boolean", default: false } as const;
 

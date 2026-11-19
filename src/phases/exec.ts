@@ -284,7 +284,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		if (config.gates.dod) await review(ctx, group, work);
 		store.updateTasks(
 			group.tasks.map((t) => t.id),
-			{ sha: checked },
+			{ sha: checked, checks_passed: work.passedChecks.length > 0 },
 		); // before the ref moves: a crash in between is recognised on resume
 		await acceptCommit(store.workDir, store.ref, checked);
 		return checked;

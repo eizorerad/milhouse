@@ -1,6 +1,6 @@
 /** The pipeline: preflight, open or resume a run, run the phases in order, finish with an honest status. */
 
-import { agentSteps, describeAgents, stepHarness } from "./config.ts";
+import { agentSteps, describeAgents, projectChecksEnabled, stepHarness } from "./config.ts";
 import { CostTracker, formatCost, formatUsd } from "./cost.ts";
 import { HARNESSES } from "./engine.ts";
 import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
@@ -31,13 +31,12 @@ export interface PipelineOptions {
 
 type Runner = (store: RunStore, config: Config, cost: CostTracker) => Promise<Outcome<unknown>[]>;
 
-const RUNNERS: Record<Phase, Runner> = {
+const RUNNERS: Record<Exclude<Phase, "merge">, Runner> = {
 	scan: (store, config, cost) => runPhase(scanPhase, store, config, cost),
 	validate: (store, config, cost) => runPhase(validatePhase, store, config, cost),
 	plan: (store, config, cost) => runPhase(planPhase, store, config, cost),
 	consolidate: (store, config, cost) => runPhase(consolidatePhase, store, config, cost),
 	exec: (store, config, cost) => runPhase(execPhase, store, config, cost),
-	merge: (store, config) => mergePhase(store, config),
 };
 
 /** The agents that the steps of `phases` use must be installed. Merge needs none. */
@@ -107,10 +106,11 @@ function announce(store: RunStore, config: Config, todo: Phase[], cost: CostTrac
 		const names = [...unpriced].map((name) => HARNESSES[name].label).join(" and ");
 		log.warn(`The budget cannot limit ${names}: it reports tokens, not dollars.`);
 	}
-	const { build, lint, test } = config.commands;
-	if (todo.includes("exec") && config.gates.dod && !(build || lint || test)) {
+	if (todo.includes("exec") && !projectChecksEnabled(config)) {
 		log.warn(
-			"No build, lint or test command is configured: the reviewer alone checks the work. Set commands in .milhouse/config.ts.",
+			config.gates.dod
+				? "No build, lint or test command is configured. Set one in .milhouse/config.ts for automatic merge."
+				: "Project checks and review are disabled (gates.dod=false). Automatic merge needs a passing project check.",
 		);
 	}
 }
@@ -145,7 +145,10 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 			if (phase !== "merge" && cost.exceeded()) break; // merging costs nothing
 			store.startPhase(phase);
 			log.phase(phase);
-			const outcomes = await RUNNERS[phase](store, config, cost);
+			const outcomes =
+				phase === "merge"
+					? await mergePhase(store, config, opts.only === "merge")
+					: await RUNNERS[phase](store, config, cost);
 			if (outcomes.every((o) => o.ok) && upstreamDone(store, config, phase))
 				store.completePhase(phase);
 			const failed = outcomes.flatMap((o) => (!o.ok && !o.skipped ? [o] : []));
@@ -159,7 +162,9 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 			}
 			if (failures > 0 && config.failFast) break;
 		}
-		return await finish(store, config, cost, failures);
+		const ok = await finish(store, config, cost, failures);
+		hintMerge(store);
+		return ok;
 	} finally {
 		release();
 	}
@@ -201,7 +206,6 @@ async function finish(
 		}
 		store.finish("completed");
 		log.success(`Pipeline complete: ${spent}. Summary: milhouse --report`);
-		hintMerge(store);
 		return true;
 	}
 	store.finish("stopped");
@@ -210,7 +214,6 @@ async function finish(
 		return false;
 	}
 	log.success(`Done: ${spent}. Summary: milhouse --report`);
-	hintMerge(store);
 	return true;
 }
 
@@ -218,6 +221,8 @@ async function finish(
 function hintMerge(store: RunStore): void {
 	const waiting = store.loadTasks().filter((t) => t.status === "verified").length;
 	if (waiting > 0) {
-		log.info(`${waiting} verified task(s) wait in ${store.ref}. Merge them with: milhouse --merge`);
+		log.info(
+			`${waiting} verified task(s) wait in ${store.ref}. To merge: milhouse --merge --run-id ${store.runId}`,
+		);
 	}
 }

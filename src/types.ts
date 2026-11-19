@@ -92,6 +92,8 @@ export interface Task {
 	error?: string;
 	/** The commit accepted for this task. Written just before the run's ref moves to it. */
 	sha?: string;
+	/** Milhouse ran at least one build, lint or test on this SHA and all passed. */
+	checks_passed?: boolean;
 }
 
 export interface RunMeta {

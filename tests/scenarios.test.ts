@@ -14,6 +14,7 @@ import {
 	git,
 	go,
 	latest,
+	mainSubjects,
 	makeRepo,
 	noMerge,
 	readFile,
@@ -201,19 +202,24 @@ describe("what the pipeline tells you", () => {
 		expect(await refExists(repo, latest(repo).ref)).toBe(true);
 	});
 
-	it("warns that only the reviewer checks the work when no command is configured", async () => {
+	it("keeps unchecked work for manual merge even if a test is configured on resume", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
-		expect(await go(repo)).toBe(true);
+		expect(await go(repo, testConfig({ commands: { setup: "true", test: "  " } }))).toBe(true);
+		const store = latest(repo);
+		const tip = await git(repo, "rev-parse", store.ref);
+		expect(await mainSubjects(repo)).toEqual(["initial"]);
+		expect(store.loadMeta().done).not.toContain("merge");
 		expect(output.join("\n")).toContain("No build, lint or test command");
 		expect(calls(fake, "Truth Verifier")[0].prompt).toContain(
 			"No build, lint or test command was run.",
 		);
 
-		output.length = 0;
-		const repo2 = await makeRepo();
-		expect(await go(repo2, testConfig({ commands: { test: "true" } }))).toBe(true);
-		expect(output.join("\n")).not.toContain("No build, lint or test command");
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		expect(await mainSubjects(repo)).toEqual(["initial"]);
+		expect(await git(repo, "rev-parse", store.ref)).toBe(tip);
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(true);
+		expect(await git(repo, "rev-parse", "HEAD")).toBe(tip);
 	});
 
 	it("does not fail a finished run because its worktree is locked", async () => {

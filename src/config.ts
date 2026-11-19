@@ -126,6 +126,10 @@ const RESERVED_ARGS: Record<HarnessName, string[]> = {
 	],
 };
 
+export function projectChecksEnabled({ gates, commands }: Config): boolean {
+	return gates.dod && [commands.build, commands.lint, commands.test].some((cmd) => cmd.trim());
+}
+
 /** The agent that runs `step`: its own choice, or the global one. */
 export const stepHarness = (config: Config, step: AgentStep): HarnessName =>
 	config.phases[step].harness || config.harness;
@@ -265,7 +269,7 @@ export default {
 
   project: { name: "", language: "", framework: "", description: "" },
 
-  // Shell commands run in the worktree. A failing build/lint/test sends the issue back to the agent.
+  // At least one build/lint/test must pass for automatic merge. Setup alone does not count.
   commands: { setup: "", build: "", lint: "", test: "" },
 
   // Rules injected into every prompt, and globs agents must not change (enforced after exec).

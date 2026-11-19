@@ -1,6 +1,6 @@
 # Milhouse
 
-Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code) and [Codex](https://github.com/openai/codex). It investigates before it acts and verifies before it merges: nothing reaches your branch until it is committed, passes your build/lint/test commands and is approved by a reviewer agent.
+Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code) and [Codex](https://github.com/openai/codex). It investigates issues, implements fixes in a worktree and merges them automatically only after review and passing project checks.
 
 ## Quick start
 
@@ -28,7 +28,7 @@ scan → validate → plan → consolidate → exec → merge
 | plan | Each real issue becomes a few small tasks with acceptance criteria. |
 | consolidate | Duplicate tasks are merged. Dependencies between issues decide the order. |
 | exec | Issues run **one at a time** in a git worktree, each on top of the ones accepted before it. The reviewer sees which build, lint and test commands passed, or that none ran. |
-| merge | Accepted work is fast-forwarded into the branch the run started on. |
+| merge | Work that passed project checks is fast-forwarded into the original branch. Unchecked work waits for an explicit `--merge`. |
 
 **exec, per issue:** the agent commits one commit per task (`[<task id>] <title>`) → Milhouse runs the gates → a reviewer agent checks the acceptance criteria against the diff → the issue is accepted. Any failure goes back to the agent as feedback for a repair round (`phases.exec.retries`). An issue that still fails is parked on `mh-failed/<issue-id>`, its worktree is thrown away (a failed attempt may have installed dependencies the next issue would silently build on) and the next issue carries on from a fresh one, so no issue builds on broken work and every issue is tested on top of all the accepted ones. An issue that depends on a failed one waits.
 
@@ -40,7 +40,9 @@ scan → validate → plan → consolidate → exec → merge
 | `dod` | failing `commands.build` / `lint` / `test`; a reviewer that rejects the acceptance criteria |
 | always on | tasks without a commit, uncommitted leftovers, history that drops accepted commits, any commit touching a `neverTouch` path or `.milhouse/` (renames and merges included), checks that move HEAD or rewrite tracked files |
 
-**merge** tests before it publishes: if your branch moved during the run, the merge commit is built and checked in the run's worktree, and only that tested commit is fast-forwarded into your branch. If the merge conflicts or the checks fail, your branch has not been touched and the work stays accepted, waiting. The run then continues from the merged state, so a later `--resume` builds on it.
+**Automatic merge** requires at least one build, lint or test command to have run on the accepted commit, with all checks passing. Setup alone does not count. If your branch advanced, the new merge commit must pass project checks too. A conflict or failing check leaves your branch untouched.
+
+If no project check ran, the work waits in `refs/milhouse/<run-id>`. Adding a test command before `--resume` does not count as running it. After inspecting the changes, use `milhouse --merge --run-id <run-id>` to accept them yourself. A manual fast-forward does not rerun checks; if a merge commit is needed, its configured checks still apply when `gates.dod` is on.
 
 ## Safety
 
