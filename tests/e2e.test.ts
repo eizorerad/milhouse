@@ -445,6 +445,36 @@ describe("merge", () => {
 		expect(store.loadTasks().every((t) => t.status === "merged")).toBe(true);
 	});
 
+	it("refuses a merge whose checks rewrote a tracked file: what lands is what was tested", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await go(repo, noMerge());
+		const moved = await commitFile(repo, "other.txt", "broken\n", "a commit made meanwhile");
+		const store = latest(repo);
+		const errors: string[] = [];
+		spyOn(console, "error").mockImplementation((...parts) => {
+			errors.push(parts.join(" "));
+		});
+
+		// The linter repairs the file and the test passes only because it did: in the worktree, not in the commit.
+		const fixing = testConfig({
+			commands: { lint: "echo fixed > other.txt", test: "grep -q fixed other.txt" },
+		});
+		expect(await go(repo, fixing, { only: "merge" })).toBe(false);
+		expect(errors.join("\n")).toContain("changed tracked files");
+		expect(await git(repo, "rev-parse", "HEAD")).toBe(moved); // nothing was published
+		expect(await git(repo, "log", "--merges", "--oneline")).toBe("");
+		expect(await isDirty(repo)).toBe(false);
+		expect(store.loadTasks().every((t) => t.status === "verified")).toBe(true);
+		expect(await refExists(repo, store.ref)).toBe(true);
+
+		// Commands that leave the files alone merge the same work.
+		const readOnly = testConfig({ commands: { test: "test -f other.txt" } });
+		expect(await go(repo, readOnly, { only: "merge" })).toBe(true);
+		expect(await git(repo, "log", "--merges", "--oneline")).not.toBe("");
+		expect(readFile(repo, "other.txt")).toBe("broken\n");
+	});
+
 	it("refuses to merge into another branch than the run started on", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
