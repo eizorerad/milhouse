@@ -15,8 +15,8 @@ import {
 	isDirty,
 	mergeInto,
 	publish,
+	refExists,
 	resetWorktree,
-	resolveRef,
 	revParse,
 } from "../git.ts";
 import type { Outcome } from "../runner.ts";
@@ -59,15 +59,21 @@ async function candidate(
 	return { sha: await revParse(store.worktree, "HEAD") };
 }
 
-/** Accepted work that agrees with the run's records, on the right branch, in a clean tree: its tip, or what is wrong. */
-async function readyToMerge(
-	store: RunStore,
-	verified: Task[],
-): Promise<{ tip: string } | { error: string }> {
+/** What a merge starts from: where the run started, the branch as it is now, and the accepted tip. */
+interface Ready {
+	baseBranch: string;
+	head: string;
+	tip: string;
+}
+
+/** The accepted work agrees with the run's records, the branch is the right one and its tree clean: or what is wrong. */
+async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | { error: string }> {
 	const repo = store.workDir;
 	const { base_branch: baseBranch } = store.loadMeta();
-	const tip = await resolveRef(repo, store.ref);
-	if (tip === null) return { error: `The accepted work of this run (${store.ref}) is missing.` };
+
+	if (!(await refExists(repo, store.ref))) {
+		return { error: `The accepted work of this run (${store.ref}) is missing.` };
+	}
 	if ((await currentBranch(repo)) !== baseBranch) {
 		return {
 			error: `Check out "${baseBranch}" (the run started there), then run: milhouse --merge`,
@@ -79,6 +85,9 @@ async function readyToMerge(
 				"The working tree has uncommitted changes. Commit or stash them, then run: milhouse --merge",
 		};
 	}
+
+	const head = await revParse(repo, "HEAD");
+	const tip = await revParse(repo, store.ref);
 	// The records and the ref must agree: a ref that was lost and recreated would otherwise let work be
 	// marked as merged that never was.
 	for (const task of verified) {
@@ -88,7 +97,7 @@ async function readyToMerge(
 			};
 		}
 	}
-	return { tip };
+	return { baseBranch, head, tip };
 }
 
 /** Move the user's branch to a commit that was tested: the tip itself, or a merge commit built and checked first. */
@@ -96,11 +105,9 @@ async function publishTested(
 	store: RunStore,
 	config: Config,
 	verified: Task[],
-	head: string,
-	tip: string,
+	{ baseBranch, head, tip }: Ready,
 ): Promise<{ sha: string } | { error: string }> {
 	const repo = store.workDir;
-	const { base_branch: baseBranch } = store.loadMeta();
 	// About to move the user's branch: to a commit that was reviewed, not to one a restored ref points at.
 	const reviewed = new Set(verified.flatMap((t) => (t.sha ? [t.sha] : [])));
 	if (!reviewed.has(tip)) {
@@ -143,12 +150,11 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 
 	const ready = await readyToMerge(store, verified);
 	if ("error" in ready) return fail(ready.error);
-	const { tip } = ready;
-	const head = await revParse(repo, "HEAD");
+	const { head, tip } = ready;
 	let landed = head; // already contains the work when the tip is an ancestor of the branch
 	let how = "";
 	if (!(await isAncestor(repo, tip, head))) {
-		const published = await publishTested(store, config, verified, head, tip);
+		const published = await publishTested(store, config, verified, ready);
 		if ("error" in published) return fail(published.error);
 		landed = published.sha;
 		how = landed === tip ? "" : " with a merge commit";

@@ -259,6 +259,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 
 	async run(group, ctx) {
 		const { store, config } = ctx;
+		const { base_sha: base } = store.loadMeta();
 
 		// What this issue builds on has to be in place; otherwise it would only waste money.
 		const unmet = unmetDependencies(group, store.loadTasks());
@@ -273,7 +274,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		const accepted = await revParse(store.workDir, store.ref);
 		const previous = ctx.lastError ?? group.tasks.find((t) => t.error)?.error;
 		if (ctx.attempt === 0) await startFromAccepted(ctx, group, accepted, previous);
-		const work: Work = { dir: store.worktree, base: store.loadMeta().base_sha, accepted };
+		const work: Work = { dir: store.worktree, base, accepted };
 		await implement(ctx, group, work, previous);
 
 		const failure = await checkWork(work, group, config);

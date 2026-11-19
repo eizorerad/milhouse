@@ -50,9 +50,9 @@ export class CostTracker {
 				spent > 0
 					? { ...this.cost.byPhase, [step]: (this.cost.byPhase[step] ?? 0) + spent }
 					: this.cost.byPhase,
-			tokens: used
-				? { input: before.input + used.input, output: before.output + used.output }
-				: this.cost.tokens,
+			...(used
+				? { tokens: { input: before.input + used.input, output: before.output + used.output } }
+				: this.cost.tokens && { tokens: this.cost.tokens }),
 		};
 		this.persist(this.cost);
 	}
