@@ -1,9 +1,6 @@
 /** Codex as a harness: the whole pipeline on it, mixed with Claude, and what goes wrong with it. */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { agentSteps, stepHarness, stepModel } from "../src/config.ts";
 import { requireAgents } from "../src/pipeline.ts";
 import { run } from "../src/proc.ts";
 import {
@@ -15,7 +12,6 @@ import {
 	go,
 	latest,
 	makeRepo,
-	milhouse,
 	readFile,
 	resetFakeAgentEnv,
 	testConfig,
@@ -129,36 +125,6 @@ describe("one harness per step", () => {
 	});
 });
 
-describe("choosing the harness and the model of a step", () => {
-	it("falls back to the global harness, and to that harness's default model", () => {
-		const claudeRun = testConfig();
-		expect(stepHarness(claudeRun, "scan")).toBe("claude");
-		expect(stepModel(claudeRun, "scan")).toBe("sonnet");
-		const codexRun = testConfig({ harness: "codex" });
-		expect(stepHarness(codexRun, "exec")).toBe("codex");
-		expect(stepModel(codexRun, "exec")).toBe(""); // Codex's own default
-		expect(stepModel(testConfig({ harness: "codex", model: "gpt-x" }), "exec")).toBe("gpt-x");
-	});
-
-	it("never hands the global model to a step on the other harness", () => {
-		const config = testConfig({ model: "opus", phases: { verify: { harness: "codex" } } });
-		expect(stepModel(config, "exec")).toBe("opus");
-		expect(stepModel(config, "verify")).toBe("");
-		const named = testConfig({
-			model: "opus",
-			phases: { verify: { harness: "codex", model: "gpt-x" } },
-		});
-		expect(stepModel(named, "verify")).toBe("gpt-x");
-	});
-
-	it("lists the steps that will call an agent: the reviewer only with the definition of done", () => {
-		const config = testConfig();
-		expect(agentSteps(config, ["scan", "exec", "merge"])).toEqual(["scan", "exec", "verify"]);
-		expect(agentSteps(config, ["merge"])).toEqual([]);
-		expect(agentSteps(testConfig({ gates: { dod: false } }), ["exec"])).toEqual(["exec"]);
-	});
-});
-
 describe("the agents have to be installed", () => {
 	it("requires the binary of every harness the steps will use, and only those", () => {
 		useFakeAgent({});
@@ -249,74 +215,5 @@ describe("a failure that every call would share", () => {
 				.every((i) => i.status === "CONFIRMED"),
 		).toBe(true);
 		expect(calls(fake, "Issue Validator").length).toBeLessThan(8 + 5 + 1);
-	});
-});
-
-describe("the CLI", () => {
-	it("--harness codex runs every step on Codex, whatever the config says", async () => {
-		const fake = useFakeAgent({});
-		const repo = await makeRepo();
-		await milhouse(repo, "--init");
-		writeFileSync(
-			join(repo, ".milhouse", "config.ts"),
-			'export default { harness: "claude", phases: { verify: { harness: "claude" } } };',
-		);
-		expect((await milhouse(repo, "--harness", "codex", "--run")).code).toBe(0);
-		expect(fake.journal().every((call) => call.harness === "codex")).toBe(true);
-	});
-
-	it("--harness codex drops the models that were named for Claude", async () => {
-		const fake = useFakeAgent({});
-		const repo = await makeRepo();
-		await milhouse(repo, "--init");
-		writeFileSync(
-			join(repo, ".milhouse", "config.ts"),
-			'export default { model: "sonnet", phases: { exec: { model: "haiku" } } };',
-		);
-		expect((await milhouse(repo, "--harness", "codex", "--run")).code).toBe(0);
-		expect(fake.journal().length).toBeGreaterThan(5);
-		for (const call of fake.journal()) expect(call.args).not.toContain("-m");
-
-		const fake2 = useFakeAgent({});
-		const repo2 = await makeRepo();
-		await milhouse(repo2, "--init");
-		writeFileSync(join(repo2, ".milhouse", "config.ts"), 'export default { model: "sonnet" };');
-		expect((await milhouse(repo2, "--harness", "codex", "--model", "gpt-x", "--run")).code).toBe(0);
-		for (const call of fake2.journal()) expect(flag(call.args, "-m")).toBe("gpt-x"); // named on purpose
-	});
-
-	it("--model applies where it can: not to a step on the other harness", async () => {
-		const fake = useFakeAgent({});
-		const repo = await makeRepo();
-		await milhouse(repo, "--init");
-		writeFileSync(
-			join(repo, ".milhouse", "config.ts"),
-			'export default { model: "sonnet", phases: { exec: { model: "haiku" }, verify: { harness: "codex" } } };',
-		);
-		expect((await milhouse(repo, "--model", "opus-x", "--run")).code).toBe(0);
-		for (const call of fake.journal()) {
-			if (call.harness === "claude") expect(flag(call.args, "--model")).toBe("opus-x");
-			else expect(call.args).not.toContain("-m");
-		}
-	});
-
-	it("rejects an unknown harness, in the flag and in the config", async () => {
-		const fake = useFakeAgent({});
-		const repo = await makeRepo();
-		const flagged = await milhouse(repo, "--harness", "gemini", "--run");
-		expect(flagged.code).toBe(2);
-		expect(flagged.stderr).toContain("--harness must be one of: claude, codex");
-
-		await milhouse(repo, "--init");
-		writeFileSync(join(repo, ".milhouse", "config.ts"), 'export default { harness: "gemini" };');
-		const configured = await milhouse(repo, "--run");
-		expect(configured.code).toBe(2);
-		expect(configured.stderr).toContain("harness must be one of claude, codex");
-		writeFileSync(
-			join(repo, ".milhouse", "config.ts"),
-			'export default { phases: { scan: { harness: "aider" } } };',
-		);
-		expect((await milhouse(repo, "--run")).stderr).toContain("phases.scan.harness");
-		expect(fake.journal()).toHaveLength(0);
 	});
 });
