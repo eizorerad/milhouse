@@ -34,7 +34,7 @@ scan → validate → plan → consolidate → exec → merge
 
 | Gate (`gates.*`) | Blocks |
 |---|---|
-| `evidence` (validate) | issues whose cited file, lines or snippet do not exist |
+| `evidence` (validate) | issues whose cited file does not exist, or whose snippet is not found at the cited lines (give or take five) |
 | `placeholder` | new `TODO` / `FIXME` / "not implemented" stubs |
 | `diffHygiene` | trailing whitespace and conflict markers in added lines |
 | `dod` | failing `commands.build` / `lint` / `test`; a reviewer that rejects the acceptance criteria |
