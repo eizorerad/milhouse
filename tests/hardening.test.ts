@@ -3,13 +3,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CostTracker, emptyCost } from "../src/cost.ts";
 import { runChecks } from "../src/gates.ts";
 import { addedLines, revParse } from "../src/git.ts";
 import { loadGroups, unmetDependencies } from "../src/phases/exec-order.ts";
 import { execPhase, rejectionReasons } from "../src/phases/exec.ts";
 import { planPhase } from "../src/phases/plan.ts";
-import { type Outcome, type PhaseDef, Skip, runPhase } from "../src/runner.ts";
 import { RunStore } from "../src/state.ts";
 import type { Issue } from "../src/types.ts";
 import { stripControl } from "../src/util.ts";
@@ -21,17 +19,12 @@ import {
 	makeIssue,
 	makeRepo,
 	makeTask,
-	resetFakeAgentEnv,
 	tempDir,
 	testConfig,
-	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-afterEach(() => {
-	cleanupTempDirs();
-	resetFakeAgentEnv();
-});
+afterEach(cleanupTempDirs);
 
 describe("unmetDependencies", () => {
 	const group = {
@@ -169,81 +162,6 @@ describe("stripControl", () => {
 			"a[31mred[0m b\tc\nde",
 		);
 		expect(stripControl("plain ünïcode ✓")).toBe("plain ünïcode ✓");
-	});
-});
-
-describe("runPhase edge cases", () => {
-	function setup(budget = 0) {
-		const store = RunStore.create(tempDir(), undefined, BASE);
-		const config = testConfig({ budget, phases: { validate: { retries: 2, workers: 1 } } });
-		return { store, config, cost: new CostTracker(emptyCost(), budget, () => {}) };
-	}
-	const phase = (
-		run: PhaseDef<number, string>["run"],
-		items = [1],
-	): PhaseDef<number, string> & { recorded: number[] } => {
-		const recorded: number[] = [];
-		return {
-			name: "validate",
-			loadItems: () => items,
-			label: (n) => `item ${n}`,
-			run,
-			record: (item) => {
-				recorded.push(item);
-			},
-			recorded,
-		};
-	};
-
-	it("leaves a skipped item alone: nothing is recorded and it is not a failure to retry", async () => {
-		const { store, config, cost } = setup();
-		const def = phase(
-			async (n) => {
-				if (n === 1) throw new Skip("waiting for something");
-				return "done";
-			},
-			[1, 2],
-		);
-		const outcomes = await runPhase(def, store, config, cost);
-		expect(outcomes[0]).toEqual({ ok: false, error: "waiting for something", skipped: true });
-		expect(outcomes[1]).toEqual({ ok: true, value: "done" });
-		expect(def.recorded).toEqual([2]);
-	});
-
-	it("keeps the real error when the budget runs out between attempts", async () => {
-		const { store, config, cost } = setup(0.5);
-		const def = phase(async () => {
-			cost.add("validate", 1); // this attempt spends the whole budget and fails
-			throw new Error("tests failed: boom");
-		});
-		const [outcome] = await runPhase(def, store, config, cost);
-		expect(outcome.ok).toBe(false);
-		const error = (outcome as { error: string }).error;
-		expect(error).toContain("tests failed: boom");
-		expect(error).toContain("budget is used up");
-		expect((outcome as { skipped?: boolean }).skipped).toBe(false); // it was attempted: record it
-		expect(def.recorded).toEqual([1]);
-	});
-
-	it("refuses to start an agent call without budget instead of spawning one that cannot run", async () => {
-		const fake = useFakeAgent({});
-		const { store, config, cost } = setup(1);
-		const def = phase(async (_n, ctx) => {
-			cost.add("validate", 1); // budget gone before the call
-			return ctx.ask("## Role: Planner");
-		});
-		const [outcome] = await runPhase(def, store, config, cost);
-		expect(outcome.ok).toBe(false);
-		expect(fake.journal()).toHaveLength(0);
-	});
-
-	it("strips terminal escape sequences from error messages it reports", async () => {
-		const { store, config, cost } = setup();
-		const def = phase(async () => {
-			throw new Error("bad \u001b[2J news");
-		});
-		const [outcome] = await runPhase(def, store, config, cost);
-		expect((outcome as Outcome<string> & { error: string }).error).toBe("bad [2J news");
 	});
 });
 

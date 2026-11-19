@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { CostTracker, emptyCost } from "../src/cost.ts";
 import { EngineError } from "../src/engine.ts";
-import { GiveUp, type Outcome, type PhaseDef, runPhase } from "../src/runner.ts";
+import { GiveUp, type Outcome, type PhaseDef, Skip, runPhase } from "../src/runner.ts";
 import { RunStore } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
 import {
@@ -141,6 +141,62 @@ describe("runPhase", () => {
 		}, [1, 2, 3, 4, 5, 6]);
 		await runPhase(def, store, config, cost);
 		expect(peak).toBe(3);
+	});
+});
+
+describe("runPhase edge cases", () => {
+	/** One worker and two retries: what these cases run with. */
+	const oneWorker = { phases: { validate: { retries: 2, workers: 1 } } };
+
+	it("leaves a skipped item alone: nothing is recorded and it is not a failure to retry", async () => {
+		const { store, config, cost } = setup(oneWorker);
+		const def = phase(
+			async (n) => {
+				if (n === 1) throw new Skip("waiting for something");
+				return "done";
+			},
+			[1, 2],
+		);
+		const outcomes = await runPhase(def, store, config, cost);
+		expect(outcomes[0]).toEqual({ ok: false, error: "waiting for something", skipped: true });
+		expect(outcomes[1]).toEqual({ ok: true, value: "done" });
+		expect(def.recorded.map(([item]) => item)).toEqual([2]);
+	});
+
+	it("keeps the real error when the budget runs out between attempts", async () => {
+		const { store, config, cost } = setup(oneWorker, 0.5);
+		const def = phase(async () => {
+			cost.add("validate", 1); // this attempt spends the whole budget and fails
+			throw new Error("tests failed: boom");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect(outcome.ok).toBe(false);
+		const error = (outcome as { error: string }).error;
+		expect(error).toContain("tests failed: boom");
+		expect(error).toContain("budget is used up");
+		expect((outcome as { skipped?: boolean }).skipped).toBe(false); // it was attempted: record it
+		expect(def.recorded.map(([item]) => item)).toEqual([1]);
+	});
+
+	it("refuses to start an agent call without budget instead of spawning one that cannot run", async () => {
+		const fake = useFakeAgent({});
+		const { store, config, cost } = setup(oneWorker, 1);
+		const def = phase(async (_n, ctx) => {
+			cost.add("validate", 1); // budget gone before the call
+			return ctx.ask("## Role: Planner");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect(outcome.ok).toBe(false);
+		expect(fake.journal()).toHaveLength(0);
+	});
+
+	it("strips terminal escape sequences from error messages it reports", async () => {
+		const { store, config, cost } = setup(oneWorker);
+		const def = phase(async () => {
+			throw new Error("bad \u001b[2J news");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect((outcome as Outcome<string> & { error: string }).error).toBe("bad [2J news");
 	});
 });
 
