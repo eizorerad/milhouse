@@ -10,7 +10,7 @@ import { repoRoot } from "./git.ts";
 import { cleanupRun } from "./phases/merge.ts";
 import { runPipeline } from "./pipeline.ts";
 import { formatReport, generateReport } from "./report.ts";
-import { RunStore, STATE_DIR, ensureIgnoreFile } from "./state.ts";
+import { RunStore, STATE_DIR, acquireLock, ensureIgnoreFile } from "./state.ts";
 import {
 	type AgentStep,
 	type Config,
@@ -92,22 +92,29 @@ function parseHarness(value: string | undefined): HarnessName | undefined {
 	return value as HarnessName;
 }
 
-/** CLI flags as config overrides. --harness beats the per-step choices too; --workers only affects parallel steps. */
-function cliOverrides(
-	harness: HarnessName | undefined,
-	workers: number | undefined,
-): Record<string, unknown> {
-	if (!harness && !workers) return {};
+/** --workers as a config override: it only affects the steps that run in parallel. */
+function workerOverrides(workers: number | undefined): Record<string, unknown> {
+	if (!workers) return {};
 	const phases = Object.fromEntries(
-		Object.entries(DEFAULTS.phases).map(([step, options]) => [
-			step,
-			{
-				...(harness && { harness }),
-				...(workers && options.workers !== undefined && { workers }),
-			},
-		]),
+		Object.entries(DEFAULTS.phases)
+			.filter(([, options]) => options.workers !== undefined)
+			.map(([step]) => [step, { workers }]),
 	);
-	return { ...(harness && { harness }), phases };
+	return { phases };
+}
+
+/**
+ * --harness runs every step on that harness, whatever the config says. A model that was named for another
+ * harness is dropped: Codex would not understand a Claude alias, nor Claude a Codex model.
+ */
+function withHarness(config: Config, harness: HarnessName): Config {
+	const phases = Object.fromEntries(
+		Object.entries(config.phases).map(([step, options]) => {
+			const was = options.harness || config.harness;
+			return [step, { ...options, harness, model: was === harness ? options.model : "" }];
+		}),
+	) as Config["phases"];
+	return { ...config, harness, model: config.harness === harness ? config.model : "", phases };
 }
 
 /**
@@ -190,12 +197,18 @@ async function main(argv: string[]): Promise<number> {
 		return 0;
 	}
 	if (values.clean) {
+		if (!existsSync(join(workDir, STATE_DIR, "runs"))) {
+			console.log("Nothing to clean.");
+			return 0;
+		}
+		// Under the lock: a milhouse that resumes one of these runs must not find it half removed.
+		const release = acquireLock(workDir);
 		// cleanupRun first: the records go only once nothing of the run is left. Unmerged work is kept.
 		const { removed, kept } = await RunStore.clean(
 			workDir,
 			positiveInt(values.days, "--days") ?? 30,
 			cleanupRun,
-		);
+		).finally(release);
 		console.log(
 			removed.length > 0
 				? `Removed ${removed.length} run(s):\n${removed.join("\n")}`
@@ -206,8 +219,10 @@ async function main(argv: string[]): Promise<number> {
 	}
 
 	const workers = positiveInt(values.workers, "--workers");
-	const loaded = await loadConfig(workDir, cliOverrides(parseHarness(values.harness), workers));
-	const config = values.model ? withModel(loaded, values.model) : loaded;
+	const harness = parseHarness(values.harness);
+	const loaded = await loadConfig(workDir, workerOverrides(workers));
+	const chosen = harness ? withHarness(loaded, harness) : loaded;
+	const config = values.model ? withModel(chosen, values.model) : chosen;
 	printBanner(pkg.version);
 	const ok = await runPipeline(config, {
 		workDir,

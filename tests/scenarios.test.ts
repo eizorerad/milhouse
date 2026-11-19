@@ -1,7 +1,7 @@
 /** Things that go wrong around the pipeline in real use: the user's checkout, git settings, odd agents. */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { ensureWorktree, refExists, revParse } from "../src/git.ts";
@@ -15,6 +15,7 @@ import {
 	makeRepo,
 	readFile,
 	resetFakeAgentEnv,
+	tempDir,
 	testConfig,
 	useFakeAgent,
 	writeFile,
@@ -112,6 +113,30 @@ describe("the user's checkout while a run is under way", () => {
 	});
 });
 
+describe("where milhouse is started", () => {
+	it("works in a linked worktree of the repository and merges into that worktree's branch", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const linked = join(tempDir(), "linked");
+		await git(repo, "worktree", "add", "-q", "-b", "feature/x", linked);
+
+		expect(await go(linked)).toBe(true);
+		expect(existsSync(join(linked, ".milhouse", "runs"))).toBe(true);
+		expect(await git(repo, "log", "--format=%s", "feature/x")).toContain("[T-");
+		expect(await git(repo, "log", "--format=%s", "main")).not.toContain("[T-"); // the other branch is untouched
+		expect(await refExists(repo, latest(linked).ref)).toBe(false); // cleaned up, as for any run
+	});
+
+	it("works in a directory whose name has spaces and non-ASCII characters", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo(join(tempDir(), "my project \u00e9\u00e8 (copy)"));
+		const config = testConfig({ commands: { setup: "true", test: 'test "$(pwd)" != ""' } });
+		expect(await go(repo, config)).toBe(true);
+		const [task] = latest(repo).loadTasks();
+		expect(readFile(repo, `${task.id}.txt`)).toBe(`${task.title}\n`);
+	});
+});
+
 describe("what the pipeline tells you", () => {
 	it("says how to merge when the pipeline ends before merge", async () => {
 		useFakeAgent({});
@@ -147,7 +172,71 @@ describe("what the pipeline tells you", () => {
 	});
 });
 
+describe("what exec may build on", () => {
+	it("refuses to start a run with untracked files: exec works from the last commit and would not see them", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		writeFile(repo, "wip.ts", "export const wip = 1;\n");
+		await expect(go(repo)).rejects.toThrow(/untracked/);
+		expect(fake.journal()).toHaveLength(0);
+		expect(await go(repo, testConfig({ pipeline: ["scan"] }))).toBe(true); // reading is fine
+	});
+
+	it("will not publish a ref that moved ahead of every commit that was reviewed", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo, noMerge())).toBe(true);
+		const store = latest(repo);
+		const tip = await revParse(repo, store.ref);
+		const tree = await git(repo, "rev-parse", `${tip}^{tree}`);
+		const unreviewed = await git(
+			repo,
+			"commit-tree",
+			tree,
+			"-p",
+			tip,
+			"-m",
+			"an unreviewed commit",
+		);
+		await git(repo, "update-ref", store.ref, unreviewed);
+		const before = await revParse(repo, "HEAD");
+
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(false);
+		expect(await revParse(repo, "HEAD")).toBe(before);
+		expect(output.join("\n")).toContain("reviewed");
+		expect(store.loadTasks().every((t) => t.status === "verified")).toBe(true);
+	});
+
+	it("sets a picked-up attempt up at its own commit: it may need what the accepted work lacks", async () => {
+		useFakeAgent({ fail: { "Truth Verifier": { message: "overloaded", times: 99 } } });
+		const repo = await makeRepo();
+		// Lists the files that exist when setup runs. Setup at the wrong commit would see none of the task files.
+		const config = testConfig({
+			commands: { setup: "ls *.txt >> ../setup-seen 2>/dev/null || true" },
+		});
+		expect(await go(repo, config)).toBe(false); // the work is done, only the review keeps failing
+		const [task] = latest(repo).loadTasks();
+		expect(readFile(repo, ".milhouse/work/setup-seen")).not.toContain(task.id);
+
+		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
+		expect(await go(repo, config, { resume: true })).toBe(true);
+		expect(readFile(repo, ".milhouse/work/setup-seen")).toContain(task.id);
+	});
+});
+
 describe("what agents and checks do to the worktree", () => {
+	it("stops, and leaves the attempt where it is, when a failed attempt cannot be kept", async () => {
+		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
+		const repo = await makeRepo();
+		// A branch named mh-failed stands in the way of every mh-failed/<issue> branch.
+		writeFile(repo, ".git/refs/heads/mh-failed", `${await revParse(repo, "HEAD")}\n`);
+
+		await expect(go(repo)).rejects.toThrow(/could not be kept/);
+		const store = latest(repo);
+		expect(existsSync(store.worktree)).toBe(true); // not removed, not reset: it is the only copy
+		expect(readdirSync(store.worktree).some((name) => name.startsWith("T-"))).toBe(true);
+	});
+
 	it("never lets a commit change .milhouse/, whose config is executed as code", async () => {
 		const fake = useFakeAgent({ exec: { "Add greeting": "milhouse-config" } });
 		const repo = await makeRepo();

@@ -47,11 +47,11 @@ scan → validate → plan → consolidate → exec → merge
 - **Claude:** read-only steps and the reviewer get only `Read`, `Grep` and `Glob`. Your MCP servers (mail, payments, …) are never loaded, and the repository's own `.claude/settings.json` (hooks, env, API URL) is ignored; your user-level Claude settings apply.
 - **Codex:** read-only steps run in Codex's read-only sandbox (nothing can be written), which is not a tool allowlist and does not cover MCP tools. Your Codex configuration applies as it is, MCP servers and plugins included (see Harnesses).
 - **exec runs the agent with permissions bypassed** (`--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex): the agent can run any command as you, inside the run's worktree. Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
-- Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Untracked files in your checkout never block a run. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
+- Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Files that appear in your checkout during a run (an editor's, the OS's) never block its merge; before a run that includes exec, untracked files do stop it, because exec starts from the last commit and would not see them. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
 - Your git hooks run for the agents' commits (agents are told to use `--no-verify` if a commit-message rule rejects `[<task id>] <title>`); Milhouse's own commits skip them. `GIT_DIR` and friends inherited from a caller never reach agents or checks, and without a git identity commits use `milhouse <milhouse@localhost>`.
 - Claude's cost is its own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`. Codex reports tokens, not dollars: they are counted and shown, but `budget` cannot limit them.
 - Ctrl-C, SIGTERM and a closed terminal stop the agents too. After `kill -9` an agent may keep running: check `ps` before resuming.
-- One Milhouse per checkout at a time (`.milhouse/lock`). A command that never stops printing cannot exhaust memory (only the last 32 MB are kept), and what an agent or a check leaves running in the background is stopped when it finishes.
+- One Milhouse per checkout at a time (`.milhouse/lock`). A command that never stops printing cannot exhaust memory (only the last 32 MB are kept), and what an agent or a check leaves running in the background is stopped when it finishes (unless it detached itself from the process group).
 
 ## Harnesses
 
@@ -65,7 +65,7 @@ Milhouse drives Claude Code (`claude`) or Codex (`codex`). `harness` picks the a
 | answer format | enforced by `--json-schema` | asked for in the prompt, checked and retried |
 | extra flags (`harnessArgs`) | `claude: [...]` | `codex: ["-p", "profile"]`, `["--ignore-user-config"]`, ... |
 
-A step uses the model of its own harness: the global `model` does not apply to a step on the other one. `--model` applies to every step on the global harness. A login problem or an unknown model stops the phase at once instead of failing every item three times.
+A step uses the model of its own harness: the global `model` does not apply to a step on the other one. `--harness` drops models that were named for the other harness; `--model` applies to every step on the global harness. `harnessArgs` may add profiles and config overrides, but not the options Milhouse sets itself (output format, sandbox, working directory): those are rejected. A login problem or an unknown model stops the phase at once instead of failing every item three times.
 
 ## Configuration
 

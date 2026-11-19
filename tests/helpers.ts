@@ -50,15 +50,15 @@ export async function commitFile(
 	return git(repo, "rev-parse", "HEAD");
 }
 
-/** A repository on `main` with one commit containing src/app.ts. */
-export async function makeRepo(): Promise<string> {
-	const repo = tempDir();
-	await git(repo, "init", "-q", "-b", "main");
-	await git(repo, "config", "user.email", "test@example.com");
-	await git(repo, "config", "user.name", "Test");
-	await git(repo, "config", "commit.gpgsign", "false");
-	await commitFile(repo, "src/app.ts", "export const app = 1;\nexport const two = 2;\n", "initial");
-	return repo;
+/** A repository on `main` with one commit containing src/app.ts, in `dir` (a new temporary directory by default). */
+export async function makeRepo(dir = tempDir()): Promise<string> {
+	mkdirSync(dir, { recursive: true });
+	await git(dir, "init", "-q", "-b", "main");
+	await git(dir, "config", "user.email", "test@example.com");
+	await git(dir, "config", "user.name", "Test");
+	await git(dir, "config", "commit.gpgsign", "false");
+	await commitFile(dir, "src/app.ts", "export const app = 1;\nexport const two = 2;\n", "initial");
+	return dir;
 }
 
 export function testConfig(overrides: Record<string, unknown> = {}): Config {

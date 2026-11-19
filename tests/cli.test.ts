@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import pkg from "../package.json";
 import { ensureWorktree, isDirty, refExists } from "../src/git.ts";
 import { run } from "../src/proc.ts";
-import { RunStore } from "../src/state.ts";
+import { RunStore, acquireLock } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
 import {
 	cleanupTempDirs,
@@ -128,6 +128,19 @@ describe("--clean", () => {
 		expect(existsSync(store.worktree)).toBe(false);
 		expect(await refExists(repo, store.ref)).toBe(false);
 		expect(RunStore.list(repo).map((r) => r.id)).not.toContain(store.runId);
+	});
+
+	it("does not clean while another milhouse works in the checkout: it could be resuming that very run", async () => {
+		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
+		const repo = await makeRepo();
+		const store = await oldRunWithLeftovers(repo);
+		const release = acquireLock(repo); // this process stands in for the other milhouse
+		const result = await milhouse(repo, "--clean");
+		release();
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain("Another milhouse is running");
+		expect(existsSync(store.worktree)).toBe(true);
+		expect(RunStore.list(repo).map((r) => r.id)).toContain(store.runId);
 	});
 
 	it("keeps a run whose worktree somebody locked, and says so", async () => {

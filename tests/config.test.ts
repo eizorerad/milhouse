@@ -92,6 +92,28 @@ describe("loadConfig", () => {
 		expect((await loadConfig(unknown).catch((e) => e)).message).toContain("harnessArgs.gemini");
 	});
 
+	it("rejects extra arguments that would change what Milhouse relies on, and allows the rest", async () => {
+		const dir = projectWith(
+			`export default { harnessArgs: { claude: ["--output-format", "text", "--verbose"], codex: ["-s", "workspace-write", "--output-last-message=out.txt", "-p", "profile"] } };`,
+		);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error).toBeInstanceOf(ConfigError);
+		expect(error.message).toContain('harnessArgs.claude: "--output-format"');
+		expect(error.message).toContain('harnessArgs.codex: "-s"');
+		expect(error.message).toContain('harnessArgs.codex: "--output-last-message"');
+		expect(error.message).not.toContain("--verbose");
+		expect(error.message).not.toContain('"-p"'); // a profile for Codex; for Claude -p is the print mode
+
+		const claudePrint = projectWith(`export default { harnessArgs: { claude: ["-p"] } };`);
+		expect((await loadConfig(claudePrint).catch((e) => e)).message).toContain(
+			'harnessArgs.claude: "-p"',
+		);
+		const fine = projectWith(
+			`export default { harnessArgs: { codex: ["-p", "profile", "-c", "x=1"] } };`,
+		);
+		expect((await loadConfig(fine)).harnessArgs.codex).toEqual(["-p", "profile", "-c", "x=1"]);
+	});
+
 	it("rejects out-of-range numbers", async () => {
 		const dir = projectWith(
 			"export default { budget: -1, phases: { exec: { retries: -2 }, plan: { workers: 0 } } };",

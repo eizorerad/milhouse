@@ -5,7 +5,7 @@ import { type AgentOptions, type AgentResult, EngineError, type Harness } from "
 
 /** Logged out, out of credit or out of quota: no other call will do better. */
 const SYSTEMIC =
-	/not logged in|invalid api key|please run \/login|credit balance is too low|hit your limit|usage limit/i;
+	/not logged in|invalid api key|please run \/login|credit balance is too low|hit your limit|usage limit|issue with the selected model/i;
 
 type ResultEvent = {
 	subtype?: string;
@@ -79,9 +79,7 @@ export const claude: Harness = {
 				costUsd,
 				fatal: result.subtype === "error_max_budget_usd",
 				systemic:
-					SYSTEMIC.test(detail) ||
-					result.api_error_status === 401 ||
-					result.api_error_status === 403,
+					SYSTEMIC.test(detail) || [401, 403, 404].includes(Number(result.api_error_status)),
 			});
 		}
 		const text =

@@ -11,7 +11,7 @@ import { type AgentOptions, type AgentResult, EngineError, type Harness } from "
 
 /** A bad login, an unknown model or deployment, a spent quota: the same for every call. */
 const SYSTEMIC =
-	/unexpected status (401|403|404)\b|not logged in|missing bearer|invalid api key|incorrect api key|usage limit/i;
+	/unexpected status (401|403|404)\b|not logged in|missing bearer|invalid api key|incorrect api key|usage limit|quota exceeded|billing details/i;
 
 type Event = {
 	type?: string;

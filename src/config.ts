@@ -84,6 +84,43 @@ function typeErrors(value: unknown, template: unknown, path: string): string[] {
 	return typeof value === typeof template ? [] : [`${path} must be a ${typeof template}`];
 }
 
+/**
+ * Options Milhouse sets itself: the protocol it reads, the permissions it grants, where the agent works.
+ * `harnessArgs` may add anything else (a profile, a config override), but not these.
+ */
+const RESERVED_ARGS: Record<HarnessName, string[]> = {
+	claude: [
+		"-p",
+		"--print",
+		"--output-format",
+		"--input-format",
+		"--json-schema",
+		"--tools",
+		"--permission-mode",
+		"--dangerously-skip-permissions",
+		"--setting-sources",
+		"--strict-mcp-config",
+		"--no-session-persistence",
+		"--max-turns",
+		"--max-budget-usd",
+	],
+	codex: [
+		"--json",
+		"--ephemeral",
+		"-C",
+		"--cd",
+		"-s",
+		"--sandbox",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"--full-auto",
+		"--approve-for-me",
+		"-o",
+		"--output-last-message",
+		"--output-schema",
+		"--add-dir",
+	],
+};
+
 /** The agent that runs `step`: its own choice, or the global one. */
 export const stepHarness = (config: Config, step: AgentStep): HarnessName =>
 	config.phases[step].harness || config.harness;
@@ -113,6 +150,14 @@ function validate(config: Config): void {
 	if (errors.length === 0) {
 		const known = (name: string): boolean => (HARNESS_NAMES as readonly string[]).includes(name);
 		if (!known(config.harness)) errors.push(`harness must be one of ${HARNESS_NAMES.join(", ")}`);
+		for (const name of HARNESS_NAMES) {
+			for (const arg of config.harnessArgs[name]) {
+				const option = arg.split("=")[0];
+				if (RESERVED_ARGS[name].includes(option)) {
+					errors.push(`harnessArgs.${name}: "${option}" is set by Milhouse and cannot be changed`);
+				}
+			}
+		}
 		const order = config.pipeline.map((phase) => PHASES.indexOf(phase));
 		if (order.includes(-1) || order.some((index, i) => i > 0 && index <= order[i - 1])) {
 			errors.push(`pipeline must list phases of ${PHASES.join(", ")} once each, in that order`);

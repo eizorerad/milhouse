@@ -230,6 +230,27 @@ describe("a failure that every call would share", () => {
 		});
 	}
 
+	it("does not blame the executor for it when the run is resumed", async () => {
+		const fake = useFakeAgent({
+			fail: {
+				Executor: { message: "Not logged in \u00b7 Please run /login", result: true, times: 1 },
+			},
+		});
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(false);
+		expect(
+			latest(repo)
+				.loadTasks()
+				.every((t) => t.status === "failed"),
+		).toBe(true);
+
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		const executors = calls(fake, "Executor");
+		expect(executors).toHaveLength(2);
+		expect(executors[1].prompt).not.toContain("Not logged in");
+		expect(executors[1].prompt).not.toContain("The previous attempt failed");
+	});
+
 	it("lets --resume take the untouched items up once the cause is gone", async () => {
 		const fake = useFakeAgent({
 			...eight,
@@ -267,6 +288,26 @@ describe("the CLI", () => {
 		);
 		expect((await milhouse(repo, "--harness", "codex", "--run")).code).toBe(0);
 		expect(fake.journal().every((call) => call.harness === "codex")).toBe(true);
+	});
+
+	it("--harness codex drops the models that were named for Claude", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await milhouse(repo, "--init");
+		writeFileSync(
+			join(repo, ".milhouse", "config.ts"),
+			'export default { model: "sonnet", phases: { exec: { model: "haiku" } } };',
+		);
+		expect((await milhouse(repo, "--harness", "codex", "--run")).code).toBe(0);
+		expect(fake.journal().length).toBeGreaterThan(5);
+		for (const call of fake.journal()) expect(call.args).not.toContain("-m");
+
+		const fake2 = useFakeAgent({});
+		const repo2 = await makeRepo();
+		await milhouse(repo2, "--init");
+		writeFileSync(join(repo2, ".milhouse", "config.ts"), 'export default { model: "sonnet" };');
+		expect((await milhouse(repo2, "--harness", "codex", "--model", "gpt-x", "--run")).code).toBe(0);
+		for (const call of fake2.journal()) expect(flag(call.args, "-m")).toBe("gpt-x"); // named on purpose
 	});
 
 	it("--model applies where it can: not to a step on the other harness", async () => {

@@ -78,7 +78,7 @@ describe("repository state", () => {
 		expect(await isAncestor(repo, next, base)).toBe(false);
 	});
 
-	it("is dirty for changes to tracked files, never for untracked files or .milhouse/", async () => {
+	it("is dirty for changes to tracked files; untracked files count only when asked, .milhouse/ never", async () => {
 		const repo = await makeRepo();
 		expect(await isDirty(repo)).toBe(false);
 
@@ -89,6 +89,8 @@ describe("repository state", () => {
 		writeFile(repo, "notes.txt", "untracked");
 		writeFile(repo, ".DS_Store", "x");
 		expect(await isDirty(repo)).toBe(false);
+		// At the start of a run they matter: exec works from the last commit and would not see them.
+		expect(await isDirty(repo, { untracked: true })).toBe(true);
 
 		writeFile(repo, "src/app.ts", "changed");
 		expect(await isDirty(repo)).toBe(true);
@@ -216,6 +218,15 @@ describe("history between two commits", () => {
 		expect(added.map((a) => a.text)).toEqual(["changed 2", "changed 27 TODO"]);
 	});
 
+	it("never answers from a part of the history either: a cut-off log could hide a task or a file", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const message = join(tempDir(), "message.txt"); // too long for a command-line argument
+		writeFileSync(message, "x".repeat(33 * 1024 * 1024));
+		await git(repo, "commit", "-q", "--allow-empty", "-F", message);
+		await expect(commitSubjects(repo, base)).rejects.toThrow(/printed too much/);
+	});
+
 	it("fails loudly when the diff is too large to check, instead of checking a part of it", async () => {
 		const repo = await makeRepo();
 		const base = await revParse(repo, "HEAD");
@@ -293,6 +304,16 @@ describe("the run worktree", () => {
 		await parkWorktree(repo, path, "mh-failed/P1");
 		expect(await git(repo, "show", "mh-failed/P1:unsaved.txt")).toBe("unsaved");
 		expect(await git(repo, "show", "mh-failed/P1:attempt.txt")).toBe("a");
+	});
+
+	it("parks new files even when git is configured not to show untracked files", async () => {
+		const repo = await makeRepo();
+		await git(repo, "config", "status.showUntrackedFiles", "no");
+		const path = join(repo, ".milhouse", "work", "r1");
+		await ensureWorktree(repo, path, REF, await revParse(repo, "HEAD"));
+		writeFile(path, "only-new.txt", "the only copy");
+		await parkWorktree(repo, path, "mh-failed/P1");
+		expect(await git(repo, "show", "mh-failed/P1:only-new.txt")).toBe("the only copy");
 	});
 
 	it("parks a clean worktree as it is, without adding a wip commit", async () => {

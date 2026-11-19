@@ -78,8 +78,14 @@ async function gitRun(cwd: string, ...args: string[]): Promise<RunResult> {
 	return result;
 }
 
-const gitText = async (cwd: string, ...args: string[]): Promise<string> =>
-	(await gitRun(cwd, ...args)).stdout;
+/** Raw stdout. Never a part of it: a cut-off log or path list could hide a task or a protected file. */
+async function gitText(cwd: string, ...args: string[]): Promise<string> {
+	const result = await gitRun(cwd, ...args);
+	if (result.truncated) {
+		throw new Error(`git ${args[0]} printed too much (over 32 MB) to be read in full.`);
+	}
+	return result.stdout;
+}
 
 export async function gitOrThrow(cwd: string, ...args: string[]): Promise<string> {
 	return (await gitText(cwd, ...args)).trimEnd();
@@ -127,15 +133,16 @@ export async function isAncestor(
 
 /**
  * Uncommitted changes to tracked files, outside .milhouse/ (milhouse's own state never counts).
- * Untracked files do not count: an editor may create them during a run, and git itself refuses to
- * overwrite one when work is merged.
+ * Untracked files count only with `untracked`: at the start of a run they matter (exec works from the
+ * last commit and would not see them), but one that an editor creates during the run must not stop its
+ * merge, and git itself refuses to overwrite an untracked file.
  */
-export async function isDirty(cwd: string): Promise<boolean> {
+export async function isDirty(cwd: string, opts: { untracked?: boolean } = {}): Promise<boolean> {
 	const status = await git(
 		cwd,
 		"status",
 		"--porcelain",
-		"--untracked-files=no",
+		`--untracked-files=${opts.untracked ? "all" : "no"}`,
 		"--",
 		".",
 		":(exclude).milhouse",
@@ -226,12 +233,15 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 	return added;
 }
 
+// The reviewer only ever reads the start of these, so a huge diff is cut off instead of refused.
 export async function diffStat(cwd: string, from: string, to = "HEAD"): Promise<string> {
-	return gitOrThrow(cwd, "diff", "--stat", "--no-color", from, to, "--");
+	return (await gitRun(cwd, "diff", "--stat", "--no-color", from, to, "--")).stdout.trimEnd();
 }
 
 export async function diffPatch(cwd: string, from: string, to = "HEAD"): Promise<string> {
-	return gitOrThrow(cwd, "diff", "--text", "--no-color", "--no-ext-diff", from, to, "--");
+	return (
+		await gitRun(cwd, "diff", "--text", "--no-color", "--no-ext-diff", from, to, "--")
+	).stdout.trimEnd();
 }
 
 // ─── The run's worktree and accepted work ────────────────────────────
@@ -278,7 +288,10 @@ export async function deleteRef(repo: string, ref: string): Promise<void> {
  */
 export async function parkWorktree(repo: string, path: string, parkBranch: string): Promise<void> {
 	const cannotKeep = (why: string) => new Error(`The failed attempt could not be kept: ${why}`);
-	if ((await git(path, "status", "--porcelain")).out) {
+	// All of it: a user's status.showUntrackedFiles=no would hide new files, and the attempt would be dropped.
+	const status = await git(path, "status", "--porcelain", "--untracked-files=all");
+	if (!status.ok) throw cannotKeep(status.err);
+	if (status.out) {
 		const added = await git(path, "add", "-A");
 		if (!added.ok) throw cannotKeep(added.err);
 		const committed = await git(

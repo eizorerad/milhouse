@@ -104,9 +104,13 @@ export async function runPhase<TItem, TValue>(
 		}
 	};
 
+	let stopped: string | undefined; // set by a failure that every other item would hit as well
+
 	const attempts = async (item: TItem, label: string): Promise<Outcome<TValue>> => {
 		let lastError: string | undefined;
 		for (let attempt = 0; attempt <= options.retries; attempt++) {
+			// Another worker found that every call would fail: calls in flight finish, no new one starts.
+			if (stopped) return { ok: false, error: stopped, skipped: true };
 			if (cost.exceeded()) {
 				const error = lastError
 					? `${lastError}\n(stopped: the budget is used up)`
@@ -134,7 +138,6 @@ export async function runPhase<TItem, TValue>(
 		return { ok: false, error: lastError ?? "failed" };
 	};
 
-	let stopped: string | undefined; // set by a failure that every other item would hit as well
 	const outcomes = await mapPool(items, workers, async (item): Promise<Outcome<TValue>> => {
 		if (stopped) return { ok: false, error: stopped, skipped: true }; // not attempted: --resume takes it up
 		const label = def.label(item);

@@ -33,7 +33,6 @@ import {
 import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
 import type { Config, Task } from "../types.ts";
-import { log } from "../ui.ts";
 import { errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
 import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
@@ -49,9 +48,15 @@ export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
  */
 const REVIEW_UNAVAILABLE = "The review could not be completed";
 
+/** The executor could not run at all (logged out, unknown model): nothing it did, nothing it can fix. */
+const AGENT_UNAVAILABLE = "The agent could not run";
+
 /** Failures that are not the executor's fault must not be fed back to it as feedback. */
 const blamesAgent = (error: string | undefined): error is string =>
-	error !== undefined && !error.startsWith(REVIEW_UNAVAILABLE) && !error.startsWith("setup failed");
+	error !== undefined &&
+	!error.startsWith(REVIEW_UNAVAILABLE) &&
+	!error.startsWith(AGENT_UNAVAILABLE) &&
+	!error.startsWith("setup failed");
 
 // ─── Checks and review ───────────────────────────────────────────────
 
@@ -231,6 +236,11 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 				(await branchExists(repo, parked)) &&
 				(await isAncestor(repo, accepted, parked));
 			await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+			if (pickUp) {
+				// The attempt may need what the accepted work lacks (a new dependency): set up at its commit.
+				const failure = await prepareWorktree(store, config, { setupAgain: true });
+				if (failure) throw new GiveUp(failure);
+			}
 		}
 		const work: Work = { dir: store.worktree, base, accepted };
 
@@ -238,11 +248,18 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		const done = group.tasks.filter((t) => doneIds.has(t.id));
 		const problem = blamesAgent(previous) ? previous : undefined;
 		if (done.length < group.tasks.length || problem !== undefined) {
-			await ctx.ask(execPrompt(group, done, config, problem), {
-				cwd: work.dir,
-				tools: "all",
-				timeoutMs: 30 * MINUTE,
-			});
+			try {
+				await ctx.ask(execPrompt(group, done, config, problem), {
+					cwd: work.dir,
+					tools: "all",
+					timeoutMs: 30 * MINUTE,
+				});
+			} catch (err) {
+				if (err instanceof EngineError && err.systemic) {
+					throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, { systemic: true });
+				}
+				throw err;
+			}
 		}
 
 		const failure = await checkWork(work, group, config);
@@ -268,7 +285,10 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 			try {
 				await parkWorktree(store.workDir, store.worktree, parkBranch(group.issue.id));
 			} catch (err) {
-				log.warn(`${group.issue.title}: ${errorMessage(err)}`);
+				// What is in the worktree is the only copy of the attempt: leave it alone, and stop everything.
+				throw new Error(
+					`${errorMessage(err)}\nThe attempt is still in ${store.worktree}. Save what you need from it, then run: milhouse --resume (it starts again from the accepted work).`,
+				);
 			}
 			// Not just a reset: a failed attempt may have installed dependencies that the next issue would
 			// silently build on. A fresh worktree (and its setup) starts every issue from what was accepted.

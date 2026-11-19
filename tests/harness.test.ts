@@ -214,6 +214,7 @@ describe("reading Codex's event stream", () => {
 				true,
 			],
 			["You've hit your usage limit. Try again later.", true],
+			["Quota exceeded. Check your plan and billing details.", true],
 			["unexpected status 429 Too Many Requests", false],
 			["unexpected status 500 Internal Server Error", false],
 			["stream disconnected before completion", false],
@@ -256,6 +257,15 @@ describe("reading Claude's result", () => {
 			[{ is_error: true, result: "Not logged in · Please run /login", total_cost_usd: 0 }, true],
 			[{ is_error: true, result: "Invalid API key", api_error_status: 401 }, true],
 			[{ is_error: true, result: "Credit balance is too low" }, true],
+			[
+				{
+					is_error: true,
+					result:
+						"There's an issue with the selected model (x). It may not exist or you may not have access to it.",
+					api_error_status: 404,
+				},
+				true,
+			],
 			[{ is_error: true, result: "You've hit your limit · resets 5pm" }, true],
 			[{ is_error: true, subtype: "error_during_execution", errors: ["tool crashed"] }, false],
 			[

@@ -99,6 +99,13 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 	let landed = head; // already contains the work when the tip is an ancestor of the branch
 	let how = "";
 	if (!(await isAncestor(repo, tip, head))) {
+		// About to move the user's branch: to a commit that was reviewed, not to one a restored ref points at.
+		const reviewed = new Set(verified.flatMap((t) => (t.sha ? [t.sha] : [])));
+		if (reviewed.size > 0 && !reviewed.has(tip)) {
+			return fail(
+				`The accepted tip of this run (${tip.slice(0, 8)}) is none of the commits that were reviewed, so nothing was merged. Inspect ${store.ref}; it was changed outside Milhouse.`,
+			);
+		}
 		const result = await candidate(store, config, head, tip);
 		if ("error" in result) return fail(result.error);
 		// The checks can take minutes: publish only if the branch is exactly where it was when they began.
