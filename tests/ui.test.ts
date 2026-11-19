@@ -29,6 +29,26 @@ describe("formatDuration", () => {
 	});
 });
 
+describe("log (text from agents, git and the repository is not trusted)", () => {
+	it("never lets a terminal escape sequence through, whichever level prints it", () => {
+		const hostile = "bad \u001b[2J\u001b]0;title\u0007 text\u0085";
+		log.info(hostile);
+		log.success(hostile);
+		log.warn(hostile);
+		log.error(hostile);
+		const progress = new Progress("exec", 1);
+		progress.begin("item");
+		progress.note(hostile);
+		progress.end("item", false, hostile);
+		progress.stop();
+		for (const line of lines) {
+			const plain = stripVTControlCharacters(line); // only the colours Milhouse adds itself may remain
+			expect(plain).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+		}
+		expect(lines.join("\n")).toContain("bad ");
+	});
+});
+
 describe("log", () => {
 	it("prints debug lines only in verbose mode", () => {
 		log.debug("hidden");

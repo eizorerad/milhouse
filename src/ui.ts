@@ -1,6 +1,7 @@
 /** Terminal output: logger, banner and a one-line progress indicator. */
 
 import pc from "picocolors";
+import { stripControl } from "./util.ts";
 
 let verbose = false;
 export const setVerbose = (value: boolean): void => {
@@ -15,13 +16,16 @@ function emit(stream: "log" | "error", message: string): void {
 	console[stream](message);
 }
 
+/** What an agent, git or the repository said: shown, but never allowed to drive the terminal. */
+const text = stripControl;
+
 export const log = {
-	info: (message: string) => emit("log", `${pc.blue("*")} ${message}`),
-	success: (message: string) => emit("log", `${pc.green("+")} ${message}`),
-	warn: (message: string) => emit("log", `${pc.yellow("!")} ${message}`),
-	error: (message: string) => emit("error", `${pc.red("x")} ${message}`),
+	info: (message: string) => emit("log", `${pc.blue("*")} ${text(message)}`),
+	success: (message: string) => emit("log", `${pc.green("+")} ${text(message)}`),
+	warn: (message: string) => emit("log", `${pc.yellow("!")} ${text(message)}`),
+	error: (message: string) => emit("error", `${pc.red("x")} ${text(message)}`),
 	debug: (message: string) => {
-		if (verbose) emit("log", pc.dim(`  ${message}`));
+		if (verbose) emit("log", pc.dim(`  ${text(message)}`));
 	},
 	phase: (name: string) => {
 		emit("log", `\n${pc.dim("-".repeat(48))}\n  ${pc.bold(pc.magenta(name.toUpperCase()))}`);
@@ -73,18 +77,18 @@ export class Progress {
 
 	begin(id: string): void {
 		this.active.add(id);
-		if (!this.tty) console.log(`  ... ${id}`);
+		if (!this.tty) console.log(`  ... ${text(id)}`);
 	}
 
 	end(id: string, ok: boolean, note = ""): void {
 		this.active.delete(id);
 		this.done++;
 		const mark = ok ? pc.green("+") : pc.red("x");
-		this.print(`${mark} ${id}${note ? pc.dim(` - ${note}`) : ""}`);
+		this.print(`${mark} ${text(id)}${note ? pc.dim(` - ${text(note)}`) : ""}`);
 	}
 
 	note(message: string): void {
-		this.print(`${pc.yellow("!")} ${message}`);
+		this.print(`${pc.yellow("!")} ${text(message)}`);
 	}
 
 	stop(): void {

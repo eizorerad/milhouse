@@ -168,7 +168,10 @@ function validate(config: Config): void {
 		if (order.includes(-1) || order.some((index, i) => i > 0 && index <= order[i - 1])) {
 			errors.push(`pipeline must list phases of ${PHASES.join(", ")} once each, in that order`);
 		}
-		if (config.budget < 0) errors.push("budget must be >= 0");
+		// NaN would switch the limit off without a word, Infinity would be passed on to the agent as a limit.
+		if (!Number.isFinite(config.budget) || config.budget < 0) {
+			errors.push("budget must be a finite number >= 0");
+		}
 		for (const [step, options] of Object.entries(config.phases)) {
 			if (options.harness !== "" && !known(options.harness)) {
 				errors.push(`phases.${step}.harness must be "" or one of ${HARNESS_NAMES.join(", ")}`);

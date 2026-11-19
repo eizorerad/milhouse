@@ -132,12 +132,21 @@ describe("loadConfig", () => {
 		expect((await loadConfig(fine)).harnessArgs.codex).toEqual(["-p", "profile", "-c", "x=1"]);
 	});
 
+	it("rejects a budget that is not a finite number: NaN would switch the limit off, Infinity would break every call", async () => {
+		for (const budget of ["Number.NaN", "Number.POSITIVE_INFINITY", "-Infinity"]) {
+			const dir = projectWith(`export default { budget: ${budget} };`);
+			const error = await loadConfig(dir).catch((e) => e);
+			expect(error).toBeInstanceOf(ConfigError);
+			expect(error.message).toContain("budget must be a finite number >= 0");
+		}
+	});
+
 	it("rejects out-of-range numbers", async () => {
 		const dir = projectWith(
 			"export default { budget: -1, phases: { exec: { retries: -2 }, plan: { workers: 0 } } };",
 		);
 		const error = await loadConfig(dir).catch((e) => e);
-		expect(error.message).toContain("budget must be >= 0");
+		expect(error.message).toContain("budget must be a finite number >= 0");
 		expect(error.message).toContain("phases.exec.retries");
 		expect(error.message).toContain("phases.plan.workers");
 	});
