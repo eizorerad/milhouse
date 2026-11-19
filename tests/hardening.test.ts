@@ -275,7 +275,7 @@ describe("fixes found by the final review", () => {
 		const dir = tempDir();
 		const started = Date.now();
 		// The shell exits 0 at once; the background child is stopped, and does not turn the pass into a timeout.
-		expect(await runChecks([["test", "sleep 30 & exit 0"]], dir, 5_000)).toBeNull();
+		expect(await runChecks(dir, { test: "sleep 30 & exit 0" }, { timeoutMs: 5_000 })).toBeNull();
 		expect(Date.now() - started).toBeLessThan(4_000);
 	});
 
