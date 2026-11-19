@@ -146,6 +146,36 @@ function selectRun(workDir: string, runId?: string): RunStore {
 	return store;
 }
 
+function listRuns(workDir: string): void {
+	const runs = RunStore.list(workDir);
+	if (runs.length === 0) console.log("No runs yet.");
+	for (const run of runs)
+		console.log(`${run.id}  ${run.status.padEnd(9)} ${run.phase.padEnd(12)} ${run.scope ?? "-"}`);
+}
+
+/** Removes old finished runs. Returns the exit code: 1 when a run had to be kept. */
+async function cleanRuns(workDir: string, days: string | undefined): Promise<number> {
+	if (!existsSync(join(workDir, STATE_DIR, "runs"))) {
+		console.log("Nothing to clean.");
+		return 0;
+	}
+	// Under the lock: a milhouse that resumes one of these runs must not find it half removed.
+	const release = acquireLock(workDir);
+	// cleanupRun first: the records go only once nothing of the run is left. Unmerged work is kept.
+	const { removed, kept } = await RunStore.clean(
+		workDir,
+		positiveInt(days, "--days") ?? 30,
+		cleanupRun,
+	).finally(release);
+	console.log(
+		removed.length > 0
+			? `Removed ${removed.length} run(s):\n${removed.join("\n")}`
+			: "Nothing to clean.",
+	);
+	for (const { id, reason } of kept) log.warn(`${id} was kept: ${reason}`);
+	return kept.length > 0 ? 1 : 0;
+}
+
 async function main(argv: string[]): Promise<number> {
 	const { values, positionals } = parseArgs({
 		args: argv,
@@ -180,10 +210,7 @@ async function main(argv: string[]): Promise<number> {
 	}
 
 	if (values["list-runs"]) {
-		const runs = RunStore.list(workDir);
-		if (runs.length === 0) console.log("No runs yet.");
-		for (const run of runs)
-			console.log(`${run.id}  ${run.status.padEnd(9)} ${run.phase.padEnd(12)} ${run.scope ?? "-"}`);
+		listRuns(workDir);
 		return 0;
 	}
 	if (values.report) {
@@ -191,27 +218,7 @@ async function main(argv: string[]): Promise<number> {
 		console.log(formatReport(generateReport(selectRun(workDir, values["run-id"])), format));
 		return 0;
 	}
-	if (values.clean) {
-		if (!existsSync(join(workDir, STATE_DIR, "runs"))) {
-			console.log("Nothing to clean.");
-			return 0;
-		}
-		// Under the lock: a milhouse that resumes one of these runs must not find it half removed.
-		const release = acquireLock(workDir);
-		// cleanupRun first: the records go only once nothing of the run is left. Unmerged work is kept.
-		const { removed, kept } = await RunStore.clean(
-			workDir,
-			positiveInt(values.days, "--days") ?? 30,
-			cleanupRun,
-		).finally(release);
-		console.log(
-			removed.length > 0
-				? `Removed ${removed.length} run(s):\n${removed.join("\n")}`
-				: "Nothing to clean.",
-		);
-		for (const { id, reason } of kept) log.warn(`${id} was kept: ${reason}`);
-		return kept.length > 0 ? 1 : 0;
-	}
+	if (values.clean) return cleanRuns(workDir, values.days);
 
 	const workers = positiveInt(values.workers, "--workers");
 	const harness = parseHarness(values.harness);
