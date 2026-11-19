@@ -69,5 +69,5 @@ export interface Harness {
 	/** What is written to stdin. */
 	input(prompt: string, opts: AgentOptions): string;
 	/** The answer of a finished process. Throws EngineError when there is none. */
-	parse(out: RunResult, opts: AgentOptions): AgentResult;
+	parse(out: RunResult): AgentResult;
 }

@@ -4,17 +4,19 @@ import { agentSteps, describeAgents, stepHarness } from "./config.ts";
 import { CostTracker, formatCost, formatUsd } from "./cost.ts";
 import { HARNESSES } from "./engine.ts";
 import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
+import { acquireLock } from "./lock.ts";
 import { consolidatePhase } from "./phases/consolidate.ts";
 import { execPhase } from "./phases/exec.ts";
-import { cleanupRun, mergePhase } from "./phases/merge.ts";
+import { mergePhase } from "./phases/merge.ts";
 import { planPhase } from "./phases/plan.ts";
 import { scanPhase } from "./phases/scan.ts";
 import { validatePhase } from "./phases/validate.ts";
 import { type Outcome, runPhase } from "./runner.ts";
-import { RunStore, acquireLock } from "./state.ts";
+import { RunStore } from "./state.ts";
 import { type Config, PHASES, type Phase } from "./types.ts";
 import { log } from "./ui.ts";
 import { errorMessage } from "./util.ts";
+import { cleanupRun } from "./worktree.ts";
 
 export interface PipelineOptions {
 	/** Repository to work in. Defaults to the current directory. */
@@ -79,6 +81,40 @@ async function existingRun(workDir: string, opts: PipelineOptions): Promise<RunS
 	return store;
 }
 
+/** Scan, validate and plan read the checkout; exec starts from the last commit and would not have its untracked files. */
+async function refuseUntracked(workDir: string, todo: Phase[]): Promise<void> {
+	const readsCheckout = todo.some((p) => p === "scan" || p === "validate" || p === "plan");
+	if (todo.includes("exec") && readsCheckout && (await isDirty(workDir, { untracked: true }))) {
+		throw new Error(
+			"The working tree has untracked files, which exec would not see (it starts from the last commit). Commit them, add them to .gitignore, or stash them: git stash -u",
+		);
+	}
+}
+
+/** What this command is about to do and spend, and what to watch out for. */
+function announce(store: RunStore, config: Config, todo: Phase[], cost: CostTracker): void {
+	log.info(`Run ${store.runId}: ${todo.join(" -> ") || "nothing left to do"}`);
+	if (config.budget > 0) {
+		log.info(`Budget ${formatUsd(config.budget)}, spent so far ${formatUsd(cost.current.total)}`);
+	}
+	if (agentSteps(config, todo).length > 0) log.info(`Agents: ${describeAgents(config, todo)}`);
+	const unpriced = new Set(
+		agentSteps(config, todo)
+			.map((step) => stepHarness(config, step))
+			.filter((name) => !HARNESSES[name].reportsCost),
+	);
+	if (config.budget > 0 && unpriced.size > 0) {
+		const names = [...unpriced].map((name) => HARNESSES[name].label).join(" and ");
+		log.warn(`The budget cannot limit ${names}: it reports tokens, not dollars.`);
+	}
+	const { build, lint, test } = config.commands;
+	if (todo.includes("exec") && config.gates.dod && !(build || lint || test)) {
+		log.warn(
+			"No build, lint or test command is configured: the reviewer alone checks the work. Set commands in .milhouse/config.ts.",
+		);
+	}
+}
+
 /** Returns true when everything that was asked for succeeded. */
 export async function runPipeline(config: Config, opts: PipelineOptions = {}): Promise<boolean> {
 	const workDir = opts.workDir ?? process.cwd();
@@ -92,13 +128,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		// A full resume skips finished phases; an explicitly requested phase always runs.
 		const todo =
 			opts.only || !opts.resume ? wanted : wanted.filter((phase) => !done.includes(phase));
-		const readsCheckout = todo.some((p) => p === "scan" || p === "validate" || p === "plan");
-		if (todo.includes("exec") && readsCheckout && (await isDirty(workDir, { untracked: true }))) {
-			// Scan and validate would read these files; exec starts from the last commit and would not have them.
-			throw new Error(
-				"The working tree has untracked files, which exec would not see (it starts from the last commit). Commit them, add them to .gitignore, or stash them: git stash -u",
-			);
-		}
+		await refuseUntracked(workDir, todo);
 		requireAgents(config, todo); // before a new run leaves anything behind
 		const store =
 			existing ??
@@ -108,26 +138,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 			});
 		const cost = new CostTracker(store.loadCost(), config.budget, (c) => store.saveCost(c));
 
-		log.info(`Run ${store.runId}: ${todo.join(" -> ") || "nothing left to do"}`);
-		if (config.budget > 0) {
-			log.info(`Budget ${formatUsd(config.budget)}, spent so far ${formatUsd(cost.current.total)}`);
-		}
-		if (agentSteps(config, todo).length > 0) log.info(`Agents: ${describeAgents(config, todo)}`);
-		const unpriced = new Set(
-			agentSteps(config, todo)
-				.map((step) => stepHarness(config, step))
-				.filter((name) => !HARNESSES[name].reportsCost),
-		);
-		if (config.budget > 0 && unpriced.size > 0) {
-			const names = [...unpriced].map((name) => HARNESSES[name].label).join(" and ");
-			log.warn(`The budget cannot limit ${names}: it reports tokens, not dollars.`);
-		}
-		const { build, lint, test } = config.commands;
-		if (todo.includes("exec") && config.gates.dod && !(build || lint || test)) {
-			log.warn(
-				"No build, lint or test command is configured: the reviewer alone checks the work. Set commands in .milhouse/config.ts.",
-			);
-		}
+		announce(store, config, todo, cost);
 
 		let failures = 0;
 		for (const phase of todo) {

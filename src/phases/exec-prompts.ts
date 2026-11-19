@@ -1,6 +1,7 @@
 /** What the executor and the reviewer are told. */
 
 import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
+import { arrayOf, object } from "../schema.ts";
 import type { Config, Task } from "../types.ts";
 import type { IssueGroup } from "./exec-order.ts";
 
@@ -57,27 +58,16 @@ export function execPrompt(
 	);
 }
 
-export const REVIEW_SCHEMA = {
-	type: "object",
-	properties: {
-		summary: { type: "string" },
-		tasks: {
-			type: "array",
-			items: {
-				type: "object",
-				properties: {
-					task_id: { type: "string" },
-					passed: { type: "boolean" },
-					reason: { type: "string" },
-				},
-				required: ["task_id", "passed", "reason"],
-				additionalProperties: false,
-			},
-		},
-	},
-	required: ["summary", "tasks"],
-	additionalProperties: false,
-} as const;
+export const REVIEW_SCHEMA = object({
+	summary: { type: "string" },
+	tasks: arrayOf(
+		object({
+			task_id: { type: "string" },
+			passed: { type: "boolean" },
+			reason: { type: "string" },
+		}),
+	),
+});
 
 export function reviewPrompt(
 	group: IssueGroup,

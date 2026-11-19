@@ -2,11 +2,10 @@
 
 import { feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
+import { arrayOf, object } from "../schema.ts";
 import type { Task } from "../types.ts";
 import { log } from "../ui.ts";
-import { parseJson, stringList } from "../util.ts";
-
-const MINUTE = 60_000;
+import { MINUTE, parseJson, stringList } from "../util.ts";
 
 export interface Consolidation {
 	duplicates: Array<{ keep: string; remove: string[] }>;
@@ -15,33 +14,16 @@ export interface Consolidation {
 
 const ids = { type: "array", items: { type: "string" } } as const;
 
-export const CONSOLIDATE_SCHEMA = {
-	type: "object",
-	properties: {
-		duplicates: {
-			type: "array",
-			items: {
-				type: "object",
-				properties: { keep: { type: "string" }, remove: ids, reason: { type: "string" } },
-				required: ["keep", "remove", "reason"],
-				additionalProperties: false,
-			},
-		},
-		cross_dependencies: {
-			type: "array",
-			items: {
-				type: "object",
-				properties: { task_id: { type: "string" }, depends_on: ids, reason: { type: "string" } },
-				required: ["task_id", "depends_on", "reason"],
-				additionalProperties: false,
-			},
-		},
-	},
-	required: ["duplicates", "cross_dependencies"],
-	additionalProperties: false,
-} as const;
+const CONSOLIDATE_SCHEMA = object({
+	duplicates: arrayOf(
+		object({ keep: { type: "string" }, remove: ids, reason: { type: "string" } }),
+	),
+	cross_dependencies: arrayOf(
+		object({ task_id: { type: "string" }, depends_on: ids, reason: { type: "string" } }),
+	),
+});
 
-export function consolidatePrompt(tasks: Task[], lastError?: string): string {
+function consolidatePrompt(tasks: Task[], lastError?: string): string {
 	const list = tasks
 		.map(
 			(t) =>
@@ -91,12 +73,10 @@ export function parseConsolidation(text: string): Consolidation {
 	};
 }
 
-/** Follow `from -> to` redirects to the final id. The step limit guards against cycles. */
+/** Follow `from -> to` redirects to the final id. A redirect only joins the ends of two chains, so there is no cycle. */
 function resolveId(redirect: Map<string, string>, id: string): string {
 	let current = id;
-	for (let step = 0; step < redirect.size && redirect.has(current); step++) {
-		current = redirect.get(current) as string;
-	}
+	while (redirect.has(current)) current = redirect.get(current) as string;
 	return current;
 }
 

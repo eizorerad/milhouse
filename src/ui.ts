@@ -103,7 +103,7 @@ export class Progress {
 
 	private render(): void {
 		const frame = pc.magenta(FRAMES[this.frame++ % FRAMES.length]);
-		const running = [...this.active].join(", ");
+		const running = [...this.active].map(text).join(", "); // the names come from the agent
 		const elapsed = formatDuration(Date.now() - this.startedAt);
 		process.stdout.write(
 			`\r  ${frame} ${this.label} ${this.done}/${this.total} ${pc.dim(`${running} ${elapsed}`)}\x1b[K`,

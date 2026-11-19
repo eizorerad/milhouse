@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { CostTracker, emptyCost } from "../src/cost.ts";
 import { EngineError } from "../src/engine.ts";
-import { GiveUp, type Outcome, type PhaseDef, runPhase } from "../src/runner.ts";
+import { GiveUp, type Outcome, type PhaseDef, Skip, runPhase } from "../src/runner.ts";
 import { RunStore } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
 import {
+	BASE,
 	cleanupTempDirs,
+	flag,
 	resetFakeAgentEnv,
 	tempDir,
 	testConfig,
@@ -24,7 +26,7 @@ interface Setup {
 }
 
 function setup(configOverrides: Record<string, unknown> = {}, budget = 0): Setup {
-	const store = RunStore.create(tempDir(), undefined, { branch: "main", sha: "abc" });
+	const store = RunStore.create(tempDir(), undefined, BASE);
 	const config = testConfig({ budget, ...configOverrides });
 	return { store, config, cost: new CostTracker(emptyCost(), budget, () => {}) };
 }
@@ -142,6 +144,61 @@ describe("runPhase", () => {
 	});
 });
 
+describe("runPhase edge cases", () => {
+	const oneWorkerTwoRetries = { phases: { validate: { retries: 2, workers: 1 } } };
+
+	it("leaves a skipped item alone: nothing is recorded and it is not a failure to retry", async () => {
+		const { store, config, cost } = setup(oneWorkerTwoRetries);
+		const def = phase(
+			async (n) => {
+				if (n === 1) throw new Skip("waiting for something");
+				return "done";
+			},
+			[1, 2],
+		);
+		const outcomes = await runPhase(def, store, config, cost);
+		expect(outcomes[0]).toEqual({ ok: false, error: "waiting for something", skipped: true });
+		expect(outcomes[1]).toEqual({ ok: true, value: "done" });
+		expect(def.recorded.map(([item]) => item)).toEqual([2]);
+	});
+
+	it("keeps the real error when the budget runs out between attempts", async () => {
+		const { store, config, cost } = setup(oneWorkerTwoRetries, 0.5);
+		const def = phase(async () => {
+			cost.add("validate", 1); // this attempt spends the whole budget and fails
+			throw new Error("tests failed: boom");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect(outcome.ok).toBe(false);
+		const error = (outcome as { error: string }).error;
+		expect(error).toContain("tests failed: boom");
+		expect(error).toContain("budget is used up");
+		expect((outcome as { skipped?: boolean }).skipped).toBe(false); // it was attempted: record it
+		expect(def.recorded.map(([item]) => item)).toEqual([1]);
+	});
+
+	it("refuses to start an agent call without budget instead of spawning one that cannot run", async () => {
+		const fake = useFakeAgent({});
+		const { store, config, cost } = setup(oneWorkerTwoRetries, 1);
+		const def = phase(async (_n, ctx) => {
+			cost.add("validate", 1); // budget gone before the call
+			return ctx.ask("## Role: Planner");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect(outcome.ok).toBe(false);
+		expect(fake.journal()).toHaveLength(0);
+	});
+
+	it("strips terminal escape sequences from error messages it reports", async () => {
+		const { store, config, cost } = setup(oneWorkerTwoRetries);
+		const def = phase(async () => {
+			throw new Error("bad \u001b[2J news");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect((outcome as Outcome<string> & { error: string }).error).toBe("bad [2J news");
+	});
+});
+
 describe("runPhase and the agent", () => {
 	it("charges failed calls too, retries engine errors and keeps the real error text", async () => {
 		useFakeAgent({ fail: { Planner: { message: "overloaded", cost: 0.3 } } });
@@ -182,7 +239,7 @@ describe("runPhase and the agent", () => {
 		const { store, config, cost } = setup({ phases: { validate: { workers: 2 } } }, 10);
 		const def = phase((_n, ctx) => ctx.ask("## Role: Planner"), [1, 2]);
 		await runPhase(def, store, config, cost);
-		const caps = fake.journal().map((call) => call.args[call.args.indexOf("--max-budget-usd") + 1]);
+		const caps = fake.journal().map((call) => flag(call.args, "--max-budget-usd"));
 		expect(caps).toEqual(["5.0000", "5.0000"]);
 	});
 
@@ -210,7 +267,7 @@ describe("runPhase and the agent", () => {
 			return "ok";
 		});
 		await runPhase(def, store, config, cost);
-		const models = fake.journal().map((call) => call.args[call.args.indexOf("--model") + 1]);
+		const models = fake.journal().map((call) => flag(call.args, "--model"));
 		expect(models).toEqual(["sonnet", "opus"]);
 		expect(Object.keys(cost.current.byPhase).sort()).toEqual(["validate", "verify"]);
 	});

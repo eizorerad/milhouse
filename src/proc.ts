@@ -10,7 +10,7 @@ export interface RunOptions {
 	timeoutMs?: number;
 	/** Run `file` as a shell command line (args are ignored). */
 	shell?: boolean;
-	/** Stop whatever the process left running in its group once it has finished (agents, not project commands). */
+	/** Stop whatever the process left running in its group once it has finished (agents and project checks; not git, and not setup, which may start a service on purpose). */
 	reap?: boolean;
 	/** Bytes of each output stream to keep (the end of it). */
 	maxOutput?: number;

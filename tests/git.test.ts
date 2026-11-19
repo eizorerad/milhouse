@@ -23,6 +23,7 @@ import {
 	removeWorktree,
 	repoRoot,
 	resetWorktree,
+	resolveRef,
 	revParse,
 	touchedFiles,
 } from "../src/git.ts";
@@ -52,6 +53,18 @@ describe("repository state", () => {
 		expect(await refExists(repo, "refs/heads/main")).toBe(true);
 		expect(await refExists(repo, REF)).toBe(false);
 		expect(await isRepo(tempDir())).toBe(false);
+	});
+
+	it("resolves a ref to its commit, or to null when there is none", async () => {
+		const repo = await makeRepo();
+		const head = await revParse(repo, "HEAD");
+		expect(await resolveRef(repo, "HEAD")).toBe(head);
+		expect(await resolveRef(repo, "refs/heads/main")).toBe(head);
+		expect(await resolveRef(repo, REF)).toBeNull();
+
+		const empty = tempDir();
+		await git(empty, "init", "-q");
+		expect(await resolveRef(empty, "HEAD")).toBeNull(); // no commit yet
 	});
 
 	it("reports an empty repository and a detached HEAD", async () => {
@@ -217,6 +230,29 @@ describe("history between two commits", () => {
 		await git(repo, "commit", "-q", "-m", "edit");
 		const added = await addedLines(repo, base);
 		expect(added.map((a) => a.text)).toEqual(["changed 2", "changed 27 TODO"]);
+	});
+
+	it("still finds added lines when the user's git config adds diff context", async () => {
+		const repo = await makeRepo();
+		await git(repo, "config", "diff.interHunkContext", "3");
+		await git(repo, "config", "diff.context", "5");
+		await commitFile(
+			repo,
+			"long.txt",
+			Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n"),
+			"long",
+		);
+		const base = await revParse(repo, "HEAD");
+		const lines = Array.from({ length: 12 }, (_, i) => `line ${i}`);
+		lines[3] = "changed 3";
+		lines[6] = "// TODO changed 6";
+		writeFile(repo, "long.txt", lines.join("\n"));
+		await git(repo, "add", "-A");
+		await git(repo, "commit", "-q", "-m", "edit");
+		expect((await addedLines(repo, base)).map((a) => a.text)).toEqual([
+			"changed 3",
+			"// TODO changed 6",
+		]);
 	});
 
 	it("never answers from a part of the history either: a cut-off log could hide a task or a file", async () => {

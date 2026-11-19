@@ -12,6 +12,7 @@ import {
 import {
 	cleanupTempDirs,
 	git,
+	goneWithin,
 	makeRepo,
 	readFile,
 	tempDir,
@@ -106,27 +107,15 @@ describe("findWhitespaceProblems", () => {
 
 describe("runChecks", () => {
 	it("passes when every command succeeds, skipping empty ones", async () => {
-		expect(
-			await runChecks(
-				[
-					["build", "true"],
-					["lint", ""],
-					["test", "echo ok"],
-				],
-				tempDir(),
-			),
-		).toBeNull();
+		expect(await runChecks(tempDir(), { build: "true", lint: "", test: "echo ok" })).toBeNull();
 	});
 
 	it("stops at the first failure and reports it with the output", async () => {
-		const failure = await runChecks(
-			[
-				["build", "true"],
-				["lint", "echo lint-broke >&2; exit 3"],
-				["test", "echo never-run > ran.txt"],
-			],
-			tempDir(),
-		);
+		const failure = await runChecks(tempDir(), {
+			build: "true",
+			lint: "echo lint-broke >&2; exit 3",
+			test: "echo never-run > ran.txt",
+		});
 		expect(failure).toContain("lint failed");
 		expect(failure).toContain("exit code 3");
 		expect(failure).toContain("lint-broke");
@@ -134,34 +123,33 @@ describe("runChecks", () => {
 
 	it("runs in the given directory", async () => {
 		const dir = tempDir();
-		expect(await runChecks([["test", "test -f marker.txt"]], dir)).toContain("test failed");
+		expect(await runChecks(dir, { test: "test -f marker.txt" })).toContain("test failed");
 		writeFileSync(join(dir, "marker.txt"), "x");
-		expect(await runChecks([["test", "test -f marker.txt"]], dir)).toBeNull();
+		expect(await runChecks(dir, { test: "test -f marker.txt" })).toBeNull();
 	});
 
 	it("kills a command that hangs, including what it spawned", async () => {
 		const started = Date.now();
-		const failure = await runChecks([["test", "sleep 30 & sleep 30"]], tempDir(), 300);
+		const failure = await runChecks(tempDir(), { test: "sleep 30 & sleep 30" }, { timeoutMs: 300 });
 		expect(failure).toContain("timed out");
 		expect(Date.now() - started).toBeLessThan(5000);
 	});
 });
 
 describe("runChecks and what a check leaves behind", () => {
+	it("judges a check by its own exit, not by a background process that keeps its pipes open", async () => {
+		const dir = tempDir();
+		const started = Date.now();
+		// The shell exits 0 at once; the background child is stopped, and does not turn the pass into a timeout.
+		expect(await runChecks(dir, { test: "sleep 30 & exit 0" }, { timeoutMs: 5_000 })).toBeNull();
+		expect(Date.now() - started).toBeLessThan(4_000);
+	});
+
 	it("stops background processes a check left running: they could change the next issue's files", async () => {
 		const dir = tempDir();
-		expect(await runChecks([["test", "sleep 30 & echo $! > watcher.pid"]], dir)).toBeNull();
+		expect(await runChecks(dir, { test: "sleep 30 & echo $! > watcher.pid" })).toBeNull();
 		const pid = Number(readFile(dir, "watcher.pid").trim());
-		let gone = false;
-		for (let waited = 0; waited < 2_000 && !gone; waited += 25) {
-			try {
-				process.kill(pid, 0);
-				await Bun.sleep(25);
-			} catch {
-				gone = true;
-			}
-		}
-		expect(gone).toBe(true);
+		expect(await goneWithin(pid, 2_000)).toBe(true);
 	});
 
 	it("does not pass on the caller's GIT_DIR to the checks", async () => {
@@ -169,7 +157,7 @@ describe("runChecks and what a check leaves behind", () => {
 		process.env.GIT_DIR = "/nonexistent/.git";
 		try {
 			expect(
-				await runChecks([["test", 'test "$(git rev-parse --show-toplevel)" = "$PWD"']], repo),
+				await runChecks(repo, { test: 'test "$(git rev-parse --show-toplevel)" = "$PWD"' }),
 			).toBeNull();
 		} finally {
 			unsetEnv("GIT_DIR");

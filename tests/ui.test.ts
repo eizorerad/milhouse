@@ -75,6 +75,32 @@ describe("log", () => {
 	});
 });
 
+describe("Progress (a terminal)", () => {
+	it("draws the running items without what could drive the terminal: their names come from the agent", async () => {
+		const written: string[] = [];
+		spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+			written.push(String(chunk));
+			return true;
+		});
+		const was = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+		try {
+			const progress = new Progress("scan", 1);
+			progress.begin("bad \u001b[2J\u001b]0;title\u0007 name");
+			await Bun.sleep(350); // the spinner redraws every 120 ms
+			progress.stop();
+		} finally {
+			if (was) Object.defineProperty(process.stdout, "isTTY", was);
+			else Reflect.deleteProperty(process.stdout, "isTTY");
+			spyOn(process.stdout, "write").mockRestore();
+		}
+		const drawn = written.find((chunk) => chunk.includes("bad ")) ?? "";
+		expect(drawn).toContain("bad [2J]0;title name"); // what is left of the name
+		expect(drawn).not.toContain("\u001b[2J");
+		expect(drawn).not.toContain("\u0007");
+	});
+});
+
 describe("Progress (not a terminal)", () => {
 	it("prints plain lines for starts, results and notes", () => {
 		const progress = new Progress("exec", 2);
