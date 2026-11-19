@@ -58,24 +58,16 @@ const DEFAULT_TIMEOUT_MS = 10 * MINUTE;
 const retryDelayMs = (): number => Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 2000);
 const firstLine = (text: string): string => text.split("\n")[0].slice(0, 160);
 
-export async function runPhase<TItem, TValue>(
-	def: PhaseDef<TItem, TValue>,
+/** What a phase hands its items to call the agent with. Parallel workers share what is left of the budget. */
+function makeAsk(
+	phase: Exclude<Phase, "merge">,
 	store: RunStore,
 	config: Config,
 	cost: CostTracker,
-): Promise<Outcome<TValue>[]> {
-	const items = await def.loadItems(store, config);
-	if (items.length === 0) {
-		log.info(`${def.name}: nothing to do`);
-		return [];
-	}
-	const options = config.phases[def.name];
-	const workers = options.workers ?? 1;
-	const progress = new Progress(def.name, items.length);
-
-	/** Calls the agent for the running phase. Parallel workers share what is left of the budget. */
-	const ask = async (prompt: string, o: AskOptions = {}): Promise<string> => {
-		const step = o.step ?? def.name;
+	workers: number,
+): Ctx["ask"] {
+	return async (prompt, o = {}) => {
+		const step = o.step ?? phase;
 		const harness = stepHarness(config, step);
 		// Only a harness that reports dollars can be given an allowance.
 		const allowance = HARNESSES[harness].reportsCost ? cost.reserve(workers) : undefined;
@@ -107,6 +99,24 @@ export async function runPhase<TItem, TValue>(
 			cost.release(allowance);
 		}
 	};
+}
+
+export async function runPhase<TItem, TValue>(
+	def: PhaseDef<TItem, TValue>,
+	store: RunStore,
+	config: Config,
+	cost: CostTracker,
+): Promise<Outcome<TValue>[]> {
+	const items = await def.loadItems(store, config);
+	if (items.length === 0) {
+		log.info(`${def.name}: nothing to do`);
+		return [];
+	}
+	const options = config.phases[def.name];
+	const workers = options.workers ?? 1;
+	const progress = new Progress(def.name, items.length);
+
+	const ask = makeAsk(def.name, store, config, cost, workers);
 
 	let stopped: string | undefined; // set by a failure that every other item would hit as well
 
