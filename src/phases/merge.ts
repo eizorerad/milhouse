@@ -11,7 +11,6 @@ import { runProjectChecks } from "../gates.ts";
 import {
 	acceptCommit,
 	currentBranch,
-	deleteRef,
 	isAncestor,
 	isDirty,
 	mergeInto,
@@ -24,13 +23,7 @@ import type { Outcome } from "../runner.ts";
 import type { RunStore } from "../state.ts";
 import type { Config } from "../types.ts";
 import { log } from "../ui.ts";
-import { discardWorktree, prepareWorktree } from "../worktree.ts";
-
-/** Remove the run's worktree, and its ref once everything in it is part of the user's branch. */
-export async function cleanupRun(store: RunStore): Promise<void> {
-	await discardWorktree(store);
-	if (await isAncestor(store.workDir, store.ref, "HEAD")) await deleteRef(store.workDir, store.ref);
-}
+import { prepareWorktree } from "../worktree.ts";
 
 /** The commit to publish: the accepted tip itself, or a merge commit that was built and tested first. */
 async function candidate(

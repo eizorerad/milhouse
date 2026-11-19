@@ -7,10 +7,10 @@ import { parseArgs } from "node:util";
 import pkg from "../package.json";
 import { CONFIG_TEMPLATE, ConfigError, loadConfig, stepHarness } from "./config.ts";
 import { repoRoot } from "./git.ts";
-import { cleanupRun } from "./phases/merge.ts";
+import { acquireLock } from "./lock.ts";
 import { runPipeline } from "./pipeline.ts";
 import { formatReport, generateReport } from "./report.ts";
-import { RunStore, STATE_DIR, acquireLock, ensureIgnoreFile } from "./state.ts";
+import { RunStore, STATE_DIR, ensureIgnoreFile } from "./state.ts";
 import {
 	type AgentStep,
 	type Config,
@@ -21,6 +21,7 @@ import {
 } from "./types.ts";
 import { log, printBanner, setVerbose } from "./ui.ts";
 import { errorMessage } from "./util.ts";
+import { cleanupRun } from "./worktree.ts";
 
 const HELP = `milhouse v${pkg.version} - correctness-first AI coding orchestrator (drives Claude Code or Codex)
 

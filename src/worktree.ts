@@ -2,7 +2,7 @@
 
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { runChecks } from "./gates.ts";
-import { ensureWorktree, isAncestor, removeWorktree, resolveRef } from "./git.ts";
+import { deleteRef, ensureWorktree, isAncestor, removeWorktree, resolveRef } from "./git.ts";
 import type { RunStore } from "./state.ts";
 import type { Config } from "./types.ts";
 
@@ -58,4 +58,10 @@ export async function prepareWorktree(
 export async function discardWorktree(store: RunStore): Promise<void> {
 	await removeWorktree(store.workDir, store.worktree);
 	rmSync(setupMarker(store), { force: true });
+}
+
+/** Remove the run's worktree, and its ref once everything in it is part of the user's branch. */
+export async function cleanupRun(store: RunStore): Promise<void> {
+	await discardWorktree(store);
+	if (await isAncestor(store.workDir, store.ref, "HEAD")) await deleteRef(store.workDir, store.ref);
 }

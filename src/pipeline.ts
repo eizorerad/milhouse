@@ -4,17 +4,19 @@ import { agentSteps, describeAgents, stepHarness } from "./config.ts";
 import { CostTracker, formatCost, formatUsd } from "./cost.ts";
 import { HARNESSES } from "./engine.ts";
 import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
+import { acquireLock } from "./lock.ts";
 import { consolidatePhase } from "./phases/consolidate.ts";
 import { execPhase } from "./phases/exec.ts";
-import { cleanupRun, mergePhase } from "./phases/merge.ts";
+import { mergePhase } from "./phases/merge.ts";
 import { planPhase } from "./phases/plan.ts";
 import { scanPhase } from "./phases/scan.ts";
 import { validatePhase } from "./phases/validate.ts";
 import { type Outcome, runPhase } from "./runner.ts";
-import { RunStore, acquireLock } from "./state.ts";
+import { RunStore } from "./state.ts";
 import { type Config, PHASES, type Phase } from "./types.ts";
 import { log } from "./ui.ts";
 import { errorMessage } from "./util.ts";
+import { cleanupRun } from "./worktree.ts";
 
 export interface PipelineOptions {
 	/** Repository to work in. Defaults to the current directory. */

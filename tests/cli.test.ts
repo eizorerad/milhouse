@@ -6,8 +6,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import pkg from "../package.json";
 import { ensureWorktree, isDirty, refExists } from "../src/git.ts";
+import { acquireLock } from "../src/lock.ts";
 import { run } from "../src/proc.ts";
-import { RunStore, acquireLock } from "../src/state.ts";
+import { RunStore } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
 import {
 	cleanupTempDirs,

@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { isDirty, refExists } from "../src/git.ts";
-import { acquireLock } from "../src/state.ts";
+import { acquireLock } from "../src/lock.ts";
 import {
 	calls,
 	cleanupTempDirs,
