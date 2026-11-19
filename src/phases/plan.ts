@@ -2,6 +2,7 @@
 
 import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
+import { arrayOf, object } from "../schema.ts";
 import { ACTIONABLE, type Config, type Issue, type Task } from "../types.ts";
 import { MINUTE, generateId, parseJson, stringList, stripControl } from "../util.ts";
 
@@ -20,31 +21,20 @@ export interface RawTask {
 
 const strings = { type: "array", items: { type: "string" } } as const;
 
-const PLAN_SCHEMA = {
-	type: "object",
-	properties: {
-		summary: { type: "string" },
-		tasks: {
-			type: "array",
-			items: {
-				type: "object",
-				properties: {
-					key: { type: "string" },
-					title: { type: "string" },
-					description: { type: "string" },
-					files: strings,
-					depends_on: strings,
-					checks: strings,
-					acceptance: strings,
-				},
-				required: ["key", "title", "description", "files", "depends_on", "checks", "acceptance"],
-				additionalProperties: false,
-			},
-		},
-	},
-	required: ["summary", "tasks"],
-	additionalProperties: false,
-} as const;
+const PLAN_SCHEMA = object({
+	summary: { type: "string" },
+	tasks: arrayOf(
+		object({
+			key: { type: "string" },
+			title: { type: "string" },
+			description: { type: "string" },
+			files: strings,
+			depends_on: strings,
+			checks: strings,
+			acceptance: strings,
+		}),
+	),
+});
 
 function planPrompt(issue: Issue, config: Config, lastError?: string): string {
 	return prompt(

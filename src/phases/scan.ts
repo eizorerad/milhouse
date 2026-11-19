@@ -2,6 +2,7 @@
 
 import { context, feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
+import { arrayOf, object } from "../schema.ts";
 import type { Config, Issue } from "../types.ts";
 import { log } from "../ui.ts";
 import { MINUTE, generateId, parseJson, stripControl } from "../util.ts";
@@ -13,35 +14,23 @@ type RawIssue = Pick<
 	"type" | "title" | "rationale" | "severity" | "scope_impact" | "strategy"
 >;
 
-const ITEM_FIELDS = ["type", "title", "rationale", "severity", "scope_impact", "strategy"];
 const TYPES: Issue["type"][] = ["bug", "feature", "refactor", "improvement", "task"];
 const SEVERITIES: Issue["severity"][] = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
 /** The prompt asks for at most 10; this only keeps a runaway answer from flooding the later phases. */
 const MAX_ITEMS = 10;
 
-const SCAN_SCHEMA = {
-	type: "object",
-	properties: {
-		items: {
-			type: "array",
-			items: {
-				type: "object",
-				properties: {
-					type: { type: "string", enum: ["bug", "feature", "refactor", "improvement", "task"] },
-					title: { type: "string" },
-					rationale: { type: "string" },
-					severity: { type: "string", enum: ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
-					scope_impact: { type: "string" },
-					strategy: { type: "string" },
-				},
-				required: ITEM_FIELDS,
-				additionalProperties: false,
-			},
-		},
-	},
-	required: ["items"],
-	additionalProperties: false,
-} as const;
+const SCAN_SCHEMA = object({
+	items: arrayOf(
+		object({
+			type: { type: "string", enum: TYPES },
+			title: { type: "string" },
+			rationale: { type: "string" },
+			severity: { type: "string", enum: SEVERITIES },
+			scope_impact: { type: "string" },
+			strategy: { type: "string" },
+		}),
+	),
+});
 
 function scanPrompt(scope: string, config: Config, lastError?: string): string {
 	return prompt(
