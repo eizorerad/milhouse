@@ -23,6 +23,7 @@ import {
 	removeWorktree,
 	repoRoot,
 	resetWorktree,
+	resolveRef,
 	revParse,
 	touchedFiles,
 } from "../src/git.ts";
@@ -52,6 +53,18 @@ describe("repository state", () => {
 		expect(await refExists(repo, "refs/heads/main")).toBe(true);
 		expect(await refExists(repo, REF)).toBe(false);
 		expect(await isRepo(tempDir())).toBe(false);
+	});
+
+	it("resolves a ref to its commit, or to null when there is none", async () => {
+		const repo = await makeRepo();
+		const head = await revParse(repo, "HEAD");
+		expect(await resolveRef(repo, "HEAD")).toBe(head);
+		expect(await resolveRef(repo, "refs/heads/main")).toBe(head);
+		expect(await resolveRef(repo, REF)).toBeNull();
+
+		const empty = tempDir();
+		await git(empty, "init", "-q");
+		expect(await resolveRef(empty, "HEAD")).toBeNull(); // no commit yet
 	});
 
 	it("reports an empty repository and a detached HEAD", async () => {

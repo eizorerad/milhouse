@@ -16,8 +16,8 @@ import {
 	isDirty,
 	mergeInto,
 	publish,
-	refExists,
 	resetWorktree,
+	resolveRef,
 	revParse,
 } from "../git.ts";
 import type { Outcome } from "../runner.ts";
@@ -76,7 +76,8 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 	const repo = store.workDir;
 	const { base_branch: baseBranch } = store.loadMeta();
 
-	if (!(await refExists(repo, store.ref))) {
+	const tip = await resolveRef(repo, store.ref);
+	if (tip === null) {
 		return fail(`The accepted work of this run (${store.ref}) is missing.`);
 	}
 	if ((await currentBranch(repo)) !== baseBranch) {
@@ -89,7 +90,6 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 	}
 
 	const head = await revParse(repo, "HEAD");
-	const tip = await revParse(repo, store.ref);
 	// The records and the ref must agree: a ref that was lost and recreated would otherwise let work be
 	// marked as merged that never was.
 	for (const task of verified) {

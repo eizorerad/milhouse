@@ -98,8 +98,7 @@ export async function repoRoot(cwd: string): Promise<string> {
 export const isRepo = async (cwd: string): Promise<boolean> =>
 	(await git(cwd, "rev-parse", "--is-inside-work-tree")).ok;
 
-export const hasCommits = async (cwd: string): Promise<boolean> =>
-	(await git(cwd, "rev-parse", "--verify", "-q", "HEAD")).ok;
+export const hasCommits = (cwd: string): Promise<boolean> => refExists(cwd, "HEAD");
 
 /** Name of the checked-out branch, or "" on a detached HEAD. */
 export async function currentBranch(cwd: string): Promise<string> {
@@ -109,13 +108,18 @@ export async function currentBranch(cwd: string): Promise<string> {
 export const revParse = (cwd: string, ref: string): Promise<string> =>
 	gitOrThrow(cwd, "rev-parse", "--verify", ref);
 
-export async function branchExists(cwd: string, branch: string): Promise<boolean> {
-	return (await git(cwd, "rev-parse", "--verify", "-q", `refs/heads/${branch}`)).ok;
+/** The commit a ref points at, or null when there is no such ref. */
+export async function resolveRef(cwd: string, ref: string): Promise<string | null> {
+	const found = await git(cwd, "rev-parse", "--verify", "-q", ref);
+	return found.ok ? found.out : null;
 }
 
-export async function refExists(cwd: string, ref: string): Promise<boolean> {
-	return (await git(cwd, "rev-parse", "--verify", "-q", ref)).ok;
-}
+export const refExists = async (cwd: string, ref: string): Promise<boolean> =>
+	(await resolveRef(cwd, ref)) !== null;
+
+/** A local branch: a tag of the same name does not count. */
+export const branchExists = (cwd: string, branch: string): Promise<boolean> =>
+	refExists(cwd, `refs/heads/${branch}`);
 
 export async function isAncestor(
 	cwd: string,
