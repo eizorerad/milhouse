@@ -4,8 +4,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { STATE_DIR } from "./state.ts";
-import { PHASES } from "./types.ts";
-import type { Config } from "./types.ts";
+import {
+	type AgentStep,
+	type Config,
+	DEFAULT_MODEL,
+	HARNESS_NAMES,
+	type HarnessName,
+	PHASES,
+	type Phase,
+} from "./types.ts";
 import { errorMessage } from "./util.ts";
 
 export class ConfigError extends Error {
@@ -13,16 +20,18 @@ export class ConfigError extends Error {
 }
 
 export const DEFAULTS: Config = {
-	model: "sonnet",
+	harness: "claude",
+	model: "",
+	harnessArgs: { claude: [], codex: [] },
 	pipeline: [...PHASES],
 	failFast: false,
 	phases: {
-		scan: { retries: 2, model: "" },
-		validate: { workers: 5, retries: 2, model: "" },
-		plan: { workers: 5, retries: 2, model: "" },
-		consolidate: { retries: 2, model: "" },
-		exec: { retries: 2, model: "" },
-		verify: { retries: 1, model: "" },
+		scan: { retries: 2, model: "", harness: "", rules: [] },
+		validate: { workers: 5, retries: 2, model: "", harness: "", rules: [] },
+		plan: { workers: 5, retries: 2, model: "", harness: "", rules: [] },
+		consolidate: { retries: 2, model: "", harness: "", rules: [] },
+		exec: { retries: 2, model: "", harness: "", rules: [] },
+		verify: { retries: 1, model: "", harness: "", rules: [] },
 	},
 	budget: 50,
 	project: { name: "", language: "", framework: "", description: "" },
@@ -75,16 +84,112 @@ function typeErrors(value: unknown, template: unknown, path: string): string[] {
 	return typeof value === typeof template ? [] : [`${path} must be a ${typeof template}`];
 }
 
+/**
+ * Options Milhouse sets itself: the protocol it reads, the permissions it grants, where the agent works.
+ * `harnessArgs` may add anything else (a profile, a config override), but not these.
+ */
+const RESERVED_ARGS: Record<HarnessName, string[]> = {
+	claude: [
+		"-p",
+		"--print",
+		"--output-format",
+		"--input-format",
+		"--json-schema",
+		"--tools",
+		"--permission-mode",
+		"--dangerously-skip-permissions",
+		"--setting-sources",
+		"--strict-mcp-config",
+		"--no-session-persistence",
+		"--max-turns",
+		"--max-budget-usd",
+		"--model", // set `model` instead
+		"--", // everything after it would be read as the prompt
+	],
+	codex: [
+		"--json",
+		"--ephemeral",
+		"-C",
+		"--cd",
+		"-s",
+		"--sandbox",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"--full-auto",
+		"--approve-for-me",
+		"-o",
+		"--output-last-message",
+		"--output-schema",
+		"--add-dir",
+		"-m", // Codex refuses an option that is given twice: set `model` instead
+		"--model",
+		"--",
+	],
+};
+
+/** The agent that runs `step`: its own choice, or the global one. */
+export const stepHarness = (config: Config, step: AgentStep): HarnessName =>
+	config.phases[step].harness || config.harness;
+
+/**
+ * The model of `step`. The global model belongs to the global harness: a step that runs on the other one
+ * does not inherit it (a Claude alias means nothing to Codex) and uses that harness's default instead.
+ */
+export function stepModel(config: Config, step: AgentStep): string {
+	const own = config.phases[step].model;
+	if (own) return own;
+	const harness = stepHarness(config, step);
+	return (harness === config.harness ? config.model : "") || DEFAULT_MODEL[harness];
+}
+
+/** The steps that call an agent when `phases` run. `verify` is the reviewer inside exec, used with the definition of done. */
+export function agentSteps(config: Config, phases: Phase[]): AgentStep[] {
+	return phases.flatMap((phase): AgentStep[] => {
+		if (phase === "merge") return [];
+		return phase === "exec" && config.gates.dod ? ["exec", "verify"] : [phase];
+	});
+}
+
+/**
+ * Which agent runs each step, for the start of a run: "scan claude/claude-opus-5-5, validate codex/default x8".
+ * "default" is the model of the harness's own configuration (a Codex step without a model).
+ */
+export function describeAgents(config: Config, phases: Phase[]): string {
+	return agentSteps(config, phases)
+		.map((step) => {
+			const workers = config.phases[step].workers ?? 1;
+			const agent = `${stepHarness(config, step)}/${stepModel(config, step) || "default"}`;
+			return `${step} ${agent}${workers > 1 ? ` x${workers}` : ""}`;
+		})
+		.join(", ");
+}
+
 function validate(config: Config): void {
 	const errors = typeErrors(config, DEFAULTS, "");
 
 	if (errors.length === 0) {
+		const known = (name: string): boolean => (HARNESS_NAMES as readonly string[]).includes(name);
+		if (!known(config.harness)) errors.push(`harness must be one of ${HARNESS_NAMES.join(", ")}`);
+		for (const name of HARNESS_NAMES) {
+			for (const arg of config.harnessArgs[name]) {
+				// --name=value is the option --name, and -xvalue is the option -x
+				const option = arg.startsWith("--") ? arg.split("=")[0] : arg.slice(0, 2);
+				if (arg.startsWith("-") && RESERVED_ARGS[name].includes(option)) {
+					errors.push(`harnessArgs.${name}: "${option}" is set by Milhouse and cannot be changed`);
+				}
+			}
+		}
 		const order = config.pipeline.map((phase) => PHASES.indexOf(phase));
 		if (order.includes(-1) || order.some((index, i) => i > 0 && index <= order[i - 1])) {
 			errors.push(`pipeline must list phases of ${PHASES.join(", ")} once each, in that order`);
 		}
-		if (config.budget < 0) errors.push("budget must be >= 0");
+		// NaN would switch the limit off without a word, Infinity would be passed on to the agent as a limit.
+		if (!Number.isFinite(config.budget) || config.budget < 0) {
+			errors.push("budget must be a finite number >= 0");
+		}
 		for (const [step, options] of Object.entries(config.phases)) {
+			if (options.harness !== "" && !known(options.harness)) {
+				errors.push(`phases.${step}.harness must be "" or one of ${HARNESS_NAMES.join(", ")}`);
+			}
 			if (!Number.isInteger(options.retries) || options.retries < 0) {
 				errors.push(`phases.${step}.retries must be an integer >= 0`);
 			}
@@ -125,8 +230,16 @@ export async function loadConfig(workDir: string, overrides: Plain = {}): Promis
 
 export const CONFIG_TEMPLATE = `// Milhouse config. Every key is optional; the values below are the defaults.
 export default {
-  // Claude model alias or id. Override per step with phases.<step>.model.
-  model: "sonnet",
+  // The agent that runs every step: "claude" (Claude Code) or "codex" (Codex CLI).
+  // Any step can use the other one, e.g. phases: { verify: { harness: "codex" } } for an independent reviewer.
+  harness: "claude",
+
+  // Model of that harness. "" = its default (claude: sonnet, codex: what your Codex config says).
+  // Override per step with phases.<step>.model.
+  model: "",
+
+  // Extra command-line arguments per harness, e.g. { codex: ["-p", "milhouse"] } to use a Codex profile.
+  harnessArgs: { claude: [], codex: [] },
 
   // Phases to run, in this order. Remove "merge" to review the verified branch yourself.
   pipeline: ["scan", "validate", "plan", "consolidate", "exec", "merge"],
@@ -134,7 +247,9 @@ export default {
   // Stop after the first phase with a failed item (default: continue with what worked).
   failFast: false,
 
-  // Retries per item. An exec retry is a repair round that feeds the failure back to the agent.
+  // Retries per item, and per step also: harness, model (a full id such as "claude-opus-5-5" pins a version,
+  // an alias such as "opus" follows the newest) and rules (extra instructions for that step only).
+  // An exec retry is a repair round that feeds the failure back to the agent.
   // verify is the reviewer that checks every issue inside exec.
   phases: {
     scan: { retries: 2 },
@@ -145,7 +260,7 @@ export default {
     verify: { retries: 1 },
   },
 
-  // Spending limit for one run, in USD. 0 = unlimited.
+  // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: it cannot be capped.
   budget: 50,
 
   project: { name: "", language: "", framework: "", description: "" },

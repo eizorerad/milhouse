@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { applyConsolidation } from "../src/phases/consolidate.ts";
+import { applyConsolidation, parseConsolidation } from "../src/phases/consolidate.ts";
 import {
 	type IssueGroup,
 	committedTaskIds,
@@ -8,7 +8,8 @@ import {
 } from "../src/phases/exec-order.ts";
 import { execPrompt, reviewPrompt } from "../src/phases/exec-prompts.ts";
 import { parseVerdicts } from "../src/phases/exec.ts";
-import { type RawTask, buildTasks } from "../src/phases/plan.ts";
+import { type RawTask, buildTasks, parseTasks } from "../src/phases/plan.ts";
+import { parseItems } from "../src/phases/scan.ts";
 import { context, describeIssue } from "../src/prompts.ts";
 import type { Issue, Severity, Task } from "../src/types.ts";
 import { testConfig } from "./helpers.ts";
@@ -35,6 +36,8 @@ const issue = (id: string, severity: Severity = "MEDIUM"): Issue => ({
 	status: "CONFIRMED",
 	evidence: [],
 });
+
+const none = { duplicates: [], cross_dependencies: [] };
 
 const group = (id: string, tasks: Task[], severity: Severity = "MEDIUM"): IssueGroup => ({
 	issue: issue(id, severity),
@@ -68,9 +71,106 @@ describe("buildTasks", () => {
 	});
 });
 
-describe("applyConsolidation", () => {
-	const none = { duplicates: [], cross_dependencies: [] };
+describe("parseTasks (the planner's answer is checked before it is used)", () => {
+	const answer = (tasks: unknown) => JSON.stringify({ summary: "s", tasks });
 
+	it("fills in what a model left out and keeps the rest", () => {
+		const [task] = parseTasks(answer([{ key: "t1", title: " Fix it " }]));
+		expect(task).toEqual({
+			key: "t1",
+			title: "Fix it",
+			description: "",
+			files: [],
+			depends_on: [],
+			checks: [],
+			acceptance: [],
+		});
+	});
+
+	it("rejects answers the rest of the pipeline could not use, so the planner is asked again", () => {
+		expect(() => parseTasks(answer([]))).toThrow(/no tasks/);
+		expect(() => parseTasks(answer([{ key: "t1" }]))).toThrow(/task 1 needs a title/);
+		expect(() => parseTasks(answer([{ title: "x" }]))).toThrow(/needs a key/);
+		expect(() => parseTasks(answer([null]))).toThrow(/needs a title/);
+		expect(() =>
+			parseTasks(
+				answer([
+					{ key: "t1", title: "a" },
+					{ key: "t1", title: "b" },
+				]),
+			),
+		).toThrow(/unique/);
+		expect(() => parseTasks("no json here")).toThrow(/no JSON/);
+	});
+
+	it("ignores entries that are not strings and caps the number of tasks", () => {
+		const many = Array.from({ length: 30 }, (_, i) => ({ key: `t${i}`, title: `Task ${i}` }));
+		expect(parseTasks(answer(many))).toHaveLength(10);
+		const [task] = parseTasks(
+			answer([{ key: "t1", title: "x", files: ["a.ts", 3, null], checks: "no" }]),
+		);
+		expect(task.files).toEqual(["a.ts"]);
+		expect(task.checks).toEqual([]);
+	});
+});
+
+describe("parseItems (the scanner's answer)", () => {
+	it("keeps real items, repairs odd severities and types, and caps the list", () => {
+		const items = parseItems(
+			JSON.stringify({
+				items: [
+					{ type: "bug", title: " Real bug ", rationale: "r", severity: "high" },
+					{ title: "No other fields" },
+					{ title: "   " },
+					null,
+					{ type: "weird", title: "Odd type", severity: "URGENT" },
+				],
+			}),
+		);
+		expect(items.map((i) => i.title)).toEqual(["Real bug", "No other fields", "Odd type"]);
+		expect(items[0]).toMatchObject({ type: "bug", severity: "HIGH", rationale: "r" });
+		expect(items[1]).toMatchObject({ type: "task", severity: "MEDIUM", rationale: "" });
+		expect(items[2]).toMatchObject({ type: "task", severity: "MEDIUM" });
+		const many = { items: Array.from({ length: 40 }, (_, i) => ({ title: `Item ${i}` })) };
+		expect(parseItems(JSON.stringify(many))).toHaveLength(10);
+	});
+
+	it("fails when there is no list", () => {
+		expect(() => parseItems(JSON.stringify({ result: "nothing" }))).toThrow(/no `items` list/);
+	});
+});
+
+describe("parseConsolidation", () => {
+	it("needs both lists, even when they are empty", () => {
+		expect(() => parseConsolidation("{}")).toThrow(/`duplicates` and `cross_dependencies`/);
+		expect(() => parseConsolidation(JSON.stringify({ duplicates: [] }))).toThrow(
+			/cross_dependencies/,
+		);
+		expect(parseConsolidation(JSON.stringify({ duplicates: [], cross_dependencies: [] }))).toEqual(
+			none,
+		);
+	});
+
+	it("drops malformed entries instead of crashing later", () => {
+		const parsed = parseConsolidation(
+			JSON.stringify({
+				duplicates: [null, { keep: "A", remove: ["B", 7] }, { remove: ["C"] }, "x"],
+				cross_dependencies: [
+					{ task_id: "B", depends_on: "A" },
+					{ task_id: "C", depends_on: ["A"] },
+					5,
+				],
+			}),
+		);
+		expect(parsed.duplicates).toEqual([{ keep: "A", remove: ["B"] }]);
+		expect(parsed.cross_dependencies).toEqual([
+			{ task_id: "B", depends_on: [] },
+			{ task_id: "C", depends_on: ["A"] },
+		]);
+	});
+});
+
+describe("applyConsolidation", () => {
 	it("removes duplicates and redirects their dependents; the survivor keeps only its own criteria", () => {
 		const tasks = [
 			task("A", { acceptance: ["a1"] }),

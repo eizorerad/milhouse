@@ -7,7 +7,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { runChecks } from "../gates.ts";
+import { runProjectChecks } from "../gates.ts";
 import {
 	acceptCommit,
 	currentBranch,
@@ -53,15 +53,10 @@ async function candidate(
 		};
 	}
 	if (config.gates.dod) {
-		const { build, lint, test } = config.commands;
-		const failure = await runChecks(
-			[
-				["build", build],
-				["lint", lint],
-				["test", test],
-			],
-			store.worktree,
-		);
+		// The branch may have changed what has to be installed (a lockfile): check what a fresh install gives.
+		const failedSetup = await prepareWorktree(store, config, { setupAgain: true });
+		if (failedSetup) return { error: `The merged work could not be set up:\n${failedSetup}` };
+		const failure = await runProjectChecks(store.worktree, config.commands);
 		if (failure) {
 			return {
 				error: `Merging would break the checks, so nothing was merged. The verified work stays in ${store.ref}.\n${failure}`,
@@ -95,9 +90,27 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 
 	const head = await revParse(repo, "HEAD");
 	const tip = await revParse(repo, store.ref);
+	// The records and the ref must agree: a ref that was lost and recreated would otherwise let work be
+	// marked as merged that never was.
+	for (const task of verified) {
+		if (task.sha && !(await isAncestor(repo, task.sha, tip))) {
+			return fail(
+				`${task.id} was accepted as ${task.sha.slice(0, 8)}, but that commit is not part of ${store.ref}: the accepted work does not match the run's records, so nothing was merged.`,
+			);
+		}
+	}
 	let landed = head; // already contains the work when the tip is an ancestor of the branch
 	let how = "";
 	if (!(await isAncestor(repo, tip, head))) {
+		// About to move the user's branch: to a commit that was reviewed, not to one a restored ref points at.
+		const reviewed = new Set(verified.flatMap((t) => (t.sha ? [t.sha] : [])));
+		if (!reviewed.has(tip)) {
+			return fail(
+				reviewed.size === 0
+					? `The run has no accepted commit recorded for its verified tasks, so nothing was merged. Inspect ${store.ref}.`
+					: `The accepted tip of this run (${tip.slice(0, 8)}) is none of the commits that were reviewed, so nothing was merged. Inspect ${store.ref}; it was changed outside Milhouse.`,
+			);
+		}
 		const result = await candidate(store, config, head, tip);
 		if ("error" in result) return fail(result.error);
 		// The checks can take minutes: publish only if the branch is exactly where it was when they began.
@@ -105,9 +118,15 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 			(await currentBranch(repo)) === baseBranch &&
 			(await revParse(repo, "HEAD")) === head &&
 			!(await isDirty(repo));
-		if (!unchanged || !(await publish(repo, result.sha))) {
+		if (!unchanged) {
 			return fail(
 				`"${baseBranch}" changed while the merge was being checked. Nothing was merged and nothing of yours was touched; run: milhouse --merge`,
+			);
+		}
+		const published = await publish(repo, result.sha);
+		if (!published.ok) {
+			return fail(
+				`git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched; fix the cause, then run: milhouse --merge`,
 			);
 		}
 		landed = result.sha;

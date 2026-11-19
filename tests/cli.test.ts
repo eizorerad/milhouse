@@ -5,11 +5,19 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import pkg from "../package.json";
-import { isDirty, refExists } from "../src/git.ts";
+import { ensureWorktree, isDirty, refExists } from "../src/git.ts";
 import { run } from "../src/proc.ts";
-import { RunStore } from "../src/state.ts";
+import { RunStore, acquireLock } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
-import { cleanupTempDirs, makeRepo, resetFakeAgentEnv, tempDir, useFakeAgent } from "./helpers.ts";
+import {
+	cleanupTempDirs,
+	git,
+	isAscii,
+	makeRepo,
+	resetFakeAgentEnv,
+	tempDir,
+	useFakeAgent,
+} from "./helpers.ts";
 
 afterEach(() => {
 	cleanupTempDirs();
@@ -29,6 +37,7 @@ describe("arguments", () => {
 			expect(result.code).toBe(0);
 			expect(result.stdout).toContain("Usage:");
 			expect(result.stdout).toContain("milhouse --resume");
+			expect(isAscii(result.stdout)).toBe(true); // it must read well in any terminal
 		}
 	});
 
@@ -93,25 +102,58 @@ describe("--init, --list-runs, --report, --clean", () => {
 });
 
 describe("--clean", () => {
-	it("removes old finished runs with their leftover worktree and work branch, keeps recent ones", async () => {
-		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
-		const repo = await makeRepo();
-		expect((await milhouse(repo, "--run")).code).toBe(1); // a failed run keeps its worktree
+	/** A failed run, aged 40 days, whose worktree is still there (as after a killed run). */
+	async function oldRunWithLeftovers(repo: string): Promise<RunStore> {
+		expect((await milhouse(repo, "--run")).code).toBe(1);
 		const store = RunStore.latest(repo) as RunStore;
-		expect(existsSync(store.worktree)).toBe(true);
-
-		expect((await milhouse(repo, "--clean")).stdout).toContain("Nothing to clean"); // too recent
-
+		expect(existsSync(store.worktree)).toBe(false); // a failed issue is parked on its branch, not kept here
+		await ensureWorktree(repo, store.worktree, store.ref, store.loadMeta().base_sha);
 		const metaPath = join(repo, ".milhouse", "runs", store.runId, "meta.json");
 		const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
 		meta.created_at = new Date(Date.now() - 40 * 86_400_000).toISOString();
 		writeFileSync(metaPath, JSON.stringify(meta));
+		return store;
+	}
 
+	it("removes old finished runs with their leftover worktree and ref, keeps recent ones", async () => {
+		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
+		const repo = await makeRepo();
+		expect((await milhouse(repo, "--run")).code).toBe(1);
+		expect((await milhouse(repo, "--clean")).stdout).toContain("Nothing to clean"); // too recent
+
+		const store = await oldRunWithLeftovers(repo);
 		const result = await milhouse(repo, "--clean");
+		expect(result.code).toBe(0);
 		expect(result.stdout).toContain(store.runId);
 		expect(existsSync(store.worktree)).toBe(false);
 		expect(await refExists(repo, store.ref)).toBe(false);
-		expect(RunStore.list(repo)).toEqual([]);
+		expect(RunStore.list(repo).map((r) => r.id)).not.toContain(store.runId);
+	});
+
+	it("does not clean while another milhouse works in the checkout: it could be resuming that very run", async () => {
+		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
+		const repo = await makeRepo();
+		const store = await oldRunWithLeftovers(repo);
+		const release = acquireLock(repo); // this process stands in for the other milhouse
+		const result = await milhouse(repo, "--clean");
+		release();
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain("Another milhouse is running");
+		expect(existsSync(store.worktree)).toBe(true);
+		expect(RunStore.list(repo).map((r) => r.id)).toContain(store.runId);
+	});
+
+	it("keeps a run whose worktree somebody locked, and says so", async () => {
+		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
+		const repo = await makeRepo();
+		const store = await oldRunWithLeftovers(repo);
+		await git(repo, "worktree", "lock", store.worktree);
+
+		const result = await milhouse(repo, "--clean");
+		expect(result.code).toBe(1);
+		expect(result.stdout + result.stderr).toContain("locked");
+		expect(existsSync(store.worktree)).toBe(true);
+		expect(RunStore.list(repo).map((r) => r.id)).toContain(store.runId);
 	});
 });
 

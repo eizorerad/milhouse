@@ -9,7 +9,7 @@ import { run } from "../src/proc.ts";
 import { RunStore } from "../src/state.ts";
 import type { Config } from "../src/types.ts";
 
-export const FAKE_CLAUDE = resolve(import.meta.dir, "fixtures/fake-claude.ts");
+export const FAKE_AGENT = resolve(import.meta.dir, "fixtures/fake-agent.ts");
 
 const created: string[] = [];
 
@@ -50,15 +50,15 @@ export async function commitFile(
 	return git(repo, "rev-parse", "HEAD");
 }
 
-/** A repository on `main` with one commit containing src/app.ts. */
-export async function makeRepo(): Promise<string> {
-	const repo = tempDir();
-	await git(repo, "init", "-q", "-b", "main");
-	await git(repo, "config", "user.email", "test@example.com");
-	await git(repo, "config", "user.name", "Test");
-	await git(repo, "config", "commit.gpgsign", "false");
-	await commitFile(repo, "src/app.ts", "export const app = 1;\nexport const two = 2;\n", "initial");
-	return repo;
+/** A repository on `main` with one commit containing src/app.ts, in `dir` (a new temporary directory by default). */
+export async function makeRepo(dir = tempDir()): Promise<string> {
+	mkdirSync(dir, { recursive: true });
+	await git(dir, "init", "-q", "-b", "main");
+	await git(dir, "config", "user.email", "test@example.com");
+	await git(dir, "config", "user.name", "Test");
+	await git(dir, "config", "commit.gpgsign", "false");
+	await commitFile(dir, "src/app.ts", "export const app = 1;\nexport const two = 2;\n", "initial");
+	return dir;
 }
 
 export function testConfig(overrides: Record<string, unknown> = {}): Config {
@@ -79,6 +79,7 @@ export function testConfig(overrides: Record<string, unknown> = {}): Config {
 export interface FakeAgent {
 	stateDir: string;
 	journal(): Array<{
+		harness: "claude" | "codex";
 		role: string;
 		issueTitle: string;
 		args: string[];
@@ -90,9 +91,10 @@ export interface FakeAgent {
 /** Point the engine at the fake agent. Returns accessors for what it saw. */
 export function useFakeAgent(scenario: Record<string, unknown> = {}): FakeAgent {
 	const stateDir = tempDir("milhouse-fake-");
-	process.env.MILHOUSE_CLAUDE = FAKE_CLAUDE;
-	process.env.FAKE_CLAUDE_STATE = stateDir;
-	process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify(scenario);
+	process.env.MILHOUSE_CLAUDE = FAKE_AGENT;
+	process.env.MILHOUSE_CODEX = FAKE_AGENT;
+	process.env.FAKE_AGENT_STATE = stateDir;
+	process.env.FAKE_AGENT_SCENARIO = JSON.stringify(scenario);
 	process.env.MILHOUSE_RETRY_DELAY_MS = "1";
 	return {
 		stateDir,
@@ -109,11 +111,21 @@ export function useFakeAgent(scenario: Record<string, unknown> = {}): FakeAgent 
 	};
 }
 
+/** Remove environment variables (a plain `delete` on a literal name is flagged by the linter). */
+export function unsetEnv(...names: string[]): void {
+	for (const name of names) delete process.env[name];
+}
+
+/** Plain ASCII: what a terminal without UTF-8 shows correctly. */
+export const isAscii = (text: string): boolean =>
+	[...text].every((c) => (c.codePointAt(0) ?? 0) < 128);
+
 export function resetFakeAgentEnv(): void {
 	for (const key of [
 		"MILHOUSE_CLAUDE",
-		"FAKE_CLAUDE_STATE",
-		"FAKE_CLAUDE_SCENARIO",
+		"MILHOUSE_CODEX",
+		"FAKE_AGENT_STATE",
+		"FAKE_AGENT_SCENARIO",
 		"MILHOUSE_RETRY_DELAY_MS",
 	]) {
 		delete process.env[key];

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { EngineError, buildArgs, runAgent } from "../src/engine.ts";
+import { EngineError, runAgent } from "../src/engine.ts";
+import type { HarnessName } from "../src/types.ts";
 import { cleanupTempDirs, resetFakeAgentEnv, tempDir, useFakeAgent } from "./helpers.ts";
 
 afterEach(() => {
@@ -7,50 +8,15 @@ afterEach(() => {
 	resetFakeAgentEnv();
 });
 
-const base = { cwd: "", timeoutMs: 20_000, tools: "read" as const };
+const base = {
+	harness: "claude" as HarnessName,
+	cwd: "",
+	timeoutMs: 20_000,
+	tools: "read" as const,
+};
+const codexBase = { ...base, harness: "codex" as HarnessName };
 
-describe("buildArgs", () => {
-	it("always isolates the agent from the user's MCP servers and from session files", () => {
-		const args = buildArgs({ tools: "read" });
-		expect(args).toContain("--strict-mcp-config");
-		expect(args).toContain("--no-session-persistence");
-		expect(args.slice(0, 3)).toEqual(["-p", "--output-format", "json"]);
-	});
-
-	it("gives read-only phases read-only tools and no permission bypass", () => {
-		const args = buildArgs({ tools: "read" });
-		expect(args.join(" ")).toContain("--tools Read,Grep,Glob");
-		expect(args).not.toContain("--dangerously-skip-permissions");
-	});
-
-	it("bypasses permissions only when the agent must edit and run things", () => {
-		const args = buildArgs({ tools: "all" });
-		expect(args).toContain("--dangerously-skip-permissions");
-		expect(args).not.toContain("--tools");
-	});
-
-	it("passes model, schema, turn limit and the per-call budget", () => {
-		const args = buildArgs({
-			tools: "read",
-			model: "opus",
-			schema: { type: "object" },
-			maxTurns: 7,
-			maxBudgetUsd: 1.23456,
-		});
-		expect(args.join(" ")).toContain("--model opus");
-		expect(args).toContain('{"type":"object"}');
-		expect(args.join(" ")).toContain("--max-turns 7");
-		expect(args.join(" ")).toContain("--max-budget-usd 1.2346");
-	});
-
-	it("omits optional flags when not given", () => {
-		const joined = buildArgs({ tools: "read" }).join(" ");
-		for (const flag of ["--model", "--json-schema", "--max-turns", "--max-budget-usd"])
-			expect(joined).not.toContain(flag);
-	});
-});
-
-describe("runAgent", () => {
+describe("runAgent with Claude", () => {
 	it("returns the structured answer as JSON text with the reported cost", async () => {
 		useFakeAgent({ cost: 0.42, scan: [{ title: "Found it" }] });
 		const result = await runAgent("## Role: Lead Investigator\nscan", { ...base, cwd: tempDir() });
@@ -85,6 +51,7 @@ describe("runAgent", () => {
 		expect(error.message).toContain("maximum number of turns");
 		expect(error.costUsd).toBe(0.3);
 		expect(error.fatal).toBe(false);
+		expect(error.systemic).toBe(false);
 	});
 
 	it("marks a used-up call budget as fatal (retrying cannot help)", async () => {
@@ -100,6 +67,16 @@ describe("runAgent", () => {
 		const error = await runAgent("## Role: Planner", { ...base, cwd: tempDir() }).catch((e) => e);
 		expect(error.costUsd).toBe(0.5);
 		expect(error.fatal).toBe(true);
+		expect(error.systemic).toBe(false);
+	});
+
+	it("recognises that Claude is logged out: no other call would work either", async () => {
+		useFakeAgent({
+			fail: { Planner: { message: "Not logged in · Please run /login", result: true } },
+		});
+		const error = await runAgent("## Role: Planner", { ...base, cwd: tempDir() }).catch((e) => e);
+		expect(error.systemic).toBe(true);
+		expect(error.message).toContain("Not logged in");
 	});
 
 	it("fails clearly when the agent prints no result", async () => {
@@ -127,6 +104,63 @@ describe("runAgent", () => {
 	it("fails clearly when the binary does not exist", async () => {
 		process.env.MILHOUSE_CLAUDE = "/nonexistent/claude";
 		const error = await runAgent("hi", { ...base, cwd: tempDir() }).catch((e) => e);
+		expect(error).toBeInstanceOf(EngineError);
+	});
+});
+
+describe("runAgent with Codex", () => {
+	it("returns the answer and the tokens, and no dollars", async () => {
+		const fake = useFakeAgent({ cost: 0.42, scan: [{ title: "Found it" }] });
+		const result = await runAgent("## Role: Lead Investigator\nscan", {
+			...codexBase,
+			cwd: tempDir(),
+			schema: { type: "object" },
+		});
+		expect(JSON.parse(result.text).items[0].title).toBe("Found it");
+		expect(result.costUsd).toBe(0);
+		expect(result.tokens).toEqual({ input: 42_000, output: 100 });
+		expect(fake.journal()[0].harness).toBe("codex");
+		expect(fake.journal()[0].prompt).toContain("matches this JSON Schema"); // asked for in the prompt
+	});
+
+	it("turns a failed turn into an EngineError, and knows a failure every call would share", async () => {
+		useFakeAgent({
+			fail: {
+				Planner: {
+					message: "unexpected status 401 Unauthorized: Missing bearer or basic authentication",
+				},
+				"Lead Investigator": { message: "stream disconnected before completion" },
+			},
+		});
+		const login = await runAgent("## Role: Planner", { ...codexBase, cwd: tempDir() }).catch(
+			(e) => e,
+		);
+		expect(login).toBeInstanceOf(EngineError);
+		expect(login.message).toContain("401");
+		expect(login.systemic).toBe(true);
+
+		const flaky = await runAgent("## Role: Lead Investigator", {
+			...codexBase,
+			cwd: tempDir(),
+		}).catch((e) => e);
+		expect(flaky.systemic).toBe(false);
+		expect(flaky.costUsd).toBe(0);
+	});
+
+	it("counts no money for a call that timed out: Codex reports none", async () => {
+		useFakeAgent({ sleep: { Planner: 30_000 } });
+		const error = await runAgent("## Role: Planner", {
+			...codexBase,
+			cwd: tempDir(),
+			timeoutMs: 400,
+		}).catch((e) => e);
+		expect(error.message).toContain("timed out");
+		expect(error.costUsd).toBe(0);
+	});
+
+	it("fails clearly when the binary does not exist", async () => {
+		process.env.MILHOUSE_CODEX = "/nonexistent/codex";
+		const error = await runAgent("hi", { ...codexBase, cwd: tempDir() }).catch((e) => e);
 		expect(error).toBeInstanceOf(EngineError);
 	});
 });

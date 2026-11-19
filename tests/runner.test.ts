@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { CostTracker, emptyCost } from "../src/cost.ts";
+import { EngineError } from "../src/engine.ts";
 import { GiveUp, type Outcome, type PhaseDef, runPhase } from "../src/runner.ts";
 import { RunStore } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
@@ -45,6 +46,30 @@ function phase(
 		recorded,
 	};
 }
+
+describe("runPhase after a failure that every call would share", () => {
+	it("does not let a worker that was waiting to retry call the agent again", async () => {
+		process.env.MILHOUSE_RETRY_DELAY_MS = "400"; // the first item waits 200-600 ms before its retry
+		const { store, config, cost } = setup({ phases: { validate: { workers: 2, retries: 2 } } });
+		let attemptsOfFirst = 0;
+		const def = phase(
+			async (n) => {
+				if (n === 1) {
+					attemptsOfFirst++;
+					throw new EngineError("overloaded");
+				}
+				await sleep(80);
+				throw new EngineError("Not logged in", { systemic: true });
+			},
+			[1, 2],
+		);
+
+		const outcomes = await runPhase(def, store, config, cost);
+		expect(attemptsOfFirst).toBe(1);
+		expect(outcomes[1]).toMatchObject({ ok: false, systemic: true });
+		expect(outcomes[0]).toMatchObject({ ok: false, skipped: true }); // left for --resume
+	});
+});
 
 describe("runPhase", () => {
 	it("runs every item and records each result", async () => {
