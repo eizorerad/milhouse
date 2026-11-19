@@ -34,10 +34,34 @@ function createLock(path: string): void {
 	}
 }
 
+/**
+ * The holder of the lock is dead. Only one starter at a time may clear its lock: two starters that both saw
+ * the stale lock would otherwise delete each other's fresh one and both run.
+ */
+function clearStaleLock(path: string, holder: string): void {
+	const takeover = `${path}.takeover`;
+	try {
+		mkdirSync(takeover);
+	} catch {
+		// Somebody else is clearing it: wait a moment, unless that starter died halfway.
+		const started = statSync(takeover, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+		if (Date.now() - started > STALE_TAKEOVER_MS)
+			rmSync(takeover, { recursive: true, force: true });
+		else Bun.sleepSync(20);
+		return;
+	}
+	try {
+		if (readFileSync(path, "utf-8") === holder) rmSync(path, { force: true });
+	} catch {
+		// already gone
+	} finally {
+		rmSync(takeover, { recursive: true, force: true });
+	}
+}
+
 /** One milhouse per repository at a time. Returns the release function (also runs on exit). */
 export function acquireLock(workDir: string): () => void {
 	const path = join(workDir, STATE_DIR, "lock");
-	const takeover = `${path}.takeover`;
 	mkdirSync(dirname(path), { recursive: true });
 
 	for (let attempt = 0; attempt < 50; attempt++) {
@@ -64,26 +88,7 @@ export function acquireLock(workDir: string): () => void {
 			throw new Error(`Another milhouse is running in this repository (pid ${pid}).`);
 		}
 
-		// The holder is dead. Only one starter at a time may clear its lock: two starters that both saw
-		// the stale lock would otherwise delete each other's fresh one and both run.
-		try {
-			mkdirSync(takeover);
-		} catch {
-			const started = statSync(takeover, { throwIfNoEntry: false })?.mtimeMs ?? 0;
-			if (Date.now() - started > STALE_TAKEOVER_MS) {
-				rmSync(takeover, { recursive: true, force: true });
-			} else {
-				Bun.sleepSync(20);
-			}
-			continue;
-		}
-		try {
-			if (readFileSync(path, "utf-8") === holder) rmSync(path, { force: true });
-		} catch {
-			// already gone
-		} finally {
-			rmSync(takeover, { recursive: true, force: true });
-		}
+		clearStaleLock(path, holder);
 	}
 	throw new Error("Could not acquire the milhouse lock.");
 }
