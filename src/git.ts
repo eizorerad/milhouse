@@ -3,10 +3,10 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { type RunResult, run } from "./proc.ts";
-import { tail } from "./util.ts";
+import { MINUTE, tail } from "./util.ts";
 
 /** A hook or a lock that never finishes must not hang milhouse forever. */
-const GIT_TIMEOUT_MS = 10 * 60 * 1000;
+const GIT_TIMEOUT_MS = 10 * MINUTE;
 
 /**
  * Variables that point git at a repository other than the working directory. A caller such as a git
@@ -78,20 +78,14 @@ async function gitRun(cwd: string, ...args: string[]): Promise<RunResult> {
 	return result;
 }
 
-/** Raw stdout. Never a part of it: a cut-off log or path list could hide a task or a protected file. */
-async function gitText(cwd: string, ...args: string[]): Promise<string> {
+/** Stdout without its last newline. Never a part of it: a cut-off log or path list could hide a task or a protected file. */
+export async function gitOrThrow(cwd: string, ...args: string[]): Promise<string> {
 	const result = await gitRun(cwd, ...args);
 	if (result.truncated) {
 		throw new Error(`git ${args[0]} printed too much (over 32 MB) to be read in full.`);
 	}
-	return result.stdout;
+	return result.stdout.trimEnd();
 }
-
-export async function gitOrThrow(cwd: string, ...args: string[]): Promise<string> {
-	return (await gitText(cwd, ...args)).trimEnd();
-}
-
-const lines = (text: string): string[] => text.split("\n").filter(Boolean);
 
 // ─── Repository state ────────────────────────────────────────────────
 
@@ -154,7 +148,9 @@ export async function isDirty(cwd: string, opts: { untracked?: boolean } = {}): 
 
 /** Commit subjects in `from..to`, newest first. */
 export async function commitSubjects(cwd: string, from: string, to = "HEAD"): Promise<string[]> {
-	return lines(await gitOrThrow(cwd, "log", "--format=%s", `${from}..${to}`));
+	return (await gitOrThrow(cwd, "log", "--format=%s", `${from}..${to}`))
+		.split("\n")
+		.filter(Boolean);
 }
 
 /**

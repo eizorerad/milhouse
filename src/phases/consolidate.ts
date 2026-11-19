@@ -4,9 +4,7 @@ import { feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
 import type { Task } from "../types.ts";
 import { log } from "../ui.ts";
-import { parseJson, stringList } from "../util.ts";
-
-const MINUTE = 60_000;
+import { MINUTE, parseJson, stringList } from "../util.ts";
 
 export interface Consolidation {
 	duplicates: Array<{ keep: string; remove: string[] }>;
@@ -15,7 +13,7 @@ export interface Consolidation {
 
 const ids = { type: "array", items: { type: "string" } } as const;
 
-export const CONSOLIDATE_SCHEMA = {
+const CONSOLIDATE_SCHEMA = {
 	type: "object",
 	properties: {
 		duplicates: {
@@ -41,7 +39,7 @@ export const CONSOLIDATE_SCHEMA = {
 	additionalProperties: false,
 } as const;
 
-export function consolidatePrompt(tasks: Task[], lastError?: string): string {
+function consolidatePrompt(tasks: Task[], lastError?: string): string {
 	const list = tasks
 		.map(
 			(t) =>
@@ -91,12 +89,10 @@ export function parseConsolidation(text: string): Consolidation {
 	};
 }
 
-/** Follow `from -> to` redirects to the final id. The step limit guards against cycles. */
+/** Follow `from -> to` redirects to the final id. A redirect only joins the ends of two chains, so there is no cycle. */
 function resolveId(redirect: Map<string, string>, id: string): string {
 	let current = id;
-	for (let step = 0; step < redirect.size && redirect.has(current); step++) {
-		current = redirect.get(current) as string;
-	}
+	while (redirect.has(current)) current = redirect.get(current) as string;
 	return current;
 }
 

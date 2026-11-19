@@ -7,7 +7,7 @@ import { section } from "./prompts.ts";
 import type { RunStore } from "./state.ts";
 import type { AgentStep, Config, Phase } from "./types.ts";
 import { Progress, log } from "./ui.ts";
-import { errorMessage, mapPool, sleep } from "./util.ts";
+import { MINUTE, errorMessage, mapPool, sleep } from "./util.ts";
 
 export type Outcome<T> =
 	| { ok: true; value: T }
@@ -54,7 +54,7 @@ export class GiveUp extends Error {}
 /** Throw to leave an item untouched for now: nothing is recorded, --resume picks it up again. */
 export class Skip extends Error {}
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 10 * MINUTE;
 const retryDelayMs = (): number => Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 2000);
 const firstLine = (text: string): string => text.split("\n")[0].slice(0, 160);
 

@@ -3,9 +3,8 @@
 import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
 import { ACTIONABLE, type Config, type Issue, type Task } from "../types.ts";
-import { generateId, parseJson, stringList, stripControl } from "../util.ts";
+import { MINUTE, generateId, parseJson, stringList, stripControl } from "../util.ts";
 
-const MINUTE = 60_000;
 /** The prompt asks for 1-5; this only keeps a runaway answer from flooding the later phases. */
 const MAX_TASKS = 10;
 
@@ -21,7 +20,7 @@ export interface RawTask {
 
 const strings = { type: "array", items: { type: "string" } } as const;
 
-export const PLAN_SCHEMA = {
+const PLAN_SCHEMA = {
 	type: "object",
 	properties: {
 		summary: { type: "string" },
@@ -47,7 +46,7 @@ export const PLAN_SCHEMA = {
 	additionalProperties: false,
 } as const;
 
-export function planPrompt(issue: Issue, config: Config, lastError?: string): string {
+function planPrompt(issue: Issue, config: Config, lastError?: string): string {
 	return prompt(
 		role(
 			"Planner",

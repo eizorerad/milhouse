@@ -34,12 +34,10 @@ import {
 import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
 import type { Config, Task } from "../types.ts";
-import { errorMessage, parseJson, tail } from "../util.ts";
+import { MINUTE, errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
 import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
 import { REVIEW_SCHEMA, bullets, execPrompt, reviewPrompt } from "./exec-prompts.ts";
-
-const MINUTE = 60_000;
 
 export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
 
@@ -70,11 +68,7 @@ interface Work {
 }
 
 /** First problem with the work (written as instructions for the agent), or null when it passes. */
-export async function checkWork(
-	work: Work,
-	group: IssueGroup,
-	config: Config,
-): Promise<string | null> {
+async function checkWork(work: Work, group: IssueGroup, config: Config): Promise<string | null> {
 	const tip = work.accepted.slice(0, 8);
 	if (!(await isAncestor(work.dir, work.accepted, "HEAD"))) {
 		return `The accepted commits (up to ${tip}) are no longer part of HEAD. Never reset, rebase or switch away from them: build on top of ${tip}.`;
@@ -123,15 +117,15 @@ export async function checkWork(
 	return null;
 }
 
-export interface Verdict {
+export interface ReviewVerdict {
 	task_id: string;
 	passed: boolean;
 	reason: string;
 }
 
 /** Exactly one verdict per task, no unknown or repeated ids. */
-export function parseVerdicts(text: string, tasks: Task[]): Verdict[] {
-	const { tasks: verdicts } = parseJson<{ tasks?: Verdict[] }>(text, "Review");
+export function parseVerdicts(text: string, tasks: Task[]): ReviewVerdict[] {
+	const { tasks: verdicts } = parseJson<{ tasks?: ReviewVerdict[] }>(text, "Review");
 	if (!Array.isArray(verdicts)) throw new Error("Review: the answer has no `tasks` list");
 	const expected = new Set(tasks.map((t) => t.id));
 	const seen = new Set<string>();
@@ -153,7 +147,7 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 		diffPatch(work.dir, work.accepted),
 	]);
 	const text = reviewPrompt(group, stat, patch, ctx.config);
-	let verdicts: Verdict[] | undefined;
+	let verdicts: ReviewVerdict[] | undefined;
 	let failure = "";
 	for (let attempt = 0; attempt <= ctx.config.phases.verify.retries && !verdicts; attempt++) {
 		let answer: string;
@@ -188,7 +182,7 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 }
 
 /** One line per task the reviewer did not explicitly pass: anything but `true` counts as a rejection. */
-export function rejectionReasons(verdicts: Verdict[], tasks: Task[]): string[] {
+export function rejectionReasons(verdicts: ReviewVerdict[], tasks: Task[]): string[] {
 	const titles = new Map(tasks.map((t) => [t.id, t.title]));
 	return verdicts
 		.filter((v) => v.passed !== true)

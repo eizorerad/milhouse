@@ -5,9 +5,9 @@ import { resolve, sep } from "node:path";
 import { type AddedLine, gitOrThrow, revParse, withoutGitRouting } from "./git.ts";
 import { run } from "./proc.ts";
 import type { Config, Evidence } from "./types.ts";
-import { tail } from "./util.ts";
+import { MINUTE, tail } from "./util.ts";
 
-export const COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+export const COMMAND_TIMEOUT_MS = 10 * MINUTE;
 
 /** Files that match one of the `neverTouch` globs. A trailing "/" means "everything below". */
 export function forbiddenFiles(files: string[], patterns: string[]): string[] {

@@ -4,10 +4,9 @@ import { context, feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
 import type { Config, Issue } from "../types.ts";
 import { log } from "../ui.ts";
-import { generateId, parseJson, stripControl } from "../util.ts";
+import { MINUTE, generateId, parseJson, stripControl } from "../util.ts";
 
 const DEFAULT_SCOPE = "Find the most important bugs and improvements.";
-const MINUTE = 60_000;
 
 type RawIssue = Pick<
 	Issue,
@@ -20,7 +19,7 @@ const SEVERITIES: Issue["severity"][] = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
 /** The prompt asks for at most 10; this only keeps a runaway answer from flooding the later phases. */
 const MAX_ITEMS = 10;
 
-export const SCAN_SCHEMA = {
+const SCAN_SCHEMA = {
 	type: "object",
 	properties: {
 		items: {
@@ -44,7 +43,7 @@ export const SCAN_SCHEMA = {
 	additionalProperties: false,
 } as const;
 
-export function scanPrompt(scope: string, config: Config, lastError?: string): string {
+function scanPrompt(scope: string, config: Config, lastError?: string): string {
 	return prompt(
 		role(
 			"Lead Investigator",

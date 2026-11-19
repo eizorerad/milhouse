@@ -7,7 +7,7 @@ import type { RunStore } from "./state.ts";
 import type { Config } from "./types.ts";
 
 /** Written only after setup succeeded, so a setup that was interrupted is run again. */
-export const setupMarker = (store: RunStore): string => `${store.worktree}.ready`;
+const setupMarker = (store: RunStore): string => `${store.worktree}.ready`;
 
 /**
  * Make the worktree usable. `commands.setup` runs whenever the worktree is new or its setup never

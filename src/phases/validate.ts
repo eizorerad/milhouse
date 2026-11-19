@@ -4,9 +4,8 @@ import { verifyEvidence } from "../gates.ts";
 import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
 import type { Config, Evidence, Issue, IssueStatus } from "../types.ts";
-import { parseJson } from "../util.ts";
+import { MINUTE, parseJson } from "../util.ts";
 
-const MINUTE = 60_000;
 const VERDICTS = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] as const;
 
 export interface Verdict {
@@ -15,7 +14,7 @@ export interface Verdict {
 	evidence: Evidence[];
 }
 
-export const VALIDATE_SCHEMA = {
+const VALIDATE_SCHEMA = {
 	type: "object",
 	properties: {
 		status: { type: "string", enum: VERDICTS },
@@ -40,7 +39,7 @@ export const VALIDATE_SCHEMA = {
 	additionalProperties: false,
 } as const;
 
-export function validatePrompt(issue: Issue, config: Config, lastError?: string): string {
+function validatePrompt(issue: Issue, config: Config, lastError?: string): string {
 	return prompt(
 		role(
 			"Issue Validator",

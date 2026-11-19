@@ -8,7 +8,6 @@ import { run } from "./proc.ts";
 import type { HarnessName } from "./types.ts";
 
 export { EngineError };
-export type { AgentOptions, AgentResult };
 
 export const HARNESSES: Record<HarnessName, Harness> = { claude, codex };
 
@@ -47,5 +46,5 @@ export async function runAgent(prompt: string, opts: AgentOptions): Promise<Agen
 			{ costUsd: Math.min(opts.maxBudgetUsd ?? UNKNOWN_COST_USD, UNKNOWN_COST_USD) },
 		);
 	}
-	return harness.parse(out, opts);
+	return harness.parse(out);
 }
