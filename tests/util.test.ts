@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { extractJson, mapPool, parseJson, sleep, tail } from "../src/util.ts";
+import { extractJson, mapPool, parseJson, sleep, stripControl, tail } from "../src/util.ts";
 
 describe("extractJson", () => {
 	it("returns raw JSON as is", () => {
@@ -68,5 +68,14 @@ describe("tail", () => {
 	it("keeps short text and cuts long text from the front", () => {
 		expect(tail("  short  ")).toBe("short");
 		expect(tail("abcdef", 3)).toBe("...def");
+	});
+});
+
+describe("stripControl", () => {
+	it("removes terminal escape sequences and control characters, keeps text, tabs and newlines", () => {
+		expect(stripControl("a\u001b[31mred\u001b[0m\u0007 b\tc\nd\u0085e")).toBe(
+			"a[31mred[0m b\tc\nde",
+		);
+		expect(stripControl("plain ünïcode ✓")).toBe("plain ünïcode ✓");
 	});
 });

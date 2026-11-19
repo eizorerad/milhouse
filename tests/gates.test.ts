@@ -137,6 +137,14 @@ describe("runChecks", () => {
 });
 
 describe("runChecks and what a check leaves behind", () => {
+	it("judges a check by its own exit, not by a background process that keeps its pipes open", async () => {
+		const dir = tempDir();
+		const started = Date.now();
+		// The shell exits 0 at once; the background child is stopped, and does not turn the pass into a timeout.
+		expect(await runChecks(dir, { test: "sleep 30 & exit 0" }, { timeoutMs: 5_000 })).toBeNull();
+		expect(Date.now() - started).toBeLessThan(4_000);
+	});
+
 	it("stops background processes a check left running: they could change the next issue's files", async () => {
 		const dir = tempDir();
 		expect(await runChecks(dir, { test: "sleep 30 & echo $! > watcher.pid" })).toBeNull();

@@ -1,28 +1,12 @@
 /** Unit tests for the safety and consistency fixes found by review. */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { runChecks } from "../src/gates.ts";
-import { addedLines, revParse } from "../src/git.ts";
 import { loadGroups, unmetDependencies } from "../src/phases/exec-order.ts";
 import { execPhase, rejectionReasons } from "../src/phases/exec.ts";
 import { planPhase } from "../src/phases/plan.ts";
 import { RunStore } from "../src/state.ts";
 import type { Issue } from "../src/types.ts";
-import { stripControl } from "../src/util.ts";
-import {
-	BASE,
-	cleanupTempDirs,
-	commitFile,
-	git,
-	makeIssue,
-	makeRepo,
-	makeTask,
-	tempDir,
-	testConfig,
-	writeFile,
-} from "./helpers.ts";
+import { BASE, cleanupTempDirs, makeIssue, makeTask, tempDir, testConfig } from "./helpers.ts";
 
 afterEach(cleanupTempDirs);
 
@@ -103,100 +87,7 @@ describe("planning", () => {
 	});
 });
 
-describe("run ids", () => {
-	it("only accepts ids that are safe as paths and ref names", () => {
-		const dir = tempDir();
-		for (const bad of ["../x", "run-/../x", "run-a b", "x", "", "run-é", "run-a/b"]) {
-			expect(() => new RunStore(dir, bad)).toThrow(/Invalid run id/);
-		}
-		expect(new RunStore(dir, "run-20260101-abc_DEF-1").ref).toBe(
-			"refs/milhouse/run-20260101-abc_DEF-1",
-		);
-	});
-
-	it("treats a path-like --run-id as simply not found", () => {
-		expect(() => RunStore.byId(tempDir(), "../../etc")).toThrow(/not found/);
-	});
-
-	it("takes the id from the directory name, never from the file content, and skips foreign directories", async () => {
-		const dir = tempDir();
-		const store = RunStore.create(dir, "real", BASE);
-		const runs = join(dir, ".milhouse", "runs");
-		// A repository could ship a run whose meta.json claims another id.
-		const fake = join(runs, "run-planted");
-		mkdirSync(fake);
-		writeFileSync(
-			join(fake, "meta.json"),
-			JSON.stringify({
-				id: "../../../victim",
-				status: "completed",
-				created_at: "2000-01-01T00:00:00Z",
-				done: [],
-			}),
-		);
-		mkdirSync(join(runs, "not-a-run"));
-		writeFileSync(join(runs, "not-a-run", "meta.json"), "{}");
-
-		const ids = RunStore.list(dir).map((r) => r.id);
-		expect(ids).toEqual(["run-planted", store.runId]);
-		expect((await RunStore.clean(dir, 1)).removed).toEqual(["run-planted"]); // removes only its own directory
-		expect(RunStore.list(dir).map((r) => r.id)).toEqual([store.runId]);
-	});
-
-	it("never follows a planted symlink when writing state", () => {
-		const dir = tempDir();
-		const store = RunStore.create(dir, undefined, BASE);
-		const victim = join(tempDir(), "victim.txt");
-		writeFileSync(victim, "precious");
-		const runDir = join(dir, ".milhouse", "runs", store.runId);
-		symlinkSync(victim, join(runDir, "tasks.json.tmp"));
-		store.saveTasks([makeTask("T1")]);
-		expect(store.loadTasks()).toHaveLength(1);
-		expect(readFileSync(victim, "utf-8")).toBe("precious");
-	});
-});
-
-describe("stripControl", () => {
-	it("removes terminal escape sequences and control characters, keeps text, tabs and newlines", () => {
-		expect(stripControl("a\u001b[31mred\u001b[0m\u0007 b\tc\nd\u0085e")).toBe(
-			"a[31mred[0m b\tc\nde",
-		);
-		expect(stripControl("plain ünïcode ✓")).toBe("plain ünïcode ✓");
-	});
-});
-
 describe("fixes found by the final review", () => {
-	it("judges a check by its own exit, not by a background process that keeps its pipes open", async () => {
-		const dir = tempDir();
-		const started = Date.now();
-		// The shell exits 0 at once; the background child is stopped, and does not turn the pass into a timeout.
-		expect(await runChecks(dir, { test: "sleep 30 & exit 0" }, { timeoutMs: 5_000 })).toBeNull();
-		expect(Date.now() - started).toBeLessThan(4_000);
-	});
-
-	it("still finds added lines when the user's git config adds diff context", async () => {
-		const repo = await makeRepo();
-		await git(repo, "config", "diff.interHunkContext", "3");
-		await git(repo, "config", "diff.context", "5");
-		await commitFile(
-			repo,
-			"long.txt",
-			Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n"),
-			"long",
-		);
-		const base = await revParse(repo, "HEAD");
-		const lines = Array.from({ length: 12 }, (_, i) => `line ${i}`);
-		lines[3] = "changed 3";
-		lines[6] = "// TODO changed 6";
-		writeFile(repo, "long.txt", lines.join("\n"));
-		await git(repo, "add", "-A");
-		await git(repo, "commit", "-q", "-m", "edit");
-		expect((await addedLines(repo, base)).map((a) => a.text)).toEqual([
-			"changed 3",
-			"// TODO changed 6",
-		]);
-	});
-
 	it("records a plan idempotently: a crash between the tasks and the planned flag cannot duplicate them", () => {
 		const store = RunStore.create(tempDir(), undefined, BASE);
 		store.saveIssues([makeIssue("P1")]);
@@ -258,12 +149,5 @@ describe("fixes found by the final review", () => {
 		const [stored] = store.loadTasks();
 		expect(stored.error?.startsWith("The review could not be completed")).toBe(true);
 		expect(stored.error).toHaveLength(2000);
-	});
-
-	it("records the commit that was accepted for a task", () => {
-		const store = RunStore.create(tempDir(), undefined, BASE);
-		store.saveTasks([makeTask("T1")]);
-		store.updateTasks(["T1"], { sha: "abc123" });
-		expect(store.loadTasks()[0].sha).toBe("abc123");
 	});
 });

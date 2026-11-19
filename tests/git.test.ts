@@ -232,6 +232,29 @@ describe("history between two commits", () => {
 		expect(added.map((a) => a.text)).toEqual(["changed 2", "changed 27 TODO"]);
 	});
 
+	it("still finds added lines when the user's git config adds diff context", async () => {
+		const repo = await makeRepo();
+		await git(repo, "config", "diff.interHunkContext", "3");
+		await git(repo, "config", "diff.context", "5");
+		await commitFile(
+			repo,
+			"long.txt",
+			Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n"),
+			"long",
+		);
+		const base = await revParse(repo, "HEAD");
+		const lines = Array.from({ length: 12 }, (_, i) => `line ${i}`);
+		lines[3] = "changed 3";
+		lines[6] = "// TODO changed 6";
+		writeFile(repo, "long.txt", lines.join("\n"));
+		await git(repo, "add", "-A");
+		await git(repo, "commit", "-q", "-m", "edit");
+		expect((await addedLines(repo, base)).map((a) => a.text)).toEqual([
+			"changed 3",
+			"// TODO changed 6",
+		]);
+	});
+
 	it("never answers from a part of the history either: a cut-off log could hide a task or a file", async () => {
 		const repo = await makeRepo();
 		const base = await revParse(repo, "HEAD");
