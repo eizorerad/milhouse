@@ -7,7 +7,7 @@ Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code)
 Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` or the `codex` CLI, logged in.
 
 ```bash
-git clone https://github.com/eizorerad/milhouse.git && cd milhouse
+git clone --depth 1 https://github.com/eizorerad/milhouse.git && cd milhouse
 bun install && bun link        # puts `milhouse` on your PATH
 
 cd your-project                # a git repo, on the branch you want changed
