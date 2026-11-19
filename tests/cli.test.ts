@@ -77,6 +77,38 @@ describe("arguments", () => {
 });
 
 describe("--init, --list-runs, --report, --clean", () => {
+	it("treats bare init as setup even with uncommitted changes, without starting agents", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		writeFileSync(join(repo, "src/app.ts"), "work in progress");
+		const result = await milhouse(repo, "init");
+		expect(result.code).toBe(0);
+		const config = join(repo, ".milhouse", "config.ts");
+		expect(existsSync(config)).toBe(true);
+		writeFileSync(config, "export default { budget: 7 };");
+		for (const args of [["-v", "init"], ["--init"]]) {
+			const repeat = await milhouse(repo, ...args);
+			expect(repeat.code).toBe(0);
+			expect(repeat.stdout).toContain("already exists");
+		}
+		expect(readFileSync(config, "utf8")).toBe("export default { budget: 7 };");
+		expect(RunStore.list(repo)).toHaveLength(0);
+		expect(fake.journal()).toHaveLength(0);
+	});
+
+	it("keeps init in longer task descriptions and explicit run scopes", async () => {
+		useFakeAgent({ scan: [] });
+		for (const [args, scope] of [
+			[["init", "a", "project"], "init a project"],
+			[["--scan", "init"], "init"],
+			[["--scope", "init"], "init"],
+		] as const) {
+			const repo = await makeRepo();
+			expect((await milhouse(repo, ...args)).code).toBe(0);
+			expect(RunStore.latest(repo)?.loadMeta().scope).toBe(scope);
+		}
+	});
+
 	it("creates the config and keeps the working tree clean, so the next run is not blocked", async () => {
 		const repo = await makeRepo();
 		const first = await milhouse(repo, "--init");

@@ -11,8 +11,14 @@ export const setVerbose = (value: boolean): void => {
 /** True while a spinner line is on screen: anything else we print must erase it first. */
 let spinnerShown = false;
 
+function clearSpinner(): void {
+	if (!spinnerShown) return;
+	process.stdout.write("\r\x1b[K");
+	spinnerShown = false;
+}
+
 function emit(stream: "log" | "error", message: string): void {
-	if (spinnerShown) process.stdout.write("\r\x1b[K");
+	clearSpinner();
 	console[stream](message);
 }
 
@@ -60,28 +66,27 @@ const FRAMES = ["|", "/", "-", "\\"];
 export class Progress {
 	private done = 0;
 	private frame = 0;
-	private readonly active = new Set<string>();
+	private readonly active: string[] = []; // parallel items may have the same display name
 	private readonly startedAt = Date.now();
-	private readonly tty = Boolean(process.stdout.isTTY);
 	private readonly timer?: ReturnType<typeof setInterval>;
 
 	constructor(
 		private readonly label: string,
 		private readonly total: number,
 	) {
-		if (this.tty) {
+		if (process.stdout.isTTY && process.stdout.columns > 1 && process.env.TERM !== "dumb") {
 			this.timer = setInterval(() => this.render(), 120);
-			spinnerShown = true;
 		}
 	}
 
 	begin(id: string): void {
-		this.active.add(id);
-		if (!this.tty) console.log(`  ... ${text(id)}`);
+		this.active.push(id);
+		if (!this.timer) console.log(`  ... ${text(id)}`);
 	}
 
 	end(id: string, ok: boolean, note = ""): void {
-		this.active.delete(id);
+		const index = this.active.indexOf(id);
+		if (index >= 0) this.active.splice(index, 1);
 		this.done++;
 		const mark = ok ? pc.green("+") : pc.red("x");
 		this.print(`${mark} ${text(id)}${note ? pc.dim(` - ${text(note)}`) : ""}`);
@@ -93,8 +98,7 @@ export class Progress {
 
 	stop(): void {
 		if (this.timer) clearInterval(this.timer);
-		if (this.tty) process.stdout.write("\r\x1b[K");
-		spinnerShown = false;
+		clearSpinner();
 	}
 
 	private print(line: string): void {
@@ -103,10 +107,24 @@ export class Progress {
 
 	private render(): void {
 		const frame = pc.magenta(FRAMES[this.frame++ % FRAMES.length]);
-		const running = [...this.active].map(text).join(", "); // the names come from the agent
+		const count = `${this.done}/${this.total}`;
+		const phase = `  ${frame} ${this.label} ${count}`;
 		const elapsed = formatDuration(Date.now() - this.startedAt);
-		process.stdout.write(
-			`\r  ${frame} ${this.label} ${this.done}/${this.total} ${pc.dim(`${running} ${elapsed}`)}\x1b[K`,
-		);
+		const running = this.active.map((id) => text(id).replace(/\s+/g, " ")).join(", ");
+		// A carriage return only rewinds one physical row. Leave the last column free to avoid wrapping.
+		const columns = process.stdout.columns;
+		const line = [
+			running && `${phase} ${pc.dim(`${running} ${elapsed}`)}`,
+			`${phase} ${pc.dim(`${this.active.length} running ${elapsed}`)}`,
+			`${phase} ${pc.dim(elapsed)}`,
+			count,
+			frame,
+		].find((candidate) => candidate && Bun.stringWidth(candidate) < columns);
+		if (line) {
+			process.stdout.write(`\r${line}\x1b[K`);
+			spinnerShown = true;
+		} else {
+			clearSpinner();
+		}
 	}
 }

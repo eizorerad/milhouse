@@ -10,9 +10,9 @@ Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` or the `codex` CLI,
 git clone https://github.com/eizorerad/milhouse.git && cd milhouse
 bun install && bun link        # puts `milhouse` on your PATH
 
-cd your-project                # a git repo, clean working tree, on the branch you want changed
-milhouse --init                # writes .milhouse/config.ts: set commands.test / lint / build
-milhouse "fix authentication bugs"
+cd your-project                # a git repo, on the branch you want changed
+milhouse init                  # writes .milhouse/config.ts: set commands.test / lint / build
+milhouse "fix authentication bugs"   # starts a run; commit or stash your work first
 ```
 
 ## How it works
@@ -69,7 +69,7 @@ A step uses the model of its own harness: the global `model` does not apply to a
 
 ## Configuration
 
-`milhouse --init` writes `.milhouse/config.ts` with every option and its default. The ones that matter:
+`milhouse init` (or `milhouse --init`) writes `.milhouse/config.ts` with every option and its default. It works with uncommitted changes, leaves an existing config alone, and does not start any agents. The options that matter:
 
 ```ts
 export default {
@@ -125,7 +125,7 @@ milhouse --scan | --validate | --plan | --consolidate | --exec | --merge
 milhouse --report [--format md] run summary: issues, tasks, failures, cost
 milhouse --list-runs            list runs
 milhouse --clean [--days 30]    delete finished runs
-milhouse --init                 create .milhouse/config.ts
+milhouse init                   create .milhouse/config.ts (also: --init)
   --scope <text>  --workers <n>  --harness <claude|codex>  --model <name>  --run-id <id>  -v  -V  -h
 ```
 

@@ -34,7 +34,7 @@ Usage:
   milhouse --report [--format md] Show a run report
   milhouse --list-runs            List runs
   milhouse --clean [--days 30]    Delete finished runs older than N days
-  milhouse --init                 Create .milhouse/config.ts
+  milhouse init                   Create .milhouse/config.ts without running agents (also: --init)
 
 Options:
   --scope <text>   What to look for (same as the positional text)
@@ -190,21 +190,23 @@ async function main(argv: string[]): Promise<number> {
 	if (phaseFlags.length > 1) throw new UsageError(`Pick one phase, got: ${phaseFlags.join(", ")}`);
 	const only: Phase | undefined = phaseFlags[0];
 	const scope = values.scope ?? (positionals.join(" ").trim() || undefined);
-	const runIntent = Boolean(values.run || values.resume || only || scope);
+	const runMode = values.run || values.resume || only;
+	const management = values.report || values["list-runs"] || values.clean;
+	// Reserve the single word "init" only in place of an implicit run. For example, --scan init still has a scope.
+	const implicit =
+		!runMode && !management && values["run-id"] === undefined && values.scope === undefined;
+	const init = values.init || (implicit && positionals.length === 1 && positionals[0] === "init");
 
 	if (values.version) {
 		console.log(pkg.version);
 		return 0;
 	}
-	if (
-		values.help ||
-		!(runIntent || values.init || values.report || values["list-runs"] || values.clean)
-	) {
+	if (values.help || !(runMode || scope || init || management)) {
 		console.log(HELP);
 		return 0;
 	}
 
-	if (values.init) {
+	if (init) {
 		initProject(workDir);
 		return 0;
 	}
