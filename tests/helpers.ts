@@ -12,7 +12,7 @@ import { RunStore } from "../src/state.ts";
 import type { Config, Issue, Task } from "../src/types.ts";
 import { sleep } from "../src/util.ts";
 
-export const FAKE_AGENT = resolve(import.meta.dir, "fixtures/fake-agent.ts");
+// ─── Temporary directories and repositories ──────────────────────────
 
 const created: string[] = [];
 
@@ -74,6 +74,8 @@ export function projectWith(configSource?: string): string {
 	return dir;
 }
 
+// ─── Config ──────────────────────────────────────────────────────────
+
 export function testConfig(overrides: Record<string, unknown> = {}): Config {
 	const base = deepMerge(DEFAULTS as unknown as Record<string, unknown>, {
 		budget: 0,
@@ -88,6 +90,14 @@ export function testConfig(overrides: Record<string, unknown> = {}): Config {
 	});
 	return deepMerge(base, overrides) as unknown as Config;
 }
+
+/** The test config with a pipeline that ends before merge: the verified work waits for --merge. */
+export const noMerge = (over: Record<string, unknown> = {}) =>
+	testConfig({ pipeline: ["scan", "validate", "plan", "consolidate", "exec"], ...over });
+
+// ─── The fake agent ──────────────────────────────────────────────────
+
+export const FAKE_AGENT = resolve(import.meta.dir, "fixtures/fake-agent.ts");
 
 export interface FakeAgent {
 	stateDir: string;
@@ -137,15 +147,6 @@ export const TWO_ISSUES = {
 	],
 };
 
-/** Remove environment variables (a plain `delete` on a literal name is flagged by the linter). */
-export function unsetEnv(...names: string[]): void {
-	for (const name of names) delete process.env[name];
-}
-
-/** Plain ASCII: what a terminal without UTF-8 shows correctly. */
-export const isAscii = (text: string): boolean =>
-	[...text].every((c) => (c.codePointAt(0) ?? 0) < 128);
-
 export function resetFakeAgentEnv(): void {
 	for (const key of [
 		"MILHOUSE_CLAUDE",
@@ -158,13 +159,18 @@ export function resetFakeAgentEnv(): void {
 	}
 }
 
+export const calls = (fake: FakeAgent, role: string) =>
+	fake.journal().filter((c) => c.role === role);
+
+/** The value that follows `name` in a command line, such as the model an agent was given. */
+export const flag = (args: string[], name: string): string | undefined =>
+	args[args.indexOf(name) + 1];
+
+// ─── Pipeline runs ───────────────────────────────────────────────────
+
 /** Run the pipeline in `repo` with the test config. */
 export const go = (repo: string, config = testConfig(), opts: PipelineOptions = {}) =>
 	runPipeline(config, { workDir: repo, ...opts });
-
-/** The test config with a pipeline that ends before merge: the verified work waits for --merge. */
-export const noMerge = (over: Record<string, unknown> = {}) =>
-	testConfig({ pipeline: ["scan", "validate", "plan", "consolidate", "exec"], ...over });
 
 export const latest = (repo: string): RunStore => RunStore.latest(repo) as RunStore;
 
@@ -174,16 +180,42 @@ export const allStatus = (repo: string, status: string): boolean =>
 		.loadTasks()
 		.every((t) => t.status === status);
 
-export const calls = (fake: FakeAgent, role: string) =>
-	fake.journal().filter((c) => c.role === role);
-
 /** Commit subjects on main, newest first. */
 export const mainSubjects = async (repo: string): Promise<string[]> =>
 	(await git(repo, "log", "--format=%s", "main")).split("\n");
 
-/** The value that follows `name` in a command line, such as the model an agent was given. */
-export const flag = (args: string[], name: string): string | undefined =>
-	args[args.indexOf(name) + 1];
+// ─── State for unit tests ────────────────────────────────────────────
+
+/** Where a run that a unit test creates starts: a branch and a made-up commit, no repository. */
+export const BASE = { branch: "main", sha: "abc" };
+
+/** An issue for unit tests: a confirmed HIGH bug titled by its id; `over` says what differs. */
+export const makeIssue = (id: string, over: Partial<Issue> = {}): Issue => ({
+	id,
+	type: "bug",
+	title: id,
+	rationale: "r",
+	severity: "HIGH",
+	status: "CONFIRMED",
+	evidence: [],
+	...over,
+});
+
+/** A task for unit tests: a pending task of issue P1, titled by its id; `over` says what differs. */
+export const makeTask = (id: string, over: Partial<Task> = {}): Task => ({
+	id,
+	issue_id: "P1",
+	title: id,
+	description: "",
+	files: [],
+	depends_on: [],
+	checks: [],
+	acceptance: [],
+	status: "pending",
+	...over,
+});
+
+// ─── The CLI and processes ───────────────────────────────────────────
 
 /** The CLI's entry point, for tests that start it as a user would. */
 export const ENTRY = resolve(import.meta.dir, "../src/index.ts");
@@ -217,34 +249,18 @@ export async function goneWithin(pid: number, ms: number): Promise<boolean> {
 	return !alive(pid);
 }
 
-/** Where a run that a unit test creates starts: a branch and a made-up commit, no repository. */
-export const BASE = { branch: "main", sha: "abc" };
+// ─── Environment and text ────────────────────────────────────────────
 
-/** An issue for unit tests: a confirmed HIGH bug titled by its id; `over` says what differs. */
-export const makeIssue = (id: string, over: Partial<Issue> = {}): Issue => ({
-	id,
-	type: "bug",
-	title: id,
-	rationale: "r",
-	severity: "HIGH",
-	status: "CONFIRMED",
-	evidence: [],
-	...over,
-});
+/** Remove environment variables (a plain `delete` on a literal name is flagged by the linter). */
+export function unsetEnv(...names: string[]): void {
+	for (const name of names) delete process.env[name];
+}
 
-/** A task for unit tests: a pending task of issue P1, titled by its id; `over` says what differs. */
-export const makeTask = (id: string, over: Partial<Task> = {}): Task => ({
-	id,
-	issue_id: "P1",
-	title: id,
-	description: "",
-	files: [],
-	depends_on: [],
-	checks: [],
-	acceptance: [],
-	status: "pending",
-	...over,
-});
+/** Plain ASCII: what a terminal without UTF-8 shows correctly. */
+export const isAscii = (text: string): boolean =>
+	[...text].every((c) => (c.codePointAt(0) ?? 0) < 128);
+
+// ─── The console ─────────────────────────────────────────────────────
 
 /** Undo what silenceConsole or captureConsole did to console.log and console.error. */
 function restoreConsole(): void {
