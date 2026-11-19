@@ -26,12 +26,12 @@ export const DEFAULTS: Config = {
 	pipeline: [...PHASES],
 	failFast: false,
 	phases: {
-		scan: { retries: 2, model: "", harness: "" },
-		validate: { workers: 5, retries: 2, model: "", harness: "" },
-		plan: { workers: 5, retries: 2, model: "", harness: "" },
-		consolidate: { retries: 2, model: "", harness: "" },
-		exec: { retries: 2, model: "", harness: "" },
-		verify: { retries: 1, model: "", harness: "" },
+		scan: { retries: 2, model: "", harness: "", rules: [] },
+		validate: { workers: 5, retries: 2, model: "", harness: "", rules: [] },
+		plan: { workers: 5, retries: 2, model: "", harness: "", rules: [] },
+		consolidate: { retries: 2, model: "", harness: "", rules: [] },
+		exec: { retries: 2, model: "", harness: "", rules: [] },
+		verify: { retries: 1, model: "", harness: "", rules: [] },
 	},
 	budget: 50,
 	project: { name: "", language: "", framework: "", description: "" },
@@ -149,6 +149,20 @@ export function agentSteps(config: Config, phases: Phase[]): AgentStep[] {
 	});
 }
 
+/**
+ * Which agent runs each step, for the start of a run: "scan claude/claude-opus-5-5, validate codex/default x8".
+ * "default" is the model of the harness's own configuration (a Codex step without a model).
+ */
+export function describeAgents(config: Config, phases: Phase[]): string {
+	return agentSteps(config, phases)
+		.map((step) => {
+			const workers = config.phases[step].workers ?? 1;
+			const agent = `${stepHarness(config, step)}/${stepModel(config, step) || "default"}`;
+			return `${step} ${agent}${workers > 1 ? ` x${workers}` : ""}`;
+		})
+		.join(", ");
+}
+
 function validate(config: Config): void {
 	const errors = typeErrors(config, DEFAULTS, "");
 
@@ -233,8 +247,10 @@ export default {
   // Stop after the first phase with a failed item (default: continue with what worked).
   failFast: false,
 
-  // Retries per item (and model / harness per step). An exec retry is a repair round that feeds the failure
-  // back to the agent. verify is the reviewer that checks every issue inside exec.
+  // Retries per item, and per step also: harness, model (a full id such as "claude-opus-5-5" pins a version,
+  // an alias such as "opus" follows the newest) and rules (extra instructions for that step only).
+  // An exec retry is a repair round that feeds the failure back to the agent.
+  // verify is the reviewer that checks every issue inside exec.
   phases: {
     scan: { retries: 2 },
     validate: { workers: 5, retries: 2 },

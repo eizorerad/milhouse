@@ -137,7 +137,70 @@ describe("where milhouse is started", () => {
 	});
 });
 
+describe("what each step is told", () => {
+	it("adds a step's own rules to that step's prompt only, after the global ones", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({
+			rules: ["Use tabs"],
+			phases: {
+				scan: { rules: ["Prefer bugs that lose data"] },
+				verify: { rules: ["Be strict about tests", "Reject stubs"] },
+			},
+		});
+		expect(await go(repo, config)).toBe(true);
+
+		const scan = calls(fake, "Lead Investigator")[0].prompt;
+		expect(scan).toContain("## Extra rules for this step\n- Prefer bugs that lose data");
+		expect(scan).toContain("- Use tabs"); // the global rules are still there
+		const review = calls(fake, "Truth Verifier")[0].prompt;
+		expect(review).toContain(
+			"## Extra rules for this step\n- Be strict about tests\n- Reject stubs",
+		);
+		expect(review).not.toContain("Prefer bugs that lose data");
+		for (const role of ["Issue Validator", "Planner", "Consistency Manager", "Executor"]) {
+			for (const call of calls(fake, role)) expect(call.prompt).not.toContain("Extra rules");
+		}
+	});
+
+	it("puts the extra rules before the answer format that Codex is asked for", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({ harness: "codex", phases: { scan: { rules: ["Prefer bugs"] } } });
+		expect(await go(repo, config)).toBe(true);
+		const scan = calls(fake, "Lead Investigator")[0].prompt;
+		expect(scan).toContain("Extra rules for this step");
+		expect(scan.indexOf("Extra rules for this step")).toBeLessThan(
+			scan.indexOf("## Answer format"),
+		);
+	});
+});
+
 describe("what the pipeline tells you", () => {
+	it("says at the start which agent runs every step, so a surprise shows before it costs money", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({
+			model: "claude-opus-5-5",
+			phases: {
+				validate: { harness: "codex", workers: 8 },
+				plan: { model: "claude-sonnet-5-5", workers: 4 },
+				verify: { harness: "codex", model: "gpt-x" },
+			},
+		});
+		await go(repo, config);
+		expect(output.join("\n")).toContain(
+			"Agents: scan claude/claude-opus-5-5, validate codex/default x8, plan claude/claude-sonnet-5-5 x4, consolidate claude/claude-opus-5-5, exec claude/claude-opus-5-5, verify codex/gpt-x",
+		);
+	});
+
+	it("shows Milhouse's own default for Claude when no model is named (not Claude Code's)", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await go(repo, testConfig({ pipeline: ["scan"] }));
+		expect(output.join("\n")).toContain("Agents: scan claude/sonnet");
+	});
+
 	it("says how to merge when the pipeline ends before merge", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();

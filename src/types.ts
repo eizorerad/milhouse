@@ -17,6 +17,8 @@ export interface StepOptions {
 	model: string;
 	/** Empty string = the global harness. */
 	harness: HarnessName | "";
+	/** Extra rules for this step only, added to the global `rules`. */
+	rules: string[];
 	/** Parallel agents. Only for steps that run items in parallel (validate, plan). */
 	workers?: number;
 }

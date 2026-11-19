@@ -59,7 +59,7 @@ Milhouse drives Claude Code (`claude`) or Codex (`codex`). `harness` picks the a
 
 | | Claude Code | Codex |
 |---|---|---|
-| model | alias or id, default `sonnet` | what your Codex config says, unless you name one |
+| model | a full id pins a version, an alias follows the newest; default `sonnet` | the model of your Codex config, unless you name one |
 | read-only steps | `Read`/`Grep`/`Glob` only, no MCP servers, no repository settings | read-only sandbox; your Codex config, MCP servers and plugins apply |
 | cost | USD per call, `budget` caps it | tokens only |
 | answer format | enforced by `--json-schema` | asked for in the prompt, checked and retried |
@@ -74,7 +74,7 @@ A step uses the model of its own harness: the global `model` does not apply to a
 ```ts
 export default {
   harness: "claude",                     // or "codex"; per step: phases.<step>.harness
-  model: "",                             // "" = the harness default; per step: phases.<step>.model
+  model: "",                             // "" = claude: sonnet, codex: your Codex config; per step: phases.<step>.model
   budget: 50,                            // USD per run, 0 = unlimited
   commands: { setup: "bun install", build: "", lint: "bunx biome check .", test: "bun test" },
   neverTouch: ["migrations/**", ".env*"],
@@ -88,28 +88,31 @@ Unknown keys and wrong types are errors, so a typo cannot silently disable a rul
 
 ### One agent per step
 
-Every step has its own `harness`, `model`, `retries` and, for the two steps that run items in parallel, `workers`. A full example for fixing bugs (paste it into `.milhouse/config.ts`, then `milhouse "fix the bugs in src/auth"`):
+Every step has its own `harness`, `model`, `rules`, `retries` and, for the two steps that run items in parallel, `workers`. A full example for fixing bugs (paste it into `.milhouse/config.ts`, then `milhouse "fix the bugs in src/auth"`):
 
 ```ts
 // Claude reads the code and does the work; Codex checks the findings (many at once) and reviews the result.
+// Models are pinned to a version: an alias such as "opus" follows the newest release, and its price follows it.
 export default {
   harness: "claude",                       // the default for every step that does not say otherwise
   budget: 20,                              // USD, for the Claude steps (Codex reports tokens, not dollars)
   harnessArgs: { codex: ["-c", 'model_reasoning_effort="high"'] },
   phases: {
-    scan:        { model: "opus" },                    // one agent reads the whole repository
-    validate:    { harness: "codex", workers: 8 },     // 8 Codex agents check the findings in parallel
-    plan:        { model: "sonnet", workers: 4 },      // 4 Claude agents plan the issues in parallel
-    consolidate: { model: "haiku" },                   // one cheap agent merges duplicate tasks
-    exec:        { model: "opus", retries: 3 },        // one issue at a time, up to 3 repair rounds
-    verify:      { harness: "codex" },                 // Codex reviews every issue before it is accepted
+    scan:        { model: "claude-opus-5-5", rules: ["Prefer bugs that lose data or break security over style"] },
+    validate:    { harness: "codex", workers: 8 },     // 8 Codex agents in parallel; add model: "<id>" to pin one
+    plan:        { model: "claude-sonnet-5-5", workers: 4 },  // 4 Claude agents plan the issues in parallel
+    consolidate: { model: "claude-haiku-5-5" },        // one cheap agent merges duplicate tasks
+    exec:        { model: "claude-opus-5-5", retries: 3, rules: ["Write the failing test first"] },
+    verify:      { harness: "codex", rules: ["Reject a fix that comes without a test"] },
   },
   commands: { setup: "bun install", test: "bun test" },
   neverTouch: [".env*", "migrations/**"],
 };
 ```
 
-`model` is the model of the step's own harness; a Codex step without one uses the model of your Codex config. `workers` exists only for `validate` and `plan`: scan, consolidate and the reviewer are one agent each, and exec is sequential on purpose (every issue is built and checked on top of the ones accepted before it). For a single run, flags override the file: `milhouse --harness codex --workers 3 "..."`.
+`model` is the model of the step's own harness. A full id (`claude-opus-5-5`) pins a version; an alias (`opus`, `sonnet`, `haiku`) follows the newest release, so its price and behaviour change when a new one ships (today they mean `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`). A step without a model: Claude runs `sonnet` (Milhouse's own choice, not Claude Code's default), Codex runs the model of your Codex config. Every run starts with a line such as `Agents: scan claude/claude-opus-5-5, validate codex/default x8, ...` (`default` = your Codex config), so you see what will run before it costs anything.
+
+`rules` adds instructions to that step's prompt only, after the global `rules`. The prompts themselves are fixed, because the parsers depend on them: the answer format of every step and the commit protocol of exec. `workers` exists only for `validate` and `plan`: scan, consolidate and the reviewer are one agent each, and exec is sequential on purpose (every issue is built and checked on top of the ones accepted before it). For a single run, flags override the file: `milhouse --harness codex --workers 3 "..."`.
 
 ## CLI
 

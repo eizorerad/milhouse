@@ -92,6 +92,18 @@ describe("loadConfig", () => {
 		expect((await loadConfig(unknown).catch((e) => e)).message).toContain("harnessArgs.gemini");
 	});
 
+	it("accepts rules for a single step, and rejects rules that are not a list of strings", async () => {
+		const ok = projectWith(
+			'export default { phases: { exec: { rules: ["Write the failing test first"] } } };',
+		);
+		expect((await loadConfig(ok)).phases.exec.rules).toEqual(["Write the failing test first"]);
+		expect((await loadConfig(projectWith("export default {};"))).phases.exec.rules).toEqual([]);
+		const bad = projectWith('export default { phases: { scan: { rules: "be careful" } } };');
+		expect((await loadConfig(bad).catch((e) => e)).message).toContain(
+			"phases.scan.rules must be an array of strings",
+		);
+	});
+
 	it("rejects extra arguments that would change what Milhouse relies on, and allows the rest", async () => {
 		const dir = projectWith(
 			`export default { harnessArgs: { claude: ["--output-format", "text", "--verbose"], codex: ["-s", "workspace-write", "--output-last-message=out.txt", "-p", "profile"] } };`,

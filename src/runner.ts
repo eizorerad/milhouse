@@ -3,6 +3,7 @@
 import { stepHarness, stepModel } from "./config.ts";
 import type { CostTracker } from "./cost.ts";
 import { EngineError, HARNESSES, runAgent } from "./engine.ts";
+import { section } from "./prompts.ts";
 import type { RunStore } from "./state.ts";
 import type { AgentStep, Config, Phase } from "./types.ts";
 import { Progress, log } from "./ui.ts";
@@ -82,7 +83,10 @@ export async function runPhase<TItem, TValue>(
 			if (allowance !== undefined && allowance <= 0) {
 				throw new EngineError("the budget is used up", { fatal: true });
 			}
-			const result = await runAgent(prompt, {
+			// The step's own rules come last, after the role, the task and the global rules.
+			const stepRules = config.phases[step].rules.map((rule) => `- ${rule}`).join("\n");
+			const extra = section("Extra rules for this step", stepRules);
+			const result = await runAgent(extra ? `${prompt}\n\n${extra}` : prompt, {
 				harness,
 				cwd: o.cwd ?? store.workDir,
 				model: stepModel(config, step),

@@ -52,11 +52,11 @@ describe('the README example "One agent per step"', () => {
 	it("loads, and every step has the agent, model and parallelism its comment promises", async () => {
 		const config = await loadConfig(projectWith(example()));
 		const expected: Record<AgentStep, [harness: string, model: string]> = {
-			scan: ["claude", "opus"],
+			scan: ["claude", "claude-opus-5-5"],
 			validate: ["codex", ""], // "" = the model of the user's Codex config
-			plan: ["claude", "sonnet"],
-			consolidate: ["claude", "haiku"],
-			exec: ["claude", "opus"],
+			plan: ["claude", "claude-sonnet-5-5"],
+			consolidate: ["claude", "claude-haiku-5-5"],
+			exec: ["claude", "claude-opus-5-5"],
 			verify: ["codex", ""],
 		};
 		for (const [step, [harness, model]] of Object.entries(expected)) {
@@ -87,16 +87,16 @@ describe('the README example "One agent per step"', () => {
 			expect(asked(role).every((c) => c.harness === "claude")).toBe(true);
 		}
 		expect(new Set(asked("Lead Investigator").map((c) => flag(c.args, "--model")))).toEqual(
-			new Set(["opus"]),
+			new Set(["claude-opus-5-5"]),
 		);
 		expect(new Set(asked("Planner").map((c) => flag(c.args, "--model")))).toEqual(
-			new Set(["sonnet"]),
+			new Set(["claude-sonnet-5-5"]),
 		);
 		expect(new Set(asked("Consistency Manager").map((c) => flag(c.args, "--model")))).toEqual(
-			new Set(["haiku"]),
+			new Set(["claude-haiku-5-5"]),
 		);
 		expect(new Set(asked("Executor").map((c) => flag(c.args, "--model")))).toEqual(
-			new Set(["opus"]),
+			new Set(["claude-opus-5-5"]),
 		);
 
 		// Three findings were checked, each by a Codex agent with the configured Codex flags.
@@ -108,5 +108,21 @@ describe('the README example "One agent per step"', () => {
 			expect(call.args).not.toContain("-m"); // the model of the user's Codex config
 		}
 		expect(asked("Truth Verifier").length).toBeGreaterThan(0);
+
+		// The rules of a step reach that step's prompt and no other.
+		const promptsOf = (role: string) => asked(role).map((c) => c.prompt);
+		const ruleOf: Record<string, string> = {
+			"Lead Investigator": "Prefer bugs that lose data or break security over style",
+			Executor: "Write the failing test first",
+			"Truth Verifier": "Reject a fix that comes without a test",
+		};
+		for (const role of ["Lead Investigator", "Executor", "Truth Verifier"]) {
+			for (const text of promptsOf(role)) {
+				expect(text).toContain(`## Extra rules for this step\n- ${ruleOf[role]}`);
+			}
+		}
+		for (const role of ["Issue Validator", "Planner", "Consistency Manager"]) {
+			for (const text of promptsOf(role)) expect(text).not.toContain("Extra rules");
+		}
 	});
 });

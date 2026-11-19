@@ -1,6 +1,6 @@
 /** The pipeline: preflight, open or resume a run, run the phases in order, finish with an honest status. */
 
-import { agentSteps, stepHarness } from "./config.ts";
+import { agentSteps, describeAgents, stepHarness } from "./config.ts";
 import { CostTracker, formatCost, formatUsd } from "./cost.ts";
 import { HARNESSES } from "./engine.ts";
 import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
@@ -112,6 +112,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		if (config.budget > 0) {
 			log.info(`Budget ${formatUsd(config.budget)}, spent so far ${formatUsd(cost.current.total)}`);
 		}
+		if (agentSteps(config, todo).length > 0) log.info(`Agents: ${describeAgents(config, todo)}`);
 		const unpriced = new Set(
 			agentSteps(config, todo)
 				.map((step) => stepHarness(config, step))
