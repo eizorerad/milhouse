@@ -1,8 +1,10 @@
-/** Test helpers: temporary git repositories, the fake agent, a default config. */
+/** Test helpers: temporary git repositories, the fake agent, a default config, the console. */
 
+import { afterEach, beforeEach, spyOn } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { DEFAULTS, deepMerge } from "../src/config.ts";
 import { type PipelineOptions, runPipeline } from "../src/pipeline.ts";
 import { run } from "../src/proc.ts";
@@ -144,3 +146,41 @@ export const calls = (fake: FakeAgent, role: string) =>
 /** Commit subjects on main, newest first. */
 export const mainSubjects = async (repo: string): Promise<string[]> =>
 	(await git(repo, "log", "--format=%s", "main")).split("\n");
+
+/** Undo what silenceConsole or captureConsole did to console.log and console.error. */
+function restoreConsole(): void {
+	spyOn(console, "log").mockRestore();
+	spyOn(console, "error").mockRestore();
+}
+
+/**
+ * Keep what the code under test prints with console.log and console.error out of the test output,
+ * in every test of the file that calls this at its top level. DEBUG_TESTS=1 lets it through, unless
+ * the file passes `honorDebug: false`.
+ */
+export function silenceConsole({ honorDebug = true }: { honorDebug?: boolean } = {}): void {
+	beforeEach(() => {
+		if (honorDebug && process.env.DEBUG_TESTS) return;
+		spyOn(console, "log").mockImplementation(() => {});
+		spyOn(console, "error").mockImplementation(() => {});
+	});
+	afterEach(restoreConsole);
+}
+
+/**
+ * Collect what the code under test prints with console.log and console.error, without colours, in
+ * every test of the file that calls this at its top level. The returned list holds the lines of the
+ * running test. DEBUG_TESTS=1 prints them instead (and the list stays empty).
+ */
+export function captureConsole(): string[] {
+	const lines: string[] = [];
+	beforeEach(() => {
+		lines.length = 0;
+		const collect = (...args: unknown[]) =>
+			void lines.push(stripVTControlCharacters(args.join(" ")));
+		spyOn(console, "log").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
+		spyOn(console, "error").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
+	});
+	afterEach(restoreConsole);
+	return lines;
+}

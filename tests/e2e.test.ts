@@ -1,6 +1,6 @@
 /** The whole pipeline against a real git repository, with the fake agent standing in for Claude. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { isDirty, refExists } from "../src/git.ts";
 import { acquireLock } from "../src/lock.ts";
@@ -15,23 +15,17 @@ import {
 	makeRepo,
 	readFile,
 	resetFakeAgentEnv,
+	silenceConsole,
 	testConfig,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-beforeEach(() => {
-	if (!process.env.DEBUG_TESTS) {
-		spyOn(console, "log").mockImplementation(() => {});
-		spyOn(console, "error").mockImplementation(() => {});
-	}
-});
+silenceConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
 
 describe("happy path", () => {

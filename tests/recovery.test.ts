@@ -1,6 +1,6 @@
 /** Failure, crash and resume scenarios: the pipeline must never lose or fake work. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { branchExists, ensureWorktree, refExists, revParse } from "../src/git.ts";
 import {
@@ -14,23 +14,17 @@ import {
 	makeRepo,
 	readFile,
 	resetFakeAgentEnv,
+	silenceConsole,
 	testConfig,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-beforeEach(() => {
-	if (!process.env.DEBUG_TESTS) {
-		spyOn(console, "log").mockImplementation(() => {});
-		spyOn(console, "error").mockImplementation(() => {});
-	}
-});
+silenceConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
 
 const noMerge = () => testConfig({ pipeline: ["scan", "validate", "plan", "consolidate", "exec"] });

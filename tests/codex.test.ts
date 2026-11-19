@@ -1,14 +1,14 @@
 /** Codex as a harness: the whole pipeline on it, mixed with Claude, and what goes wrong with it. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { stripVTControlCharacters } from "node:util";
 import { agentSteps, stepHarness, stepModel } from "../src/config.ts";
 import { requireAgents } from "../src/pipeline.ts";
 import { run } from "../src/proc.ts";
 import {
 	calls,
+	captureConsole,
 	cleanupTempDirs,
 	go,
 	latest,
@@ -19,21 +19,11 @@ import {
 	useFakeAgent,
 } from "./helpers.ts";
 
-let output: string[] = [];
-
-beforeEach(() => {
-	output = [];
-	const collect = (...args: unknown[]) =>
-		void output.push(stripVTControlCharacters(args.join(" ")));
-	spyOn(console, "log").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
-	spyOn(console, "error").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
-});
+const output = captureConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
 
 const flag = (args: string[], name: string): string | undefined => args[args.indexOf(name) + 1];

@@ -1,6 +1,6 @@
 /** The README's examples are what people paste: they have to load, and a run has to do what they say. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { deepMerge, loadConfig, stepHarness, stepModel } from "../src/config.ts";
@@ -11,20 +11,16 @@ import {
 	go,
 	makeRepo,
 	resetFakeAgentEnv,
+	silenceConsole,
 	tempDir,
 	useFakeAgent,
 } from "./helpers.ts";
 
-beforeEach(() => {
-	spyOn(console, "log").mockImplementation(() => {});
-	spyOn(console, "error").mockImplementation(() => {});
-});
+silenceConsole({ honorDebug: false });
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
 
 const README = readFileSync(resolve(import.meta.dir, "../README.md"), "utf-8");

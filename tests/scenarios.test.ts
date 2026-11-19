@@ -1,13 +1,13 @@
 /** Things that go wrong around the pipeline in real use: the user's checkout, git settings, odd agents. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { stripVTControlCharacters } from "node:util";
 import { ensureWorktree, refExists, revParse } from "../src/git.ts";
 import { prepareWorktree } from "../src/worktree.ts";
 import {
 	calls,
+	captureConsole,
 	cleanupTempDirs,
 	git,
 	go,
@@ -21,21 +21,11 @@ import {
 	writeFile,
 } from "./helpers.ts";
 
-let output: string[] = [];
-
-beforeEach(() => {
-	output = [];
-	const collect = (...args: unknown[]) =>
-		void output.push(stripVTControlCharacters(args.join(" ")));
-	spyOn(console, "log").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
-	spyOn(console, "error").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
-});
+const output = captureConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
 
 const PHASES_BEFORE_MERGE = ["scan", "validate", "plan", "consolidate", "exec"] as const;
@@ -215,7 +205,7 @@ describe("what the pipeline tells you", () => {
 		expect(await go(repo)).toBe(true);
 		expect(output.join("\n")).toContain("No build, lint or test command");
 
-		output = [];
+		output.length = 0;
 		const repo2 = await makeRepo();
 		expect(await go(repo2, testConfig({ commands: { test: "true" } }))).toBe(true);
 		expect(output.join("\n")).not.toContain("No build, lint or test command");
