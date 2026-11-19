@@ -4,7 +4,7 @@ Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code)
 
 ## Quick start
 
-Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` or the `codex` CLI, logged in.
+Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` or the `codex` CLI, logged in. Works on macOS and Linux; Windows is not supported.
 
 ```bash
 git clone --depth 1 https://github.com/eizorerad/milhouse.git && cd milhouse
