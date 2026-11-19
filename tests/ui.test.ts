@@ -29,6 +29,13 @@ describe("formatDuration", () => {
 	});
 });
 
+/** Control characters other than tab and newline: what could drive a terminal. */
+const hasControlCharacters = (text: string): boolean =>
+	[...text].some((c) => {
+		const code = c.codePointAt(0) ?? 0;
+		return code <= 8 || (code >= 11 && code <= 31) || (code >= 127 && code <= 159);
+	});
+
 describe("log (text from agents, git and the repository is not trusted)", () => {
 	it("never lets a terminal escape sequence through, whichever level prints it", () => {
 		const hostile = "bad \u001b[2J\u001b]0;title\u0007 text\u0085";
@@ -43,7 +50,7 @@ describe("log (text from agents, git and the repository is not trusted)", () => 
 		progress.stop();
 		for (const line of lines) {
 			const plain = stripVTControlCharacters(line); // only the colours Milhouse adds itself may remain
-			expect(plain).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+			expect(hasControlCharacters(plain)).toBe(false);
 		}
 		expect(lines.join("\n")).toContain("bad ");
 	});
