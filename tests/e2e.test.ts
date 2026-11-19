@@ -5,6 +5,8 @@ import { existsSync } from "node:fs";
 import { isDirty, refExists } from "../src/git.ts";
 import { acquireLock } from "../src/lock.ts";
 import {
+	TWO_ISSUES,
+	allStatus,
 	calls,
 	cleanupTempDirs,
 	commitFile,
@@ -13,8 +15,10 @@ import {
 	latest,
 	mainSubjects,
 	makeRepo,
+	noMerge,
 	readFile,
 	resetFakeAgentEnv,
+	setScenario,
 	silenceConsole,
 	tempDir,
 	testConfig,
@@ -214,13 +218,7 @@ describe("repair loop", () => {
 
 describe("failures stay contained", () => {
 	it("parks a failed issue, resets the worktree and carries on with the next issue", async () => {
-		const fake = useFakeAgent({
-			scan: [
-				{ title: "Critical thing", severity: "CRITICAL" },
-				{ title: "Low thing", severity: "LOW" },
-			],
-			exec: { "Critical thing": "never-commits" },
-		});
+		const fake = useFakeAgent({ ...TWO_ISSUES, exec: { "Critical thing": "never-commits" } });
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
 
@@ -317,7 +315,7 @@ describe("budget and resume", () => {
 		expect(await go(repo)).toBe(false);
 		expect(latest(repo).loadMeta()).toMatchObject({ status: "failed", done: ["scan"] });
 
-		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
+		setScenario({});
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		expect(calls(fake, "Lead Investigator")).toHaveLength(1);
 		expect(calls(fake, "Issue Validator")).toHaveLength(2);
@@ -328,22 +326,14 @@ describe("budget and resume", () => {
 		const fake = useFakeAgent({ exec: { "Add greeting": "never-commits" } });
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "failed"),
-		).toBe(true);
+		expect(allStatus(repo, "failed")).toBe(true);
 
-		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
+		setScenario({});
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		const executor = calls(fake, "Executor");
 		expect(executor[executor.length - 1].prompt).toContain("The previous attempt failed");
 		expect(executor[executor.length - 1].prompt).toContain("no commit");
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "merged"),
-		).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 		expect(await git(repo, "branch", "--list", "mh-failed/*")).toBe(""); // the stale parked attempt is gone
 	});
 
@@ -385,9 +375,6 @@ describe("single phases", () => {
 });
 
 describe("merge", () => {
-	const noMerge = () =>
-		testConfig({ pipeline: ["scan", "validate", "plan", "consolidate", "exec"] });
-
 	it("leaves verified work on its branch when merge is not in the pipeline, and merges it later", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
@@ -398,11 +385,7 @@ describe("merge", () => {
 		expect(await refExists(repo, store.ref)).toBe(true);
 
 		expect(await go(repo, testConfig(), { only: "merge" })).toBe(true);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "merged"),
-		).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 		expect((await mainSubjects(repo)).length).toBe(3);
 	});
 
@@ -479,11 +462,7 @@ describe("merge", () => {
 		await expect(go(repo, testConfig(), { resume: true })).rejects.toThrow(/started on "main"/);
 		await git(repo, "checkout", "-q", "main");
 		expect(await mainSubjects(repo)).toEqual(["initial"]);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 
 	it("keeps the verified work when the merge conflicts", async () => {
@@ -496,11 +475,7 @@ describe("merge", () => {
 		expect(await go(repo, testConfig(), { only: "merge" })).toBe(false);
 		expect(await refExists(repo, store.ref)).toBe(true);
 		expect(await isDirty(repo)).toBe(false);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 });
 

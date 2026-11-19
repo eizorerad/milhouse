@@ -124,6 +124,19 @@ export function useFakeAgent(scenario: Record<string, unknown> = {}): FakeAgent 
 	};
 }
 
+/** Give the fake agent another scenario, for the next run in the same test. */
+export const setScenario = (scenario: object): void => {
+	process.env.FAKE_AGENT_SCENARIO = JSON.stringify(scenario);
+};
+
+/** A scan that finds two issues of different severity. */
+export const TWO_ISSUES = {
+	scan: [
+		{ title: "Critical thing", severity: "CRITICAL" },
+		{ title: "Low thing", severity: "LOW" },
+	],
+};
+
 /** Remove environment variables (a plain `delete` on a literal name is flagged by the linter). */
 export function unsetEnv(...names: string[]): void {
 	for (const name of names) delete process.env[name];
@@ -149,7 +162,17 @@ export function resetFakeAgentEnv(): void {
 export const go = (repo: string, config = testConfig(), opts: PipelineOptions = {}) =>
 	runPipeline(config, { workDir: repo, ...opts });
 
+/** The test config with a pipeline that ends before merge: the verified work waits for --merge. */
+export const noMerge = (over: Record<string, unknown> = {}) =>
+	testConfig({ pipeline: ["scan", "validate", "plan", "consolidate", "exec"], ...over });
+
 export const latest = (repo: string): RunStore => RunStore.latest(repo) as RunStore;
+
+/** Whether every task of the latest run has `status`. */
+export const allStatus = (repo: string, status: string): boolean =>
+	latest(repo)
+		.loadTasks()
+		.every((t) => t.status === status);
 
 export const calls = (fake: FakeAgent, role: string) =>
 	fake.journal().filter((c) => c.role === role);

@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { ensureWorktree, refExists, revParse } from "../src/git.ts";
 import { prepareWorktree } from "../src/worktree.ts";
 import {
+	TWO_ISSUES,
+	allStatus,
 	calls,
 	captureConsole,
 	cleanupTempDirs,
@@ -13,8 +15,10 @@ import {
 	go,
 	latest,
 	makeRepo,
+	noMerge,
 	readFile,
 	resetFakeAgentEnv,
+	setScenario,
 	tempDir,
 	testConfig,
 	useFakeAgent,
@@ -27,16 +31,6 @@ afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
 });
-
-const PHASES_BEFORE_MERGE = ["scan", "validate", "plan", "consolidate", "exec"] as const;
-const noMerge = (over: Record<string, unknown> = {}) =>
-	testConfig({ pipeline: [...PHASES_BEFORE_MERGE], ...over });
-const TWO_ISSUES = {
-	scan: [
-		{ title: "Critical thing", severity: "CRITICAL" },
-		{ title: "Low thing", severity: "LOW" },
-	],
-};
 
 describe("the user's checkout while a run is under way", () => {
 	it("still merges when an editor or the OS created files meanwhile", async () => {
@@ -66,11 +60,7 @@ describe("the user's checkout while a run is under way", () => {
 		expect(readFile(repo, `${task.id}.txt`)).toBe("my local copy");
 		expect(await revParse(repo, "HEAD")).toBe(before);
 		expect(await refExists(repo, latest(repo).ref)).toBe(true); // the work is still waiting
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 
 	it("refuses to merge work that the run's records and its ref disagree about", async () => {
@@ -315,7 +305,7 @@ describe("what exec may build on", () => {
 		const [task] = latest(repo).loadTasks();
 		expect(readFile(repo, ".milhouse/work/setup-seen")).not.toContain(task.id);
 
-		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
+		setScenario({});
 		expect(await go(repo, config, { resume: true })).toBe(true);
 		expect(readFile(repo, ".milhouse/work/setup-seen")).toContain(task.id);
 	});
@@ -339,11 +329,7 @@ describe("what agents and checks do to the worktree", () => {
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
 		expect(calls(fake, "Executor")[1].prompt).toContain(".milhouse/config.ts");
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "failed"),
-		).toBe(true);
+		expect(allStatus(repo, "failed")).toBe(true);
 	});
 
 	it("is not fooled by status.showUntrackedFiles=no: a leftover file is still sent back", async () => {

@@ -7,6 +7,7 @@ import { agentSteps, stepHarness, stepModel } from "../src/config.ts";
 import { requireAgents } from "../src/pipeline.ts";
 import { run } from "../src/proc.ts";
 import {
+	allStatus,
 	calls,
 	captureConsole,
 	cleanupTempDirs,
@@ -224,11 +225,7 @@ describe("a failure that every call would share", () => {
 		});
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "failed"),
-		).toBe(true);
+		expect(allStatus(repo, "failed")).toBe(true);
 
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		const executors = calls(fake, "Executor");
