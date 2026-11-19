@@ -109,6 +109,15 @@ export function useFakeAgent(scenario: Record<string, unknown> = {}): FakeAgent 
 	};
 }
 
+/** Remove environment variables (a plain `delete` on a literal name is flagged by the linter). */
+export function unsetEnv(...names: string[]): void {
+	for (const name of names) delete process.env[name];
+}
+
+/** Plain ASCII: what a terminal without UTF-8 shows correctly. */
+export const isAscii = (text: string): boolean =>
+	[...text].every((c) => (c.codePointAt(0) ?? 0) < 128);
+
 export function resetFakeAgentEnv(): void {
 	for (const key of [
 		"MILHOUSE_CLAUDE",

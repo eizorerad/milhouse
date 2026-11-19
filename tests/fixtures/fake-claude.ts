@@ -37,6 +37,7 @@ interface Scenario {
 		| "rename-protected"
 		| "own-branch"
 		| "reset-history"
+		| "milhouse-config"
 	>;
 	/** [dependent issue title, base issue title]: the dependent's tasks depend on the base's first task. */
 	cross?: Array<[string, string]>;
@@ -48,6 +49,8 @@ interface Scenario {
 	fail?: Record<string, { message: string; cost?: number; subtype?: string; times?: number }>;
 	/** Return garbage instead of a result event. */
 	garbage?: string[];
+	/** Answer with prose instead of the JSON that was asked for, on the first call only. */
+	proseOnce?: string[];
 	/** Sleep this many ms before answering, per role. */
 	sleep?: Record<string, number>;
 }
@@ -69,14 +72,28 @@ appendFileSync(
 	`${JSON.stringify({ role, issueTitle, args, cwd: process.cwd(), prompt })}\n`,
 );
 
+/** Calls may run in parallel: take a lock around the read-modify-write. */
 function count(key: string): number {
-	const file = join(stateDir, "counters.json");
-	const counters: Record<string, number> = existsSync(file)
-		? JSON.parse(readFileSync(file, "utf-8"))
-		: {};
-	counters[key] = (counters[key] ?? 0) + 1;
-	writeFileSync(file, JSON.stringify(counters));
-	return counters[key];
+	const lock = join(stateDir, "counters.lock");
+	for (;;) {
+		try {
+			mkdirSync(lock);
+			break;
+		} catch {
+			Bun.sleepSync(2);
+		}
+	}
+	try {
+		const file = join(stateDir, "counters.json");
+		const counters: Record<string, number> = existsSync(file)
+			? JSON.parse(readFileSync(file, "utf-8"))
+			: {};
+		counters[key] = (counters[key] ?? 0) + 1;
+		writeFileSync(file, JSON.stringify(counters));
+		return counters[key];
+	} finally {
+		rmSync(lock, { recursive: true, force: true });
+	}
 }
 
 function reply(structured?: unknown, text = "done"): never {
@@ -111,6 +128,8 @@ if (scenario.garbage?.includes(role)) {
 	console.log("this is not json");
 	process.exit(0);
 }
+if (scenario.proseOnce?.includes(role) && count(`prose:${role}`) === 1)
+	reply(undefined, "Looks fine to me.");
 const failure = scenario.fail?.[role];
 if (failure && (failure.times === undefined || count(`fail:${role}`) <= failure.times)) {
 	fail(failure.message, failure.cost, failure.subtype);
@@ -209,6 +228,13 @@ switch (role) {
 		};
 
 		if (mode === "forbidden") writeFileSync(join(process.cwd(), "secrets.env"), "touched\n");
+		if (mode === "milhouse-config") {
+			mkdirSync(join(process.cwd(), ".milhouse"), { recursive: true });
+			writeFileSync(
+				join(process.cwd(), ".milhouse", "config.ts"),
+				"export default { gates: {} };\n",
+			);
+		}
 		if (mode === "own-branch") git("checkout", "-q", "-b", `agent-work-${process.pid}`);
 		if (mode === "reset-history") {
 			git("reset", "-q", "--hard", git("rev-list", "--max-parents=0", "HEAD").stdout.trim());

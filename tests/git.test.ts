@@ -8,6 +8,7 @@ import {
 	commitSubjects,
 	currentBranch,
 	deleteRef,
+	detectIdentity,
 	diffPatch,
 	ensureWorktree,
 	hasCommits,
@@ -31,6 +32,7 @@ import {
 	makeRepo,
 	readFile,
 	tempDir,
+	unsetEnv,
 	writeFile,
 } from "./helpers.ts";
 
@@ -76,21 +78,25 @@ describe("repository state", () => {
 		expect(await isAncestor(repo, next, base)).toBe(false);
 	});
 
-	it("is dirty for tracked and untracked changes, but never because of .milhouse/", async () => {
+	it("is dirty for changes to tracked files, never for untracked files or .milhouse/", async () => {
 		const repo = await makeRepo();
 		expect(await isDirty(repo)).toBe(false);
 
 		writeFile(repo, ".milhouse/config.ts", "export default {};");
 		writeFile(repo, ".milhouse/runs/r1/meta.json", "{}");
-		expect(await isDirty(repo)).toBe(false);
-
+		// An editor or the OS may create files while a run is under way. Git itself refuses to
+		// overwrite an untracked file, so they cannot be lost and must not stop a merge.
 		writeFile(repo, "notes.txt", "untracked");
-		expect(await isDirty(repo)).toBe(true);
-		await git(repo, "add", "-A");
-		await git(repo, "commit", "-q", "-m", "notes");
+		writeFile(repo, ".DS_Store", "x");
 		expect(await isDirty(repo)).toBe(false);
 
 		writeFile(repo, "src/app.ts", "changed");
+		expect(await isDirty(repo)).toBe(true);
+		await git(repo, "checkout", "--", "src/app.ts");
+		expect(await isDirty(repo)).toBe(false);
+
+		writeFile(repo, "src/app.ts", "staged");
+		await git(repo, "add", "src/app.ts");
 		expect(await isDirty(repo)).toBe(true);
 	});
 });
@@ -209,6 +215,17 @@ describe("history between two commits", () => {
 		const added = await addedLines(repo, base);
 		expect(added.map((a) => a.text)).toEqual(["changed 2", "changed 27 TODO"]);
 	});
+
+	it("fails loudly when the diff is too large to check, instead of checking a part of it", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		writeFile(repo, "bundle.js", `${"x".repeat(33 * 1024 * 1024)}\n`);
+		await git(repo, "add", "-A");
+		await git(repo, "commit", "-q", "-m", "a huge generated file");
+		await expect(addedLines(repo, base)).rejects.toThrow(/too large to check/);
+		// Reviewing a huge diff is not an error: the reviewer only ever sees the start of it.
+		expect((await diffPatch(repo, base)).length).toBeGreaterThan(1_000_000);
+	});
 });
 
 describe("the run worktree", () => {
@@ -297,6 +314,27 @@ describe("the run worktree", () => {
 		expect(await git(repo, "worktree", "list")).not.toContain("r1");
 		expect(await refExists(repo, REF)).toBe(false);
 	});
+
+	it("says so when a failed attempt cannot be kept, instead of silently dropping it", async () => {
+		const repo = await makeRepo();
+		const path = join(repo, ".milhouse", "work", "r1");
+		await ensureWorktree(repo, path, REF, await revParse(repo, "HEAD"));
+		writeFile(path, "unsaved.txt", "unsaved");
+		await expect(parkWorktree(repo, path, "bad..name")).rejects.toThrow(/could not be kept/);
+		expect(readFile(path, "unsaved.txt")).toBe("unsaved"); // nothing was reset
+	});
+
+	it("refuses to delete a worktree that git has locked", async () => {
+		const repo = await makeRepo();
+		const path = join(repo, ".milhouse", "work", "r1");
+		await ensureWorktree(repo, path, REF, await revParse(repo, "HEAD"));
+		await git(repo, "worktree", "lock", path);
+		await expect(removeWorktree(repo, path)).rejects.toThrow(/locked/);
+		expect(existsSync(path)).toBe(true);
+		await git(repo, "worktree", "unlock", path);
+		await removeWorktree(repo, path);
+		expect(existsSync(path)).toBe(false);
+	});
 });
 
 describe("mergeInto and publish", () => {
@@ -310,7 +348,7 @@ describe("mergeInto and publish", () => {
 
 	it("fast-forwards the branch to a commit that descends from it", async () => {
 		const { repo, work } = await repoWithWork();
-		expect(await publish(repo, work)).toBe(true);
+		expect(await publish(repo, work)).toEqual({ ok: true });
 		expect(await revParse(repo, "HEAD")).toBe(work);
 		expect(readFile(repo, "feature.txt")).toBe("f");
 		expect(await git(repo, "log", "--oneline", "--merges")).toBe("");
@@ -319,7 +357,9 @@ describe("mergeInto and publish", () => {
 	it("refuses a commit the branch cannot fast-forward to, and leaves the branch alone", async () => {
 		const { repo, work } = await repoWithWork();
 		const moved = await commitFile(repo, "other.txt", "o", "someone else committed");
-		expect(await publish(repo, work)).toBe(false);
+		const refused = await publish(repo, work);
+		expect(refused.ok).toBe(false);
+		expect(refused.error).toBeTruthy(); // git's own reason, not a guess
 		expect(await revParse(repo, "HEAD")).toBe(moved);
 		expect(await isDirty(repo)).toBe(false);
 	});
@@ -327,7 +367,7 @@ describe("mergeInto and publish", () => {
 	it("does not let a squash-by-default configuration pretend that the branch moved", async () => {
 		const { repo, work } = await repoWithWork();
 		await git(repo, "config", "branch.main.mergeOptions", "--squash");
-		expect(await publish(repo, work)).toBe(true); // explicit --no-squash wins
+		expect((await publish(repo, work)).ok).toBe(true); // explicit --no-squash wins
 		expect(await revParse(repo, "HEAD")).toBe(work);
 	});
 
@@ -341,7 +381,7 @@ describe("mergeInto and publish", () => {
 		expect(merged).toEqual({ ok: true });
 		expect(await git(side, "log", "-1", "--format=%s")).toBe("merge feature");
 		expect(await revParse(repo, "HEAD")).toBe(head); // the branch has not moved yet
-		expect(await publish(repo, await revParse(side, "HEAD"))).toBe(true);
+		expect((await publish(repo, await revParse(side, "HEAD"))).ok).toBe(true);
 		expect(readFile(repo, "other.txt")).toBe("o");
 		expect(readFile(repo, "feature.txt")).toBe("f");
 	});
@@ -360,5 +400,90 @@ describe("mergeInto and publish", () => {
 		expect(result.error).toBeTruthy();
 		expect(await git(side, "status", "--porcelain")).toBe("");
 		expect(readFile(side, "src/app.ts")).toBe("main version\n");
+	});
+
+	it("never overwrites an ignored local file that the published work starts to track", async () => {
+		const repo = await makeRepo();
+		await commitFile(repo, ".gitignore", "local.env\n", "ignore local.env");
+		await git(repo, "checkout", "-q", "-b", "feature");
+		writeFile(repo, "local.env", "from the agent\n");
+		await git(repo, "add", "-f", "local.env");
+		await git(repo, "commit", "-q", "-m", "track local.env");
+		const work = await revParse(repo, "HEAD");
+		await git(repo, "checkout", "-q", "main");
+		writeFile(repo, "local.env", "my local settings\n"); // ignored on main: git would overwrite it silently
+
+		const result = await publish(repo, work);
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain("local.env");
+		expect(readFile(repo, "local.env")).toBe("my local settings\n");
+		expect(await revParse(repo, "HEAD")).not.toBe(work);
+	});
+
+	it("is not stopped by the user's merge and commit hooks: milhouse runs its own checks", async () => {
+		const { repo, work } = await repoWithWork();
+		await commitFile(repo, "other.txt", "o", "someone else committed");
+		for (const hook of ["pre-merge-commit", "commit-msg"]) {
+			const path = join(repo, ".git", "hooks", hook);
+			writeFileSync(path, "#!/bin/sh\necho rejected by a hook >&2\nexit 1\n", { mode: 0o755 });
+		}
+		const side = join(repo, ".milhouse", "work", "side");
+		await ensureWorktree(repo, side, REF, await revParse(repo, "HEAD"));
+		expect(await mergeInto(side, work, "merge feature")).toEqual({ ok: true });
+	});
+});
+
+describe("git environment", () => {
+	it("ignores GIT_DIR and friends inherited from a caller such as a git hook", async () => {
+		const repo = await makeRepo();
+		const other = await makeRepo();
+		await git(other, "checkout", "-q", "-b", "the-callers-branch");
+		process.env.GIT_DIR = join(other, ".git");
+		process.env.GIT_WORK_TREE = other;
+		try {
+			expect(await repoRoot(repo)).toBe(repo);
+			expect(await currentBranch(repo)).toBe("main"); // not the caller's branch
+		} finally {
+			unsetEnv("GIT_DIR", "GIT_WORK_TREE");
+		}
+	});
+
+	it("gives commits a neutral identity when git has none, instead of failing them", async () => {
+		const repo = tempDir();
+		const home = tempDir();
+		const saved = { ...process.env };
+		Object.assign(process.env, {
+			HOME: home,
+			GIT_CONFIG_GLOBAL: "/dev/null",
+			GIT_CONFIG_NOSYSTEM: "1",
+			GIT_AUTHOR_NAME: "Seed",
+			GIT_AUTHOR_EMAIL: "seed@example.com",
+			GIT_COMMITTER_NAME: "Seed",
+			GIT_COMMITTER_EMAIL: "seed@example.com",
+		});
+		try {
+			await git(repo, "init", "-q", "-b", "main");
+			await git(repo, "commit", "-q", "--allow-empty", "-m", "seed");
+			for (const key of [
+				"GIT_AUTHOR_NAME",
+				"GIT_AUTHOR_EMAIL",
+				"GIT_COMMITTER_NAME",
+				"GIT_COMMITTER_EMAIL",
+			]) {
+				delete process.env[key];
+			}
+			await git(repo, "config", "user.useConfigOnly", "true"); // git must not guess a name
+
+			await detectIdentity(repo);
+			const path = join(repo, ".milhouse", "work", "r1");
+			await ensureWorktree(repo, path, REF, await revParse(repo, "HEAD"));
+			writeFile(path, "unsaved.txt", "unsaved");
+			await parkWorktree(repo, path, "mh-failed/P1"); // commits as a side effect
+			expect(await git(repo, "show", "mh-failed/P1:unsaved.txt")).toBe("unsaved");
+		} finally {
+			for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+			Object.assign(process.env, saved);
+			await detectIdentity(repo); // back to the real environment for the other tests
+		}
 	});
 });

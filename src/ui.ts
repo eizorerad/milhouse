@@ -49,7 +49,8 @@ export function printBanner(version: string): void {
 	console.log(pc.dim(` Correctness-first AI coding orchestrator  v${version}\n`));
 }
 
-const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// Plain ASCII: a terminal without UTF-8 (a CI log, an old console) must not show garbage.
+const FRAMES = ["|", "/", "-", "\\"];
 
 /** Shows which items of a phase are running. Plain log lines when stdout is not a terminal. */
 export class Progress {
@@ -72,14 +73,14 @@ export class Progress {
 
 	begin(id: string): void {
 		this.active.add(id);
-		if (!this.tty) console.log(`  … ${id}`);
+		if (!this.tty) console.log(`  ... ${id}`);
 	}
 
 	end(id: string, ok: boolean, note = ""): void {
 		this.active.delete(id);
 		this.done++;
 		const mark = ok ? pc.green("+") : pc.red("x");
-		this.print(`${mark} ${id}${note ? pc.dim(` — ${note}`) : ""}`);
+		this.print(`${mark} ${id}${note ? pc.dim(` - ${note}`) : ""}`);
 	}
 
 	note(message: string): void {

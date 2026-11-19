@@ -15,7 +15,7 @@ import { PHASES, type Phase } from "./types.ts";
 import { log, printBanner, setVerbose } from "./ui.ts";
 import { errorMessage } from "./util.ts";
 
-const HELP = `milhouse v${pkg.version} — correctness-first AI coding orchestrator (runs on Claude Code)
+const HELP = `milhouse v${pkg.version} - correctness-first AI coding orchestrator (runs on Claude Code)
 
 Usage:
   milhouse "fix auth bugs"        Run the whole pipeline; the text is the scope
@@ -159,14 +159,19 @@ async function main(argv: string[]): Promise<number> {
 		return 0;
 	}
 	if (values.clean) {
-		const removed = RunStore.clean(workDir, positiveInt(values.days, "--days") ?? 30);
-		for (const id of removed) await cleanupRun(new RunStore(workDir, id)); // unmerged work is kept
+		// cleanupRun first: the records go only once nothing of the run is left. Unmerged work is kept.
+		const { removed, kept } = await RunStore.clean(
+			workDir,
+			positiveInt(values.days, "--days") ?? 30,
+			cleanupRun,
+		);
 		console.log(
 			removed.length > 0
 				? `Removed ${removed.length} run(s):\n${removed.join("\n")}`
 				: "Nothing to clean.",
 		);
-		return 0;
+		for (const { id, reason } of kept) log.warn(`${id} was kept: ${reason}`);
+		return kept.length > 0 ? 1 : 0;
 	}
 
 	const workers = positiveInt(values.workers, "--workers");

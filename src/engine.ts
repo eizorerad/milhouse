@@ -99,6 +99,7 @@ export async function runAgent(prompt: string, opts: AgentOptions): Promise<Agen
 		env: agentEnv(),
 		input: prompt,
 		timeoutMs: opts.timeoutMs,
+		reap: true, // a dev server the agent started must not outlive its call
 	});
 
 	if (out.timedOut) {

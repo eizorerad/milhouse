@@ -2,7 +2,7 @@
 
 import { CostTracker, formatCost, formatUsd } from "./cost.ts";
 import { claudeBinary } from "./engine.ts";
-import { currentBranch, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
+import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
 import { consolidatePhase } from "./phases/consolidate.ts";
 import { execPhase } from "./phases/exec.ts";
 import { cleanupRun, mergePhase } from "./phases/merge.ts";
@@ -13,6 +13,7 @@ import { type Outcome, runPhase } from "./runner.ts";
 import { RunStore, acquireLock } from "./state.ts";
 import { type Config, PHASES, type Phase } from "./types.ts";
 import { log } from "./ui.ts";
+import { errorMessage } from "./util.ts";
 
 export interface PipelineOptions {
 	/** Repository to work in. Defaults to the current directory. */
@@ -47,6 +48,7 @@ export async function preflight(workDir: string, phases: Phase[]): Promise<void>
 		throw new Error("This is not a git repository. Run milhouse inside one.");
 	if (!(await hasCommits(workDir)))
 		throw new Error("The repository has no commits yet. Make an initial commit first.");
+	await detectIdentity(workDir); // commits need an author, also in a container that has none
 	if (phases.includes("exec") || phases.includes("merge")) {
 		if (!(await currentBranch(workDir)))
 			throw new Error("HEAD is detached. Check out a branch first.");
@@ -90,6 +92,12 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		log.info(`Run ${store.runId}: ${todo.join(" -> ") || "nothing left to do"}`);
 		if (config.budget > 0) {
 			log.info(`Budget ${formatUsd(config.budget)}, spent so far ${formatUsd(cost.current.total)}`);
+		}
+		const { build, lint, test } = config.commands;
+		if (todo.includes("exec") && config.gates.dod && !(build || lint || test)) {
+			log.warn(
+				"No build, lint or test command is configured: the reviewer alone checks the work. Set commands in .milhouse/config.ts.",
+			);
 		}
 
 		let failures = 0;
@@ -139,9 +147,14 @@ async function finish(
 		return false;
 	}
 	if (complete) {
-		await cleanupRun(store); // nothing is left to do with the worktree; unmerged work stays in the ref
+		try {
+			await cleanupRun(store); // nothing is left to do with the worktree; unmerged work stays in the ref
+		} catch (err) {
+			log.warn(`The run's worktree was not removed: ${errorMessage(err)}`);
+		}
 		store.finish("completed");
 		log.success(`Pipeline complete: ${spent}. Summary: milhouse --report`);
+		hintMerge(store);
 		return true;
 	}
 	store.finish("stopped");
@@ -150,5 +163,14 @@ async function finish(
 		return false;
 	}
 	log.success(`Done: ${spent}. Summary: milhouse --report`);
+	hintMerge(store);
 	return true;
+}
+
+/** Verified work that no merge has taken to the branch yet. */
+function hintMerge(store: RunStore): void {
+	const waiting = store.loadTasks().filter((t) => t.status === "verified").length;
+	if (waiting > 0) {
+		log.info(`${waiting} verified task(s) wait in ${store.ref}. Merge them with: milhouse --merge`);
+	}
 }

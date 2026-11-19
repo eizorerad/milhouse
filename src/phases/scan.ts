@@ -15,6 +15,10 @@ type RawIssue = Pick<
 >;
 
 const ITEM_FIELDS = ["type", "title", "rationale", "severity", "scope_impact", "strategy"];
+const TYPES: Issue["type"][] = ["bug", "feature", "refactor", "improvement", "task"];
+const SEVERITIES: Issue["severity"][] = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+/** The prompt asks for at most 10; this only keeps a runaway answer from flooding the later phases. */
+const MAX_ITEMS = 10;
 
 export const SCAN_SCHEMA = {
 	type: "object",
@@ -61,6 +65,29 @@ export function scanPrompt(scope: string, config: Config, lastError?: string): s
 	);
 }
 
+/** The scanner's work items. What a model left out or spelled differently is repaired; items without a title are dropped. */
+export function parseItems(text: string): RawIssue[] {
+	const { items } = parseJson<{ items?: unknown }>(text, "Scan");
+	if (!Array.isArray(items)) throw new Error("Scan: the response has no `items` list");
+	const str = (value: unknown): string =>
+		typeof value === "string" ? stripControl(value.trim()) : "";
+	return items
+		.filter((item) => typeof item?.title === "string" && item.title.trim() !== "")
+		.slice(0, MAX_ITEMS)
+		.map((item) => {
+			const type = str(item.type).toLowerCase() as Issue["type"];
+			const severity = str(item.severity).toUpperCase() as Issue["severity"];
+			return {
+				type: TYPES.includes(type) ? type : "task",
+				title: str(item.title),
+				rationale: str(item.rationale),
+				severity: SEVERITIES.includes(severity) ? severity : "MEDIUM",
+				scope_impact: str(item.scope_impact),
+				strategy: str(item.strategy),
+			};
+		});
+}
+
 export const scanPhase: PhaseDef<{ scope: string }, RawIssue[]> = {
 	name: "scan",
 
@@ -75,11 +102,7 @@ export const scanPhase: PhaseDef<{ scope: string }, RawIssue[]> = {
 			maxTurns: 100,
 			timeoutMs: 15 * MINUTE,
 		});
-		const { items } = parseJson<{ items?: unknown }>(text, "Scan");
-		if (!Array.isArray(items)) throw new Error("Scan: the response has no `items` list");
-		return items
-			.filter((i): i is RawIssue => typeof i?.title === "string" && i.title.trim() !== "")
-			.map((i) => ({ ...i, title: stripControl(i.title.trim()) }));
+		return parseItems(text);
 	},
 
 	record(_item, outcome, store) {

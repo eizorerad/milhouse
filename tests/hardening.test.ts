@@ -149,7 +149,7 @@ describe("run ids", () => {
 		expect(() => RunStore.byId(tempDir(), "../../etc")).toThrow(/not found/);
 	});
 
-	it("takes the id from the directory name, never from the file content, and skips foreign directories", () => {
+	it("takes the id from the directory name, never from the file content, and skips foreign directories", async () => {
 		const dir = tempDir();
 		const store = RunStore.create(dir, "real", BASE);
 		const runs = join(dir, ".milhouse", "runs");
@@ -170,7 +170,7 @@ describe("run ids", () => {
 
 		const ids = RunStore.list(dir).map((r) => r.id);
 		expect(ids).toEqual(["run-planted", store.runId]);
-		expect(RunStore.clean(dir, 1)).toEqual(["run-planted"]); // removes only its own directory
+		expect((await RunStore.clean(dir, 1)).removed).toEqual(["run-planted"]); // removes only its own directory
 		expect(RunStore.list(dir).map((r) => r.id)).toEqual([store.runId]);
 	});
 

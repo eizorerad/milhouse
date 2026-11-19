@@ -112,7 +112,7 @@ describe("RunStore", () => {
 		expect(RunStore.list(tempDir())).toEqual([]);
 	});
 
-	it("cleans only finished runs older than the cutoff", () => {
+	it("cleans only finished runs older than the cutoff", async () => {
 		const dir = tempDir();
 		const old = RunStore.create(dir, "old", BASE);
 		const stopped = RunStore.create(dir, "stopped", BASE);
@@ -128,7 +128,7 @@ describe("RunStore", () => {
 			meta.created_at = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
 			writeFileSync(metaPath, JSON.stringify(meta));
 		}
-		expect(RunStore.clean(dir, 30)).toEqual([old.runId]);
+		expect((await RunStore.clean(dir, 30)).removed).toEqual([old.runId]);
 		expect(
 			RunStore.list(dir)
 				.map((r) => r.id)

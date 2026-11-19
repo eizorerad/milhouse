@@ -2,9 +2,9 @@
 
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
-import type { AddedLine } from "./git.ts";
+import { type AddedLine, gitOrThrow, revParse, withoutGitRouting } from "./git.ts";
 import { run } from "./proc.ts";
-import type { Evidence } from "./types.ts";
+import type { Config, Evidence } from "./types.ts";
 import { tail } from "./util.ts";
 
 export const COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
@@ -20,7 +20,8 @@ const CONFLICT_MARKER = /^(?:<{7}|>{7})(?: |$)/;
 
 /** Added lines with trailing whitespace or a leftover merge-conflict marker: "file: problem". */
 export function findWhitespaceProblems(added: AddedLine[]): string[] {
-	return added.flatMap(({ file, text }) => {
+	return added.flatMap(({ file, text: raw }) => {
+		const text = raw.replace(/\r$/, ""); // the line ending of a CRLF file is not trailing whitespace
 		if (CONFLICT_MARKER.test(text)) return [`${file}: conflict marker "${text.trim()}"`];
 		if (TRAILING_SPACE.test(text)) {
 			return [`${file}: trailing whitespace after "${text.trim().slice(0, 60)}"`];
@@ -39,11 +40,15 @@ export function findPlaceholders(added: AddedLine[]): string[] {
 		.map(({ file, text }) => `${file}: ${text.trim()}`);
 }
 
-/** Run shell commands one after another. Returns a description of the first failure, or null. */
+/**
+ * Run shell commands one after another. Returns a description of the first failure, or null.
+ * `reap`: stop what a command left running (a watcher, a server) when it has finished.
+ */
 export async function runChecks(
 	commands: Array<[label: string, command: string]>,
 	cwd: string,
 	timeoutMs = COMMAND_TIMEOUT_MS,
+	reap = true,
 ): Promise<string | null> {
 	for (const [label, command] of commands) {
 		if (!command.trim()) continue;
@@ -51,7 +56,8 @@ export async function runChecks(
 			cwd,
 			shell: true,
 			timeoutMs,
-			env: { ...process.env, CI: "true" },
+			reap,
+			env: { ...withoutGitRouting(process.env), CI: "true" },
 		});
 		// A shell can exit 0 while a child it started keeps running; a timeout is a failure either way.
 		if (result.code === 0 && !result.timedOut) continue;
@@ -59,6 +65,36 @@ export async function runChecks(
 			? `timed out after ${Math.round(timeoutMs / 1000)}s`
 			: `exit code ${result.code}`;
 		return `${label} failed (\`${command}\`, ${why}):\n${tail(result.stdout + result.stderr, 2500)}`;
+	}
+	return null;
+}
+
+/**
+ * Build, lint and test in `dir`, a clean checkout of the commit being judged. The commands must leave it as
+ * it was: one that rewrites a tracked file (a fixing linter) or makes a commit would make the tested state
+ * differ from the committed one. Returns what is wrong, or null.
+ */
+export async function runProjectChecks(
+	dir: string,
+	commands: Config["commands"],
+): Promise<string | null> {
+	const before = await revParse(dir, "HEAD");
+	const failure = await runChecks(
+		[
+			["build", commands.build],
+			["lint", commands.lint],
+			["test", commands.test],
+		],
+		dir,
+	);
+	await gitOrThrow(dir, "clean", "-fd"); // what the commands generated: the tree was clean before them
+	if (failure) return failure;
+	if ((await revParse(dir, "HEAD")) !== before) {
+		return "Running the checks moved HEAD (they made a commit), so what was tested is not what is committed. Make the commands read-only.";
+	}
+	const changed = await gitOrThrow(dir, "status", "--porcelain", "--untracked-files=no");
+	if (changed) {
+		return `Running the checks changed tracked files, so what was tested is not what is committed. Commit those changes or make the commands read-only:\n${tail(changed, 800)}`;
 	}
 	return null;
 }

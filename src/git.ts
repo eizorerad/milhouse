@@ -2,13 +2,61 @@
 
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { run } from "./proc.ts";
+import { type RunResult, run } from "./proc.ts";
 import { tail } from "./util.ts";
 
 /** A hook or a lock that never finishes must not hang milhouse forever. */
 const GIT_TIMEOUT_MS = 10 * 60 * 1000;
 
-const gitEnv = (): NodeJS.ProcessEnv => ({ ...process.env, GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" });
+/**
+ * Variables that point git at a repository other than the working directory. A caller such as a git
+ * hook sets them; they must never reach the worktrees, the agents or the checks.
+ */
+const ROUTING_VARS = [
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_COMMON_DIR",
+	"GIT_PREFIX",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+	"GIT_NAMESPACE",
+];
+
+/** The environment of a process that works in a repository of its own. */
+export function withoutGitRouting(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const clean = { ...env };
+	for (const name of ROUTING_VARS) delete clean[name];
+	return clean;
+}
+
+/** Set when git has no author for commits (a fresh container): a neutral one is used instead of failing. */
+let fallbackIdentity: NodeJS.ProcessEnv = {};
+
+/** Environment for commits made by milhouse and its agents. */
+export const identityEnv = (): NodeJS.ProcessEnv => fallbackIdentity;
+
+export async function detectIdentity(cwd: string): Promise<void> {
+	const known =
+		(await git(cwd, "var", "GIT_AUTHOR_IDENT")).ok &&
+		(await git(cwd, "var", "GIT_COMMITTER_IDENT")).ok;
+	const who = { NAME: "milhouse", EMAIL: "milhouse@localhost" };
+	fallbackIdentity = known
+		? {}
+		: {
+				GIT_AUTHOR_NAME: who.NAME,
+				GIT_AUTHOR_EMAIL: who.EMAIL,
+				GIT_COMMITTER_NAME: who.NAME,
+				GIT_COMMITTER_EMAIL: who.EMAIL,
+			};
+}
+
+const gitEnv = (): NodeJS.ProcessEnv => ({
+	...withoutGitRouting(process.env),
+	...fallbackIdentity,
+	GIT_TERMINAL_PROMPT: "0",
+	LC_ALL: "C",
+});
 
 export interface GitResult {
 	ok: boolean;
@@ -21,14 +69,17 @@ export async function git(cwd: string, ...args: string[]): Promise<GitResult> {
 	return { ok: result.code === 0, out: result.stdout.trimEnd(), err: result.stderr.trim() };
 }
 
-/** Raw stdout (trailing whitespace on the last line intact). Throws when git fails. */
-async function gitText(cwd: string, ...args: string[]): Promise<string> {
+/** The finished process (stdout raw: trailing whitespace on the last line intact). Throws when git fails. */
+async function gitRun(cwd: string, ...args: string[]): Promise<RunResult> {
 	const result = await run("git", args, { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
 	if (result.code !== 0) {
 		throw new Error(`git ${args.join(" ")} failed: ${tail(result.stderr || result.stdout, 500)}`);
 	}
-	return result.stdout;
+	return result;
 }
+
+const gitText = async (cwd: string, ...args: string[]): Promise<string> =>
+	(await gitRun(cwd, ...args)).stdout;
 
 export async function gitOrThrow(cwd: string, ...args: string[]): Promise<string> {
 	return (await gitText(cwd, ...args)).trimEnd();
@@ -74,9 +125,21 @@ export async function isAncestor(
 	return (await git(cwd, "merge-base", "--is-ancestor", ancestor, descendant)).ok;
 }
 
-/** Uncommitted changes outside .milhouse/ (milhouse's own state never counts). */
+/**
+ * Uncommitted changes to tracked files, outside .milhouse/ (milhouse's own state never counts).
+ * Untracked files do not count: an editor may create them during a run, and git itself refuses to
+ * overwrite one when work is merged.
+ */
 export async function isDirty(cwd: string): Promise<boolean> {
-	const status = await git(cwd, "status", "--porcelain", "--", ".", ":(exclude).milhouse");
+	const status = await git(
+		cwd,
+		"status",
+		"--porcelain",
+		"--untracked-files=no",
+		"--",
+		".",
+		":(exclude).milhouse",
+	);
 	return status.out.length > 0;
 }
 
@@ -118,7 +181,7 @@ export interface AddedLine {
  */
 export async function addedLines(cwd: string, from: string, to = "HEAD"): Promise<AddedLine[]> {
 	// Raw output: trailing whitespace on the very last added line must survive.
-	const diff = await gitText(
+	const result = await gitRun(
 		cwd,
 		"diff",
 		"--text",
@@ -132,8 +195,13 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 		to,
 		"--",
 	);
+	if (result.truncated) {
+		throw new Error(
+			"The change is too large to check (more than 32 MB of added lines). Keep generated, vendored and binary files out of the commits.",
+		);
+	}
 	const added: AddedLine[] = [];
-	const rows = diff.split("\n");
+	const rows = result.stdout.split("\n");
 	let file = "";
 	for (let i = 0; i < rows.length; i++) {
 		const row = rows[i];
@@ -206,11 +274,14 @@ export async function deleteRef(repo: string, ref: string): Promise<void> {
 /**
  * Keep a failed attempt for inspection on its own branch. Uncommitted files are committed first;
  * a clean worktree is parked exactly as it is, so the branch can be resumed and accepted as is.
+ * Throws when the attempt could not be kept: the caller must not discard the worktree then.
  */
 export async function parkWorktree(repo: string, path: string, parkBranch: string): Promise<void> {
+	const cannotKeep = (why: string) => new Error(`The failed attempt could not be kept: ${why}`);
 	if ((await git(path, "status", "--porcelain")).out) {
-		await git(path, "add", "-A");
-		await git(
+		const added = await git(path, "add", "-A");
+		if (!added.ok) throw cannotKeep(added.err);
+		const committed = await git(
 			path,
 			"-c",
 			"commit.gpgsign=false",
@@ -220,9 +291,12 @@ export async function parkWorktree(repo: string, path: string, parkBranch: strin
 			"-m",
 			"wip: failed attempt",
 		);
+		if (!committed.ok) throw cannotKeep(committed.err);
 	}
 	const head = await git(path, "rev-parse", "HEAD");
-	if (head.ok) await git(repo, "branch", "-f", parkBranch, head.out);
+	if (!head.ok) throw cannotKeep(head.err);
+	const parked = await git(repo, "branch", "-f", parkBranch, head.out);
+	if (!parked.ok) throw cannotKeep(parked.err);
 }
 
 export async function deleteBranch(repo: string, branch: string): Promise<void> {
@@ -231,7 +305,15 @@ export async function deleteBranch(repo: string, branch: string): Promise<void> 
 
 export async function removeWorktree(repo: string, path: string): Promise<void> {
 	const removed = await git(repo, "worktree", "remove", "--force", path);
-	if (!removed.ok) rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 500 });
+	if (!removed.ok) {
+		// A lock is somebody's request to keep the directory (for inspection, say): it is not ours to override.
+		if (/locked/i.test(removed.err)) {
+			throw new Error(
+				`The worktree ${path} is locked. Unlock it with: git worktree unlock "${path}"`,
+			);
+		}
+		rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 500 });
+	}
 	await git(repo, "worktree", "prune");
 }
 
@@ -252,6 +334,7 @@ export async function mergeInto(
 		"--no-ff",
 		"--no-squash",
 		"--commit",
+		"--no-verify", // the user's hooks are for their own commits; milhouse checks the result itself
 		"-m",
 		message,
 		sha,
@@ -264,8 +347,13 @@ export async function mergeInto(
 /**
  * Move the branch checked out in `repo` forward to `sha` and confirm that it got there. A fast-forward
  * that cannot happen changes nothing, so the user's checkout (staged edits included) is never reset.
+ * --no-overwrite-ignore: git would otherwise replace an ignored local file (a .env, say) with a tracked one.
  */
-export async function publish(repo: string, sha: string): Promise<boolean> {
-	await git(repo, "merge", "--ff-only", "--no-squash", sha);
-	return (await git(repo, "rev-parse", "HEAD")).out === sha;
+export async function publish(repo: string, sha: string): Promise<{ ok: boolean; error?: string }> {
+	const merged = await git(repo, "merge", "--ff-only", "--no-squash", "--no-overwrite-ignore", sha);
+	if (!merged.ok) return { ok: false, error: tail(merged.err || merged.out, 500) };
+	const reached = (await git(repo, "rev-parse", "HEAD")).out === sha;
+	return reached
+		? { ok: true }
+		: { ok: false, error: "the branch did not move to the merged commit" };
 }

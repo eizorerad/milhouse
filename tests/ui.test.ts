@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import { Progress, formatDuration, log, setVerbose } from "../src/ui.ts";
+import { isAscii } from "./helpers.ts";
 
 let lines: string[];
 
@@ -58,9 +59,10 @@ describe("Progress (not a terminal)", () => {
 		progress.stop();
 		// CI=true makes picocolors emit colors even without a terminal.
 		const text = stripVTControlCharacters(lines.join("\n"));
-		expect(text).toContain("… first");
+		expect(text).toContain("... first");
 		expect(text).toContain("+ first");
 		expect(text).toContain("attempt 1/2 failed");
 		expect(text).toMatch(/x second.*boom/);
+		expect(isAscii(text)).toBe(true); // for terminals without UTF-8
 	});
 });

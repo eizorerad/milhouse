@@ -11,6 +11,10 @@ export function stripControl(text: string): string {
 	return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
 }
 
+/** The strings of a value that should be a list of strings: anything else in it, or around it, is dropped. */
+export const stringList = (value: unknown): string[] =>
+	Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
 export function errorMessage(err: unknown): string {
 	return stripControl(err instanceof Error ? err.message : String(err));
 }
@@ -22,7 +26,7 @@ export function generateId(prefix: string): string {
 /** Last `max` characters of a text, trimmed (command output, stderr). */
 export function tail(text: string, max = 2000): string {
 	const trimmed = text.trim();
-	return trimmed.length <= max ? trimmed : `…${trimmed.slice(-max)}`;
+	return trimmed.length <= max ? trimmed : `...${trimmed.slice(-max)}`;
 }
 
 /** Run `fn` over `items` with at most `size` calls in flight. Results keep the input order. */

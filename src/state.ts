@@ -186,18 +186,33 @@ export class RunStore {
 		return store;
 	}
 
-	/** Remove finished runs older than `days`. Stopped runs stay: they can be resumed. */
-	static clean(workDir: string, days: number): string[] {
+	/**
+	 * Remove finished runs older than `days` (stopped runs stay: they can be resumed). `before` runs first for
+	 * each one, to remove what the run left outside its directory; if it throws, the run is kept.
+	 */
+	static async clean(
+		workDir: string,
+		days: number,
+		before?: (store: RunStore) => Promise<void>,
+	): Promise<{ removed: string[]; kept: Array<{ id: string; reason: string }> }> {
 		const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 		const old = RunStore.list(workDir).filter(
 			(run) =>
 				(run.status === "completed" || run.status === "failed") &&
 				new Date(run.created_at).getTime() < cutoff,
 		);
+		const removed: string[] = [];
+		const kept: Array<{ id: string; reason: string }> = [];
 		for (const run of old) {
-			rmSync(join(workDir, STATE_DIR, "runs", run.id), { recursive: true, force: true });
+			try {
+				await before?.(new RunStore(workDir, run.id));
+				rmSync(join(workDir, STATE_DIR, "runs", run.id), { recursive: true, force: true });
+				removed.push(run.id);
+			} catch (err) {
+				kept.push({ id: run.id, reason: errorMessage(err) });
+			}
 		}
-		return old.map((run) => run.id);
+		return { removed, kept };
 	}
 }
 

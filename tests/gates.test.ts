@@ -6,9 +6,18 @@ import {
 	findWhitespaceProblems,
 	forbiddenFiles,
 	runChecks,
+	runProjectChecks,
 	verifyEvidence,
 } from "../src/gates.ts";
-import { cleanupTempDirs, tempDir } from "./helpers.ts";
+import {
+	cleanupTempDirs,
+	git,
+	makeRepo,
+	readFile,
+	tempDir,
+	unsetEnv,
+	writeFile,
+} from "./helpers.ts";
 
 afterEach(cleanupTempDirs);
 
@@ -73,6 +82,16 @@ describe("findWhitespaceProblems", () => {
 		expect(found.map((f) => f.split(":")[0])).toEqual(["a.ts", "b.ts", "c.ts", "d.ts"]);
 	});
 
+	it("sees through CRLF line endings: they are not trailing whitespace, but a space before one is", () => {
+		expect(
+			findWhitespaceProblems([
+				{ file: "ok.txt", text: "const x = 1;\r" },
+				{ file: "bad.txt", text: "const x = 1; \r" },
+				{ file: "marker.txt", text: "<<<<<<< HEAD\r" },
+			]).map((f) => f.split(":")[0]),
+		).toEqual(["bad.txt", "marker.txt"]);
+	});
+
 	it("leaves clean lines and markdown underlines alone", () => {
 		expect(
 			findWhitespaceProblems([
@@ -125,6 +144,78 @@ describe("runChecks", () => {
 		const failure = await runChecks([["test", "sleep 30 & sleep 30"]], tempDir(), 300);
 		expect(failure).toContain("timed out");
 		expect(Date.now() - started).toBeLessThan(5000);
+	});
+});
+
+describe("runChecks and what a check leaves behind", () => {
+	it("stops background processes a check left running: they could change the next issue's files", async () => {
+		const dir = tempDir();
+		expect(await runChecks([["test", "sleep 30 & echo $! > watcher.pid"]], dir)).toBeNull();
+		const pid = Number(readFile(dir, "watcher.pid").trim());
+		let gone = false;
+		for (let waited = 0; waited < 2_000 && !gone; waited += 25) {
+			try {
+				process.kill(pid, 0);
+				await Bun.sleep(25);
+			} catch {
+				gone = true;
+			}
+		}
+		expect(gone).toBe(true);
+	});
+
+	it("does not pass on the caller's GIT_DIR to the checks", async () => {
+		const repo = await makeRepo();
+		process.env.GIT_DIR = "/nonexistent/.git";
+		try {
+			expect(
+				await runChecks([["test", 'test "$(git rev-parse --show-toplevel)" = "$PWD"']], repo),
+			).toBeNull();
+		} finally {
+			unsetEnv("GIT_DIR");
+		}
+	});
+});
+
+describe("runProjectChecks", () => {
+	const commands = (over: Partial<Record<"build" | "lint" | "test", string>> = {}) => ({
+		setup: "",
+		build: "",
+		lint: "",
+		test: "",
+		...over,
+	});
+
+	it("passes when the commands pass, and removes what they generated", async () => {
+		const repo = await makeRepo();
+		expect(
+			await runProjectChecks(repo, commands({ test: "echo out > build-output.txt" })),
+		).toBeNull();
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+	});
+
+	it("reports a failing command, and still removes what it generated", async () => {
+		const repo = await makeRepo();
+		const failure = await runProjectChecks(repo, commands({ test: "echo x > junk.txt; exit 1" }));
+		expect(failure).toContain("test failed");
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+	});
+
+	it("rejects checks that rewrite a tracked file: what was tested is not what is committed", async () => {
+		const repo = await makeRepo();
+		const failure = await runProjectChecks(repo, commands({ lint: "echo fixed >> src/app.ts" }));
+		expect(failure).toContain("changed tracked files");
+		expect(failure).toContain("src/app.ts");
+	});
+
+	it("rejects checks that move HEAD, for example a build that commits", async () => {
+		const repo = await makeRepo();
+		writeFile(repo, "src/app.ts", "export const app = 2;\n");
+		const failure = await runProjectChecks(
+			repo,
+			commands({ build: "git commit -qam 'generated' && true" }),
+		);
+		expect(failure).toContain("moved HEAD");
 	});
 });
 

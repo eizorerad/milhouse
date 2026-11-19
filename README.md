@@ -30,7 +30,7 @@ scan → validate → plan → consolidate → exec → merge
 | exec | Issues run **one at a time** in a git worktree, each on top of the ones accepted before it (see below). |
 | merge | Accepted work is fast-forwarded into the branch the run started on. |
 
-**exec, per issue:** the agent commits one commit per task (`[<task id>] <title>`) → Milhouse runs the gates → a reviewer agent checks the acceptance criteria against the diff → the issue is accepted. Any failure goes back to the agent as feedback for a repair round (`phases.exec.retries`). An issue that still fails is parked on `mh-failed/<issue-id>`, the worktree returns to the accepted state and the next issue carries on, so no issue builds on broken work and every issue is tested on top of all the accepted ones. An issue that depends on a failed one waits.
+**exec, per issue:** the agent commits one commit per task (`[<task id>] <title>`) → Milhouse runs the gates → a reviewer agent checks the acceptance criteria against the diff → the issue is accepted. Any failure goes back to the agent as feedback for a repair round (`phases.exec.retries`). An issue that still fails is parked on `mh-failed/<issue-id>`, its worktree is thrown away (a failed attempt may have installed dependencies the next issue would silently build on) and the next issue carries on from a fresh one, so no issue builds on broken work and every issue is tested on top of all the accepted ones. An issue that depends on a failed one waits.
 
 | Gate (`gates.*`) | Blocks |
 |---|---|
@@ -38,7 +38,7 @@ scan → validate → plan → consolidate → exec → merge
 | `placeholder` | new `TODO` / `FIXME` / "not implemented" stubs |
 | `diffHygiene` | trailing whitespace and conflict markers in added lines |
 | `dod` | failing `commands.build` / `lint` / `test`; a reviewer that rejects the acceptance criteria |
-| always on | tasks without a commit, uncommitted leftovers, history that drops accepted commits, any commit touching a `neverTouch` path (renames and merges included) |
+| always on | tasks without a commit, uncommitted leftovers, history that drops accepted commits, any commit touching a `neverTouch` path or `.milhouse/` (renames and merges included), checks that move HEAD or rewrite tracked files |
 
 **merge** tests before it publishes: if your branch moved during the run, the merge commit is built and checked in the run's worktree, and only that tested commit is fast-forwarded into your branch. If the merge conflicts or the checks fail, your branch has not been touched and the work stays accepted, waiting. The run then continues from the merged state, so a later `--resume` builds on it.
 
@@ -46,10 +46,11 @@ scan → validate → plan → consolidate → exec → merge
 
 - Read-only phases and the reviewer get only `Read`, `Grep` and `Glob`. Your MCP servers (mail, payments, …) are never loaded, and the repository's own `.claude/settings.json` (hooks, env, API URL) is ignored; your user-level Claude settings apply.
 - **exec runs Claude with permissions bypassed**: the agent can run any command as you, inside the run's worktree. Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
-- Your branch changes only in `merge`, and only with accepted work. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
+- Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Untracked files in your checkout never block a run. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
+- Your git hooks run for the agents' commits (agents are told to use `--no-verify` if a commit-message rule rejects `[<task id>] <title>`); Milhouse's own commits skip them. `GIT_DIR` and friends inherited from a caller never reach agents or checks, and without a git identity commits use `milhouse <milhouse@localhost>`.
 - Cost comes from Claude's own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`.
 - Ctrl-C, SIGTERM and a closed terminal stop the agents too. After `kill -9` an agent may keep running: check `ps` before resuming.
-- One Milhouse per repository at a time (`.milhouse/lock`).
+- One Milhouse per checkout at a time (`.milhouse/lock`). A command that never stops printing cannot exhaust memory (only the last 32 MB are kept), and what an agent or a check leaves running in the background is stopped when it finishes.
 
 ## Configuration
 
@@ -67,7 +68,7 @@ export default {
 };
 ```
 
-Unknown keys and wrong types are errors, so a typo cannot silently disable a rule. `commands.setup` runs once when the worktree is created; the other commands run on every issue. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
+Unknown keys and wrong types are errors, so a typo cannot silently disable a rule. `commands.setup` runs whenever the worktree is created (also after a failed issue); what it installs must be ignored by git (`node_modules`, `.venv`). The other commands run on every issue and must leave the files alone. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
 
 ## CLI
 
