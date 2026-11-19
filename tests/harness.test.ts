@@ -150,7 +150,6 @@ describe("reading Codex's event stream", () => {
 	it("takes the last message as the answer and the usage of the turn as the tokens", () => {
 		const result = codex.parse(
 			out(lines(...started, message("working on it"), message('{"ok":true}'), finished(500, 20))),
-			opts(),
 		);
 		expect(result).toEqual({ text: '{"ok":true}', costUsd: 0, tokens: { input: 500, output: 20 } });
 	});
@@ -166,14 +165,13 @@ describe("reading Codex's event stream", () => {
 					finished(),
 				),
 			),
-			opts(),
 		);
 		expect(result.text).toBe("");
 	});
 
 	it("skips lines that are not events, such as a cut-off first line", () => {
 		const stream = `{"type":"item.comp\n${lines(...started, message("answer"), finished())}\nnot json`;
-		expect(codex.parse(out(stream), opts()).text).toBe("answer");
+		expect(codex.parse(out(stream)).text).toBe("answer");
 	});
 
 	it("fails with the reason when the turn failed, whatever the stream said before", () => {
@@ -186,7 +184,6 @@ describe("reading Codex's event stream", () => {
 					}),
 					1,
 				),
-				opts(),
 			);
 		expect(failure).toThrow(EngineError);
 		expect(failure).toThrow(/stream disconnected/);
@@ -198,11 +195,11 @@ describe("reading Codex's event stream", () => {
 	});
 
 	it("fails when the stream has no ending or the process failed, even after a message", () => {
-		expect(() => codex.parse(out(lines(...started, message("x"))), opts())).toThrow(/no result/);
-		expect(() => codex.parse(out(lines(...started, message("x"), finished()), 1), opts())).toThrow(
+		expect(() => codex.parse(out(lines(...started, message("x"))))).toThrow(/no result/);
+		expect(() => codex.parse(out(lines(...started, message("x"), finished()), 1))).toThrow(
 			EngineError,
 		);
-		expect(() => codex.parse(out("", null, "spawn ENOENT"), opts())).toThrow(/ENOENT/);
+		expect(() => codex.parse(out("", null, "spawn ENOENT"))).toThrow(/ENOENT/);
 	});
 
 	it("knows a failure that every other call would share: login, unknown model, quota", () => {
@@ -222,10 +219,7 @@ describe("reading Codex's event stream", () => {
 		for (const [reason, systemic] of reasons) {
 			let error: EngineError | undefined;
 			try {
-				codex.parse(
-					out(lines(...started, { type: "turn.failed", error: { message: reason } }), 1),
-					opts(),
-				);
+				codex.parse(out(lines(...started, { type: "turn.failed", error: { message: reason } }), 1));
 			} catch (err) {
 				error = err as EngineError;
 			}
@@ -247,20 +241,16 @@ describe("a command line the CLI rejects", () => {
 							2,
 							"error: the argument '--sandbox <SANDBOX_MODE>' cannot be used multiple times",
 						),
-						opts(),
 					),
 			],
 			[
 				"codex unknown flag",
-				() => codex.parse(out("", 2, "error: unexpected argument '--bogus' found"), opts()),
+				() => codex.parse(out("", 2, "error: unexpected argument '--bogus' found")),
 			],
-			[
-				"claude unknown flag",
-				() => claude.parse(out("", 1, "error: unknown option '--bogus'"), opts()),
-			],
+			["claude unknown flag", () => claude.parse(out("", 1, "error: unknown option '--bogus'"))],
 			[
 				"claude logged out, said on stderr only",
-				() => claude.parse(out("", 1, "Not logged in \u00b7 Please run /login"), opts()),
+				() => claude.parse(out("", 1, "Not logged in \u00b7 Please run /login")),
 			],
 		];
 		for (const [name, parse] of cases) {
@@ -277,7 +267,7 @@ describe("a command line the CLI rejects", () => {
 	it("is not confused with an ordinary failure that printed nothing", () => {
 		let error: EngineError | undefined;
 		try {
-			codex.parse(out("", 1, "killed"), opts());
+			codex.parse(out("", 1, "killed"));
 		} catch (err) {
 			error = err as EngineError;
 		}
@@ -297,8 +287,8 @@ describe("reading Claude's result", () => {
 		});
 
 	it("returns the text and the cost, preferring structured output", () => {
-		expect(claude.parse(out(result({})), opts())).toEqual({ text: "ok", costUsd: 0.5 });
-		const structured = claude.parse(out(result({ structured_output: { a: 1 } })), opts());
+		expect(claude.parse(out(result({})))).toEqual({ text: "ok", costUsd: 0.5 });
+		const structured = claude.parse(out(result({ structured_output: { a: 1 } })));
 		expect(structured.text).toBe('{"a":1}');
 	});
 
@@ -326,7 +316,7 @@ describe("reading Claude's result", () => {
 		for (const [shape, systemic] of shapes) {
 			let error: EngineError | undefined;
 			try {
-				claude.parse(out(result(shape), 1), opts());
+				claude.parse(out(result(shape), 1));
 			} catch (err) {
 				error = err as EngineError;
 			}
@@ -346,7 +336,6 @@ describe("reading Claude's result", () => {
 					}),
 					1,
 				),
-				opts(),
 			);
 			throw new Error("should have failed");
 		} catch (err) {

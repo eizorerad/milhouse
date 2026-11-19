@@ -3,31 +3,30 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import pkg from "../package.json";
 import { ensureWorktree, isDirty, refExists } from "../src/git.ts";
-import { run } from "../src/proc.ts";
-import { RunStore, acquireLock } from "../src/state.ts";
-import { sleep } from "../src/util.ts";
+import { acquireLock } from "../src/lock.ts";
+import { RunStore } from "../src/state.ts";
 import {
+	ENTRY,
+	alive,
 	cleanupTempDirs,
+	flag,
 	git,
 	isAscii,
 	makeRepo,
+	milhouse,
 	resetFakeAgentEnv,
 	tempDir,
 	useFakeAgent,
+	waitFor,
 } from "./helpers.ts";
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
 });
-
-const ENTRY = resolve(import.meta.dir, "../src/index.ts");
-
-const milhouse = (cwd: string, ...args: string[]) =>
-	run("bun", [ENTRY, ...args], { cwd, env: { ...process.env, NO_COLOR: "1" }, timeoutMs: 120_000 });
 
 describe("arguments", () => {
 	it("prints the help without arguments, with --help and with -h", async () => {
@@ -202,9 +201,20 @@ describe("a full run through the CLI", () => {
 			'export default { model: "sonnet", phases: { verify: { model: "haiku" } } };',
 		);
 		expect((await milhouse(repo, "--model", "opus-x", "--run")).code).toBe(0);
-		const models = fake.journal().map((call) => call.args[call.args.indexOf("--model") + 1]);
+		const models = fake.journal().map((call) => flag(call.args, "--model"));
 		expect(models.length).toBeGreaterThan(5);
 		expect(new Set(models)).toEqual(new Set(["opus-x"]));
+	});
+
+	it("--workers sets the parallelism of the two steps that have workers, and of no other", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const result = await milhouse(repo, "--workers", "3", "--run");
+		expect(result.code).toBe(0);
+		const agents = result.stdout.split("\n").find((line) => line.includes("Agents:")) ?? "";
+		expect(agents).toContain("validate claude/sonnet x3");
+		expect(agents).toContain("plan claude/sonnet x3");
+		expect(agents).not.toMatch(/(scan|consolidate|exec|verify) claude\/sonnet x/);
 	});
 
 	it("works from a subdirectory of the repository and keeps its state at the root", async () => {
@@ -225,19 +235,74 @@ describe("a full run through the CLI", () => {
 	});
 });
 
-const alive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
-};
+describe("harness and model on the command line", () => {
+	it("--harness codex runs every step on Codex, whatever the config says", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await milhouse(repo, "--init");
+		writeFileSync(
+			join(repo, ".milhouse", "config.ts"),
+			'export default { harness: "claude", phases: { verify: { harness: "claude" } } };',
+		);
+		expect((await milhouse(repo, "--harness", "codex", "--run")).code).toBe(0);
+		expect(fake.journal().every((call) => call.harness === "codex")).toBe(true);
+	});
 
-async function waitFor(condition: () => boolean, ms = 15_000): Promise<void> {
-	const deadline = Date.now() + ms;
-	while (!condition() && Date.now() < deadline) await sleep(50);
-}
+	it("--harness codex drops the models that were named for Claude", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await milhouse(repo, "--init");
+		writeFileSync(
+			join(repo, ".milhouse", "config.ts"),
+			'export default { model: "sonnet", phases: { exec: { model: "haiku" } } };',
+		);
+		expect((await milhouse(repo, "--harness", "codex", "--run")).code).toBe(0);
+		expect(fake.journal().length).toBeGreaterThan(5);
+		for (const call of fake.journal()) expect(call.args).not.toContain("-m");
+
+		const fake2 = useFakeAgent({});
+		const repo2 = await makeRepo();
+		await milhouse(repo2, "--init");
+		writeFileSync(join(repo2, ".milhouse", "config.ts"), 'export default { model: "sonnet" };');
+		expect((await milhouse(repo2, "--harness", "codex", "--model", "gpt-x", "--run")).code).toBe(0);
+		for (const call of fake2.journal()) expect(flag(call.args, "-m")).toBe("gpt-x"); // named on purpose
+	});
+
+	it("--model applies where it can: not to a step on the other harness", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await milhouse(repo, "--init");
+		writeFileSync(
+			join(repo, ".milhouse", "config.ts"),
+			'export default { model: "sonnet", phases: { exec: { model: "haiku" }, verify: { harness: "codex" } } };',
+		);
+		expect((await milhouse(repo, "--model", "opus-x", "--run")).code).toBe(0);
+		for (const call of fake.journal()) {
+			if (call.harness === "claude") expect(flag(call.args, "--model")).toBe("opus-x");
+			else expect(call.args).not.toContain("-m");
+		}
+	});
+
+	it("rejects an unknown harness, in the flag and in the config", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const flagged = await milhouse(repo, "--harness", "gemini", "--run");
+		expect(flagged.code).toBe(2);
+		expect(flagged.stderr).toContain("--harness must be one of: claude, codex");
+
+		await milhouse(repo, "--init");
+		writeFileSync(join(repo, ".milhouse", "config.ts"), 'export default { harness: "gemini" };');
+		const configured = await milhouse(repo, "--run");
+		expect(configured.code).toBe(2);
+		expect(configured.stderr).toContain("harness must be one of claude, codex");
+		writeFileSync(
+			join(repo, ".milhouse", "config.ts"),
+			'export default { phases: { scan: { harness: "aider" } } };',
+		);
+		expect((await milhouse(repo, "--run")).stderr).toContain("phases.scan.harness");
+		expect(fake.journal()).toHaveLength(0);
+	});
+});
 
 describe("interruption", () => {
 	const exitCodes = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;

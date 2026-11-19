@@ -1,13 +1,13 @@
 /** The run's worktree, ready to use: created at the accepted ref, with `commands.setup` done. */
 
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { COMMAND_TIMEOUT_MS, runChecks } from "./gates.ts";
-import { ensureWorktree, isAncestor, refExists, removeWorktree, revParse } from "./git.ts";
+import { runChecks } from "./gates.ts";
+import { deleteRef, ensureWorktree, isAncestor, removeWorktree, resolveRef } from "./git.ts";
 import type { RunStore } from "./state.ts";
 import type { Config } from "./types.ts";
 
 /** Written only after setup succeeded, so a setup that was interrupted is run again. */
-export const setupMarker = (store: RunStore): string => `${store.worktree}.ready`;
+const setupMarker = (store: RunStore): string => `${store.worktree}.ready`;
 
 /**
  * Make the worktree usable. `commands.setup` runs whenever the worktree is new or its setup never
@@ -21,17 +21,14 @@ export async function prepareWorktree(
 	opts: { setupAgain?: boolean } = {},
 ): Promise<string | null> {
 	const { base_sha: base } = store.loadMeta();
+	const tip = await resolveRef(store.workDir, store.ref);
 	// A lost ref must not be recreated at the starting point: work that was verified is not in it any more.
-	if (
-		!(await refExists(store.workDir, store.ref)) &&
-		store.loadTasks().some((t) => t.status === "verified")
-	) {
+	if (tip === null && store.loadTasks().some((t) => t.status === "verified")) {
 		return `setup failed: the accepted work of this run (${store.ref}) is missing although tasks were verified. Merge or inspect it by hand; start a new run for the rest.`;
 	}
-	if (await refExists(store.workDir, store.ref)) {
+	if (tip !== null) {
 		// Nothing but a commit that Milhouse accepted (the starting point, or one of the tasks') was reviewed;
 		// what the user's branch contains already is no news. Anything else: the ref was moved by hand.
-		const tip = await revParse(store.workDir, store.ref);
 		const accepted = new Set([base, ...store.loadTasks().flatMap((t) => (t.sha ? [t.sha] : []))]);
 		if (!accepted.has(tip) && !(await isAncestor(store.workDir, tip, "HEAD"))) {
 			return `setup failed: ${store.ref} points at a commit that Milhouse never accepted, so it was changed outside Milhouse. Inspect it; start a new run to continue.`;
@@ -45,10 +42,9 @@ export async function prepareWorktree(
 
 	// reap=false: a service that setup starts on purpose is allowed to stay.
 	const failure = await runChecks(
-		[["setup", config.commands.setup]],
 		store.worktree,
-		COMMAND_TIMEOUT_MS,
-		false,
+		{ setup: config.commands.setup },
+		{ reap: false },
 	);
 	if (failure) {
 		await removeWorktree(store.workDir, store.worktree);
@@ -62,4 +58,10 @@ export async function prepareWorktree(
 export async function discardWorktree(store: RunStore): Promise<void> {
 	await removeWorktree(store.workDir, store.worktree);
 	rmSync(setupMarker(store), { force: true });
+}
+
+/** Remove the run's worktree, and its ref once everything in it is part of the user's branch. */
+export async function cleanupRun(store: RunStore): Promise<void> {
+	await discardWorktree(store);
+	if (await isAncestor(store.workDir, store.ref, "HEAD")) await deleteRef(store.workDir, store.ref);
 }

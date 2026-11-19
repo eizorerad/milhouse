@@ -1,9 +1,11 @@
 /** Failure, crash and resume scenarios: the pipeline must never lose or fake work. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { branchExists, ensureWorktree, refExists, revParse } from "../src/git.ts";
 import {
+	TWO_ISSUES,
+	allStatus,
 	calls,
 	cleanupTempDirs,
 	commitFile,
@@ -12,41 +14,22 @@ import {
 	latest,
 	mainSubjects,
 	makeRepo,
+	noMerge,
 	readFile,
 	resetFakeAgentEnv,
+	setScenario,
+	silenceConsole,
 	testConfig,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-beforeEach(() => {
-	if (!process.env.DEBUG_TESTS) {
-		spyOn(console, "log").mockImplementation(() => {});
-		spyOn(console, "error").mockImplementation(() => {});
-	}
-});
+silenceConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
-
-const noMerge = () => testConfig({ pipeline: ["scan", "validate", "plan", "consolidate", "exec"] });
-const TWO_ISSUES = {
-	scan: [
-		{ title: "Critical thing", severity: "CRITICAL" },
-		{ title: "Low thing", severity: "LOW" },
-	],
-};
-const setScenario = (scenario: object) => {
-	process.env.FAKE_AGENT_SCENARIO = JSON.stringify(scenario);
-};
-const allStatus = (repo: string, status: string) =>
-	latest(repo)
-		.loadTasks()
-		.every((t) => t.status === status);
 
 describe("what an agent can and cannot do to the accepted work", () => {
 	it("does not let a renamed protected file through the neverTouch gate", async () => {
@@ -257,11 +240,7 @@ describe("merge: tested before it touches your branch", () => {
 		expect(await go(repo, racing, { only: "merge" })).toBe(false);
 		expect((await mainSubjects(repo))[0]).toBe("user commit during checks");
 		expect(await git(repo, "log", "--merges", "--oneline")).toBe("");
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 
 		// Run again without the race: the work merges on top of the user's commit.
 		writeFile(repo, ".milhouse/work/go2", "");
@@ -388,11 +367,7 @@ describe("worktree preparation, artifacts and a branch that changes under the me
 		expect(await go(repo, switching, { only: "merge" })).toBe(false);
 		expect(await git(repo, "rev-parse", "main")).toBe(await git(repo, "rev-parse", "elsewhere"));
 		expect(await git(repo, "log", "--merges", "--oneline", "elsewhere")).toBe("");
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 
 	it("leaves the user's staged edits alone when the branch moved and the merge cannot be published", async () => {

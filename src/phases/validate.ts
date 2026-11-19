@@ -3,10 +3,10 @@
 import { verifyEvidence } from "../gates.ts";
 import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
 import type { PhaseDef } from "../runner.ts";
+import { arrayOf, object } from "../schema.ts";
 import type { Config, Evidence, Issue, IssueStatus } from "../types.ts";
-import { parseJson } from "../util.ts";
+import { MINUTE, parseJson } from "../util.ts";
 
-const MINUTE = 60_000;
 const VERDICTS = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] as const;
 
 export interface Verdict {
@@ -15,32 +15,21 @@ export interface Verdict {
 	evidence: Evidence[];
 }
 
-export const VALIDATE_SCHEMA = {
-	type: "object",
-	properties: {
-		status: { type: "string", enum: VERDICTS },
-		summary: { type: "string" },
-		corrected_description: { type: "string" },
-		evidence: {
-			type: "array",
-			items: {
-				type: "object",
-				properties: {
-					file: { type: "string" },
-					line_start: { type: "number" },
-					line_end: { type: "number" },
-					snippet: { type: "string" },
-				},
-				required: ["file", "line_start", "line_end", "snippet"],
-				additionalProperties: false,
-			},
-		},
-	},
-	required: ["status", "summary", "corrected_description", "evidence"],
-	additionalProperties: false,
-} as const;
+const VALIDATE_SCHEMA = object({
+	status: { type: "string", enum: VERDICTS },
+	summary: { type: "string" },
+	corrected_description: { type: "string" },
+	evidence: arrayOf(
+		object({
+			file: { type: "string" },
+			line_start: { type: "number" },
+			line_end: { type: "number" },
+			snippet: { type: "string" },
+		}),
+	),
+});
 
-export function validatePrompt(issue: Issue, config: Config, lastError?: string): string {
+function validatePrompt(issue: Issue, config: Config, lastError?: string): string {
 	return prompt(
 		role(
 			"Issue Validator",

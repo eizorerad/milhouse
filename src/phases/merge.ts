@@ -11,7 +11,6 @@ import { runProjectChecks } from "../gates.ts";
 import {
 	acceptCommit,
 	currentBranch,
-	deleteRef,
 	isAncestor,
 	isDirty,
 	mergeInto,
@@ -22,15 +21,9 @@ import {
 } from "../git.ts";
 import type { Outcome } from "../runner.ts";
 import type { RunStore } from "../state.ts";
-import type { Config } from "../types.ts";
+import type { Config, Task } from "../types.ts";
 import { log } from "../ui.ts";
-import { discardWorktree, prepareWorktree } from "../worktree.ts";
-
-/** Remove the run's worktree, and its ref once everything in it is part of the user's branch. */
-export async function cleanupRun(store: RunStore): Promise<void> {
-	await discardWorktree(store);
-	if (await isAncestor(store.workDir, store.ref, "HEAD")) await deleteRef(store.workDir, store.ref);
-}
+import { prepareWorktree } from "../worktree.ts";
 
 /** The commit to publish: the accepted tip itself, or a merge commit that was built and tested first. */
 async function candidate(
@@ -66,26 +59,31 @@ async function candidate(
 	return { sha: await revParse(store.worktree, "HEAD") };
 }
 
-export async function mergePhase(store: RunStore, config: Config): Promise<Outcome<string>[]> {
-	const verified = store.loadTasks().filter((t) => t.status === "verified");
-	if (verified.length === 0) {
-		log.info("merge: no verified work to merge");
-		return [];
-	}
-	const fail = (error: string): Outcome<string>[] => [{ ok: false, error }];
+/** What a merge starts from: where the run started, the branch as it is now, and the accepted tip. */
+interface Ready {
+	baseBranch: string;
+	head: string;
+	tip: string;
+}
+
+/** The accepted work agrees with the run's records, the branch is the right one and its tree clean: or what is wrong. */
+async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | { error: string }> {
 	const repo = store.workDir;
 	const { base_branch: baseBranch } = store.loadMeta();
 
 	if (!(await refExists(repo, store.ref))) {
-		return fail(`The accepted work of this run (${store.ref}) is missing.`);
+		return { error: `The accepted work of this run (${store.ref}) is missing.` };
 	}
 	if ((await currentBranch(repo)) !== baseBranch) {
-		return fail(`Check out "${baseBranch}" (the run started there), then run: milhouse --merge`);
+		return {
+			error: `Check out "${baseBranch}" (the run started there), then run: milhouse --merge`,
+		};
 	}
 	if (await isDirty(repo)) {
-		return fail(
-			"The working tree has uncommitted changes. Commit or stash them, then run: milhouse --merge",
-		);
+		return {
+			error:
+				"The working tree has uncommitted changes. Commit or stash them, then run: milhouse --merge",
+		};
 	}
 
 	const head = await revParse(repo, "HEAD");
@@ -94,42 +92,71 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 	// marked as merged that never was.
 	for (const task of verified) {
 		if (task.sha && !(await isAncestor(repo, task.sha, tip))) {
-			return fail(
-				`${task.id} was accepted as ${task.sha.slice(0, 8)}, but that commit is not part of ${store.ref}: the accepted work does not match the run's records, so nothing was merged.`,
-			);
+			return {
+				error: `${task.id} was accepted as ${task.sha.slice(0, 8)}, but that commit is not part of ${store.ref}: the accepted work does not match the run's records, so nothing was merged.`,
+			};
 		}
 	}
-	let landed = head; // already contains the work when the tip is an ancestor of the branch
-	let how = "";
-	if (!(await isAncestor(repo, tip, head))) {
-		// About to move the user's branch: to a commit that was reviewed, not to one a restored ref points at.
-		const reviewed = new Set(verified.flatMap((t) => (t.sha ? [t.sha] : [])));
-		if (!reviewed.has(tip)) {
-			return fail(
+	return { baseBranch, head, tip };
+}
+
+/** Move the user's branch to a commit that was tested: the tip itself, or a merge commit built and checked first. */
+async function publishTested(
+	store: RunStore,
+	config: Config,
+	verified: Task[],
+	{ baseBranch, head, tip }: Ready,
+): Promise<{ sha: string } | { error: string }> {
+	const repo = store.workDir;
+	// About to move the user's branch: to a commit that was reviewed, not to one a restored ref points at.
+	const reviewed = new Set(verified.flatMap((t) => (t.sha ? [t.sha] : [])));
+	if (!reviewed.has(tip)) {
+		return {
+			error:
 				reviewed.size === 0
 					? `The run has no accepted commit recorded for its verified tasks, so nothing was merged. Inspect ${store.ref}.`
 					: `The accepted tip of this run (${tip.slice(0, 8)}) is none of the commits that were reviewed, so nothing was merged. Inspect ${store.ref}; it was changed outside Milhouse.`,
-			);
-		}
-		const result = await candidate(store, config, head, tip);
-		if ("error" in result) return fail(result.error);
-		// The checks can take minutes: publish only if the branch is exactly where it was when they began.
-		const unchanged =
-			(await currentBranch(repo)) === baseBranch &&
-			(await revParse(repo, "HEAD")) === head &&
-			!(await isDirty(repo));
-		if (!unchanged) {
-			return fail(
-				`"${baseBranch}" changed while the merge was being checked. Nothing was merged and nothing of yours was touched; run: milhouse --merge`,
-			);
-		}
-		const published = await publish(repo, result.sha);
-		if (!published.ok) {
-			return fail(
-				`git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched; fix the cause, then run: milhouse --merge`,
-			);
-		}
-		landed = result.sha;
+		};
+	}
+	const result = await candidate(store, config, head, tip);
+	if ("error" in result) return result;
+	// The checks can take minutes: publish only if the branch is exactly where it was when they began.
+	const unchanged =
+		(await currentBranch(repo)) === baseBranch &&
+		(await revParse(repo, "HEAD")) === head &&
+		!(await isDirty(repo));
+	if (!unchanged) {
+		return {
+			error: `"${baseBranch}" changed while the merge was being checked. Nothing was merged and nothing of yours was touched; run: milhouse --merge`,
+		};
+	}
+	const published = await publish(repo, result.sha);
+	if (!published.ok) {
+		return {
+			error: `git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched; fix the cause, then run: milhouse --merge`,
+		};
+	}
+	return result;
+}
+
+export async function mergePhase(store: RunStore, config: Config): Promise<Outcome<string>[]> {
+	const verified = store.loadTasks().filter((t) => t.status === "verified");
+	if (verified.length === 0) {
+		log.info("merge: no verified work to merge");
+		return [];
+	}
+	const fail = (error: string): Outcome<string>[] => [{ ok: false, error }];
+	const repo = store.workDir;
+
+	const ready = await readyToMerge(store, verified);
+	if ("error" in ready) return fail(ready.error);
+	const { head, tip } = ready;
+	let landed = head; // already contains the work when the tip is an ancestor of the branch
+	let how = "";
+	if (!(await isAncestor(repo, tip, head))) {
+		const published = await publishTested(store, config, verified, ready);
+		if ("error" in published) return fail(published.error);
+		landed = published.sha;
 		how = landed === tip ? "" : " with a merge commit";
 	}
 

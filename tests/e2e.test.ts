@@ -1,10 +1,12 @@
 /** The whole pipeline against a real git repository, with the fake agent standing in for Claude. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { isDirty, refExists } from "../src/git.ts";
-import { acquireLock } from "../src/state.ts";
+import { acquireLock } from "../src/lock.ts";
 import {
+	TWO_ISSUES,
+	allStatus,
 	calls,
 	cleanupTempDirs,
 	commitFile,
@@ -13,25 +15,22 @@ import {
 	latest,
 	mainSubjects,
 	makeRepo,
+	noMerge,
 	readFile,
 	resetFakeAgentEnv,
+	setScenario,
+	silenceConsole,
+	tempDir,
 	testConfig,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-beforeEach(() => {
-	if (!process.env.DEBUG_TESTS) {
-		spyOn(console, "log").mockImplementation(() => {});
-		spyOn(console, "error").mockImplementation(() => {});
-	}
-});
+silenceConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
 
 describe("happy path", () => {
@@ -219,13 +218,7 @@ describe("repair loop", () => {
 
 describe("failures stay contained", () => {
 	it("parks a failed issue, resets the worktree and carries on with the next issue", async () => {
-		const fake = useFakeAgent({
-			scan: [
-				{ title: "Critical thing", severity: "CRITICAL" },
-				{ title: "Low thing", severity: "LOW" },
-			],
-			exec: { "Critical thing": "never-commits" },
-		});
+		const fake = useFakeAgent({ ...TWO_ISSUES, exec: { "Critical thing": "never-commits" } });
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
 
@@ -322,7 +315,7 @@ describe("budget and resume", () => {
 		expect(await go(repo)).toBe(false);
 		expect(latest(repo).loadMeta()).toMatchObject({ status: "failed", done: ["scan"] });
 
-		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
+		setScenario({});
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		expect(calls(fake, "Lead Investigator")).toHaveLength(1);
 		expect(calls(fake, "Issue Validator")).toHaveLength(2);
@@ -333,22 +326,14 @@ describe("budget and resume", () => {
 		const fake = useFakeAgent({ exec: { "Add greeting": "never-commits" } });
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "failed"),
-		).toBe(true);
+		expect(allStatus(repo, "failed")).toBe(true);
 
-		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
+		setScenario({});
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		const executor = calls(fake, "Executor");
 		expect(executor[executor.length - 1].prompt).toContain("The previous attempt failed");
 		expect(executor[executor.length - 1].prompt).toContain("no commit");
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "merged"),
-		).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 		expect(await git(repo, "branch", "--list", "mh-failed/*")).toBe(""); // the stale parked attempt is gone
 	});
 
@@ -390,9 +375,6 @@ describe("single phases", () => {
 });
 
 describe("merge", () => {
-	const noMerge = () =>
-		testConfig({ pipeline: ["scan", "validate", "plan", "consolidate", "exec"] });
-
 	it("leaves verified work on its branch when merge is not in the pipeline, and merges it later", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
@@ -403,11 +385,7 @@ describe("merge", () => {
 		expect(await refExists(repo, store.ref)).toBe(true);
 
 		expect(await go(repo, testConfig(), { only: "merge" })).toBe(true);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "merged"),
-		).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 		expect((await mainSubjects(repo)).length).toBe(3);
 	});
 
@@ -445,6 +423,36 @@ describe("merge", () => {
 		expect(store.loadTasks().every((t) => t.status === "merged")).toBe(true);
 	});
 
+	it("refuses a merge whose checks rewrote a tracked file: what lands is what was tested", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await go(repo, noMerge());
+		const moved = await commitFile(repo, "other.txt", "broken\n", "a commit made meanwhile");
+		const store = latest(repo);
+		const errors: string[] = [];
+		spyOn(console, "error").mockImplementation((...parts) => {
+			errors.push(parts.join(" "));
+		});
+
+		// The linter repairs the file and the test passes only because it did: in the worktree, not in the commit.
+		const fixing = testConfig({
+			commands: { lint: "echo fixed > other.txt", test: "grep -q fixed other.txt" },
+		});
+		expect(await go(repo, fixing, { only: "merge" })).toBe(false);
+		expect(errors.join("\n")).toContain("changed tracked files");
+		expect(await git(repo, "rev-parse", "HEAD")).toBe(moved); // nothing was published
+		expect(await git(repo, "log", "--merges", "--oneline")).toBe("");
+		expect(await isDirty(repo)).toBe(false);
+		expect(store.loadTasks().every((t) => t.status === "verified")).toBe(true);
+		expect(await refExists(repo, store.ref)).toBe(true);
+
+		// Commands that leave the files alone merge the same work.
+		const readOnly = testConfig({ commands: { test: "test -f other.txt" } });
+		expect(await go(repo, readOnly, { only: "merge" })).toBe(true);
+		expect(await git(repo, "log", "--merges", "--oneline")).not.toBe("");
+		expect(readFile(repo, "other.txt")).toBe("broken\n");
+	});
+
 	it("refuses to merge into another branch than the run started on", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
@@ -454,11 +462,7 @@ describe("merge", () => {
 		await expect(go(repo, testConfig(), { resume: true })).rejects.toThrow(/started on "main"/);
 		await git(repo, "checkout", "-q", "main");
 		expect(await mainSubjects(repo)).toEqual(["initial"]);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 
 	it("keeps the verified work when the merge conflicts", async () => {
@@ -471,11 +475,7 @@ describe("merge", () => {
 		expect(await go(repo, testConfig(), { only: "merge" })).toBe(false);
 		expect(await refExists(repo, store.ref)).toBe(true);
 		expect(await isDirty(repo)).toBe(false);
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 });
 
@@ -483,10 +483,10 @@ describe("preflight", () => {
 	it("explains what is wrong before spending anything", async () => {
 		const fake = useFakeAgent({});
 
-		const notRepo = (await import("./helpers.ts")).tempDir();
+		const notRepo = tempDir();
 		await expect(go(notRepo)).rejects.toThrow(/not a git repository/);
 
-		const empty = (await import("./helpers.ts")).tempDir();
+		const empty = tempDir();
 		await git(empty, "init", "-q");
 		await expect(go(empty)).rejects.toThrow(/no commits/);
 

@@ -1,25 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { run } from "../src/proc.ts";
-import { cleanupTempDirs, tempDir } from "./helpers.ts";
+import { alive, cleanupTempDirs, goneWithin, tempDir } from "./helpers.ts";
 
 afterEach(cleanupTempDirs);
-
-const alive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
-};
-
-async function goneWithin(pid: number, ms: number): Promise<boolean> {
-	for (let waited = 0; waited < ms; waited += 25) {
-		if (!alive(pid)) return true;
-		await Bun.sleep(25);
-	}
-	return !alive(pid);
-}
 
 describe("run", () => {
 	it("captures output and the exit code", async () => {

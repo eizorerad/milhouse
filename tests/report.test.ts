@@ -2,36 +2,18 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { formatReport, generateReport } from "../src/report.ts";
 import { RunStore } from "../src/state.ts";
 import type { Issue, Task } from "../src/types.ts";
-import { cleanupTempDirs, tempDir } from "./helpers.ts";
+import { BASE, cleanupTempDirs, makeIssue, makeTask, tempDir } from "./helpers.ts";
 
 afterEach(cleanupTempDirs);
 
-const issue = (id: string, over: Partial<Issue> = {}): Issue => ({
-	id,
-	type: "bug",
-	title: `Title of ${id}`,
-	rationale: "r",
-	severity: "HIGH",
-	status: "CONFIRMED",
-	evidence: [],
-	...over,
-});
-
-const task = (id: string, issue_id: string, over: Partial<Task> = {}): Task => ({
-	id,
-	issue_id,
-	title: id,
-	description: "",
-	files: [],
-	depends_on: [],
-	checks: [],
-	acceptance: [],
-	status: "merged",
-	...over,
-});
+/** Issues titled "Title of <id>"; tasks that are merged unless a test says otherwise. */
+const issue = (id: string, over: Partial<Issue> = {}) =>
+	makeIssue(id, { title: `Title of ${id}`, ...over });
+const task = (id: string, issue_id: string, over: Partial<Task> = {}) =>
+	makeTask(id, { issue_id, status: "merged", ...over });
 
 function sampleStore(): RunStore {
-	const store = RunStore.create(tempDir(), "fix auth", { branch: "main", sha: "abc" });
+	const store = RunStore.create(tempDir(), "fix auth", BASE);
 	store.saveIssues([
 		issue("P1"),
 		issue("P2", { status: "FALSE", severity: "LOW" }),
@@ -61,7 +43,7 @@ describe("generateReport", () => {
 	});
 
 	it("handles a run with no issues at all", () => {
-		const store = RunStore.create(tempDir(), undefined, { branch: "main", sha: "abc" });
+		const store = RunStore.create(tempDir(), undefined, BASE);
 		const report = generateReport(store);
 		expect(report.issues.total).toBe(0);
 		expect(formatReport(report, "terminal")).toContain("0 found: none");

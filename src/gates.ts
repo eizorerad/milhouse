@@ -5,9 +5,9 @@ import { resolve, sep } from "node:path";
 import { type AddedLine, gitOrThrow, revParse, withoutGitRouting } from "./git.ts";
 import { run } from "./proc.ts";
 import type { Config, Evidence } from "./types.ts";
-import { tail } from "./util.ts";
+import { MINUTE, tail } from "./util.ts";
 
-export const COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+export const COMMAND_TIMEOUT_MS = 10 * MINUTE;
 
 /** Files that match one of the `neverTouch` globs. A trailing "/" means "everything below". */
 export function forbiddenFiles(files: string[], patterns: string[]): string[] {
@@ -41,16 +41,15 @@ export function findPlaceholders(added: AddedLine[]): string[] {
 }
 
 /**
- * Run shell commands one after another. Returns a description of the first failure, or null.
- * `reap`: stop what a command left running (a watcher, a server) when it has finished.
+ * Run shell commands (label -> command) one after another, in the order given. Returns a description of the
+ * first failure, or null. `reap`: stop what a command left running (a watcher, a server) when it has finished.
  */
 export async function runChecks(
-	commands: Array<[label: string, command: string]>,
 	cwd: string,
-	timeoutMs = COMMAND_TIMEOUT_MS,
-	reap = true,
+	commands: Record<string, string>,
+	{ timeoutMs = COMMAND_TIMEOUT_MS, reap = true }: { timeoutMs?: number; reap?: boolean } = {},
 ): Promise<string | null> {
-	for (const [label, command] of commands) {
+	for (const [label, command] of Object.entries(commands)) {
 		if (!command.trim()) continue;
 		const result = await run(command, [], {
 			cwd,
@@ -79,14 +78,8 @@ export async function runProjectChecks(
 	commands: Config["commands"],
 ): Promise<string | null> {
 	const before = await revParse(dir, "HEAD");
-	const failure = await runChecks(
-		[
-			["build", commands.build],
-			["lint", commands.lint],
-			["test", commands.test],
-		],
-		dir,
-	);
+	const { build, lint, test } = commands;
+	const failure = await runChecks(dir, { build, lint, test });
 	await gitOrThrow(dir, "clean", "-fd"); // what the commands generated: the tree was clean before them
 	if (failure) return failure;
 	if ((await revParse(dir, "HEAD")) !== before) {

@@ -1,19 +1,17 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { CONFIG_TEMPLATE, ConfigError, DEFAULTS, deepMerge, loadConfig } from "../src/config.ts";
-import { cleanupTempDirs, tempDir } from "./helpers.ts";
+import {
+	CONFIG_TEMPLATE,
+	ConfigError,
+	DEFAULTS,
+	agentSteps,
+	deepMerge,
+	loadConfig,
+	stepHarness,
+	stepModel,
+} from "../src/config.ts";
+import { cleanupTempDirs, projectWith, testConfig } from "./helpers.ts";
 
 afterEach(cleanupTempDirs);
-
-function projectWith(configSource?: string): string {
-	const dir = tempDir();
-	if (configSource !== undefined) {
-		mkdirSync(join(dir, ".milhouse"));
-		writeFileSync(join(dir, ".milhouse", "config.ts"), configSource);
-	}
-	return dir;
-}
 
 describe("loadConfig", () => {
 	it("returns the defaults without a config file", async () => {
@@ -189,5 +187,35 @@ describe("deepMerge", () => {
 		const merged = deepMerge(base, { a: { c: [2, 3] } }, { d: undefined });
 		expect(merged).toEqual({ a: { b: 1, c: [2, 3] }, d: 1 });
 		expect(base).toEqual({ a: { b: 1, c: [1] }, d: 1 });
+	});
+});
+
+describe("choosing the harness and the model of a step", () => {
+	it("falls back to the global harness, and to that harness's default model", () => {
+		const claudeRun = testConfig();
+		expect(stepHarness(claudeRun, "scan")).toBe("claude");
+		expect(stepModel(claudeRun, "scan")).toBe("sonnet");
+		const codexRun = testConfig({ harness: "codex" });
+		expect(stepHarness(codexRun, "exec")).toBe("codex");
+		expect(stepModel(codexRun, "exec")).toBe(""); // Codex's own default
+		expect(stepModel(testConfig({ harness: "codex", model: "gpt-x" }), "exec")).toBe("gpt-x");
+	});
+
+	it("never hands the global model to a step on the other harness", () => {
+		const config = testConfig({ model: "opus", phases: { verify: { harness: "codex" } } });
+		expect(stepModel(config, "exec")).toBe("opus");
+		expect(stepModel(config, "verify")).toBe("");
+		const named = testConfig({
+			model: "opus",
+			phases: { verify: { harness: "codex", model: "gpt-x" } },
+		});
+		expect(stepModel(named, "verify")).toBe("gpt-x");
+	});
+
+	it("lists the steps that will call an agent: the reviewer only with the definition of done", () => {
+		const config = testConfig();
+		expect(agentSteps(config, ["scan", "exec", "merge"])).toEqual(["scan", "exec", "verify"]);
+		expect(agentSteps(config, ["merge"])).toEqual([]);
+		expect(agentSteps(testConfig({ gates: { dod: false } }), ["exec"])).toEqual(["exec"]);
 	});
 });

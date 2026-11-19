@@ -1,52 +1,36 @@
 /** Things that go wrong around the pipeline in real use: the user's checkout, git settings, odd agents. */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { stripVTControlCharacters } from "node:util";
 import { ensureWorktree, refExists, revParse } from "../src/git.ts";
 import { prepareWorktree } from "../src/worktree.ts";
 import {
+	TWO_ISSUES,
+	allStatus,
 	calls,
+	captureConsole,
 	cleanupTempDirs,
 	git,
 	go,
 	latest,
 	makeRepo,
+	noMerge,
 	readFile,
 	resetFakeAgentEnv,
+	setScenario,
 	tempDir,
 	testConfig,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-let output: string[] = [];
-
-beforeEach(() => {
-	output = [];
-	const collect = (...args: unknown[]) =>
-		void output.push(stripVTControlCharacters(args.join(" ")));
-	spyOn(console, "log").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
-	spyOn(console, "error").mockImplementation(process.env.DEBUG_TESTS ? console.info : collect);
-});
+const output = captureConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
 	resetFakeAgentEnv();
-	spyOn(console, "log").mockRestore();
-	spyOn(console, "error").mockRestore();
 });
-
-const PHASES_BEFORE_MERGE = ["scan", "validate", "plan", "consolidate", "exec"] as const;
-const noMerge = (over: Record<string, unknown> = {}) =>
-	testConfig({ pipeline: [...PHASES_BEFORE_MERGE], ...over });
-const TWO_ISSUES = {
-	scan: [
-		{ title: "Critical thing", severity: "CRITICAL" },
-		{ title: "Low thing", severity: "LOW" },
-	],
-};
 
 describe("the user's checkout while a run is under way", () => {
 	it("still merges when an editor or the OS created files meanwhile", async () => {
@@ -76,11 +60,7 @@ describe("the user's checkout while a run is under way", () => {
 		expect(readFile(repo, `${task.id}.txt`)).toBe("my local copy");
 		expect(await revParse(repo, "HEAD")).toBe(before);
 		expect(await refExists(repo, latest(repo).ref)).toBe(true); // the work is still waiting
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "verified"),
-		).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
 	});
 
 	it("refuses to merge work that the run's records and its ref disagree about", async () => {
@@ -215,7 +195,7 @@ describe("what the pipeline tells you", () => {
 		expect(await go(repo)).toBe(true);
 		expect(output.join("\n")).toContain("No build, lint or test command");
 
-		output = [];
+		output.length = 0;
 		const repo2 = await makeRepo();
 		expect(await go(repo2, testConfig({ commands: { test: "true" } }))).toBe(true);
 		expect(output.join("\n")).not.toContain("No build, lint or test command");
@@ -325,7 +305,7 @@ describe("what exec may build on", () => {
 		const [task] = latest(repo).loadTasks();
 		expect(readFile(repo, ".milhouse/work/setup-seen")).not.toContain(task.id);
 
-		process.env.FAKE_AGENT_SCENARIO = JSON.stringify({});
+		setScenario({});
 		expect(await go(repo, config, { resume: true })).toBe(true);
 		expect(readFile(repo, ".milhouse/work/setup-seen")).toContain(task.id);
 	});
@@ -349,11 +329,7 @@ describe("what agents and checks do to the worktree", () => {
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
 		expect(calls(fake, "Executor")[1].prompt).toContain(".milhouse/config.ts");
-		expect(
-			latest(repo)
-				.loadTasks()
-				.every((t) => t.status === "failed"),
-		).toBe(true);
+		expect(allStatus(repo, "failed")).toBe(true);
 	});
 
 	it("is not fooled by status.showUntrackedFiles=no: a leftover file is still sent back", async () => {
