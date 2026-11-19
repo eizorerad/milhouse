@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { RunStore, acquireLock } from "../src/state.ts";
 import type { Issue, Task } from "../src/types.ts";
@@ -144,6 +151,15 @@ describe("acquireLock", () => {
 		expect(() => acquireLock(dir)).toThrow(/Another milhouse is running/);
 		release();
 		acquireLock(dir)();
+	});
+
+	it("never shows a lock without its owner, and leaves no temporary file behind", () => {
+		const dir = tempDir();
+		const release = acquireLock(dir);
+		expect(readFileSync(join(dir, ".milhouse", "lock"), "utf-8")).toBe(String(process.pid));
+		expect(readdirSync(join(dir, ".milhouse"))).toEqual(["lock"]);
+		release();
+		expect(readdirSync(join(dir, ".milhouse"))).toEqual([]);
 	});
 
 	it("takes over a stale lock left by a dead process", () => {

@@ -271,11 +271,12 @@ describe("runPhase edge cases", () => {
 });
 
 describe("fixes found by the final review", () => {
-	it("treats a timed-out check as a failure even when the shell itself exited 0", async () => {
+	it("judges a check by its own exit, not by a background process that keeps its pipes open", async () => {
 		const dir = tempDir();
-		// The shell exits at once; the background child keeps the output pipe open until it is killed.
-		const failure = await runChecks([["test", "sleep 30 & exit 0"]], dir, 300);
-		expect(failure).toContain("timed out");
+		const started = Date.now();
+		// The shell exits 0 at once; the background child is stopped, and does not turn the pass into a timeout.
+		expect(await runChecks([["test", "sleep 30 & exit 0"]], dir, 5_000)).toBeNull();
+		expect(Date.now() - started).toBeLessThan(4_000);
 	});
 
 	it("still finds added lines when the user's git config adds diff context", async () => {

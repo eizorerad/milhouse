@@ -138,7 +138,7 @@ export async function isAncestor(
  * merge, and git itself refuses to overwrite an untracked file.
  */
 export async function isDirty(cwd: string, opts: { untracked?: boolean } = {}): Promise<boolean> {
-	const status = await git(
+	const status = await gitOrThrow(
 		cwd,
 		"status",
 		"--porcelain",
@@ -147,7 +147,7 @@ export async function isDirty(cwd: string, opts: { untracked?: boolean } = {}): 
 		".",
 		":(exclude).milhouse",
 	);
-	return status.out.length > 0;
+	return status.length > 0;
 }
 
 // ─── History between two commits ─────────────────────────────────────
@@ -286,7 +286,12 @@ export async function deleteRef(repo: string, ref: string): Promise<void> {
  * a clean worktree is parked exactly as it is, so the branch can be resumed and accepted as is.
  * Throws when the attempt could not be kept: the caller must not discard the worktree then.
  */
-export async function parkWorktree(repo: string, path: string, parkBranch: string): Promise<void> {
+export async function parkWorktree(
+	repo: string,
+	path: string,
+	parkBranch: string,
+	accepted?: string,
+): Promise<void> {
 	const cannotKeep = (why: string) => new Error(`The failed attempt could not be kept: ${why}`);
 	// All of it: a user's status.showUntrackedFiles=no would hide new files, and the attempt would be dropped.
 	const status = await git(path, "status", "--porcelain", "--untracked-files=all");
@@ -308,12 +313,20 @@ export async function parkWorktree(repo: string, path: string, parkBranch: strin
 	}
 	const head = await git(path, "rev-parse", "HEAD");
 	if (!head.ok) throw cannotKeep(head.err);
+	// An attempt that produced nothing (the agent could not even run) must not replace an earlier one.
+	if (!status.out && head.out === accepted) return;
 	const parked = await git(repo, "branch", "-f", parkBranch, head.out);
 	if (!parked.ok) throw cannotKeep(parked.err);
 }
 
 export async function deleteBranch(repo: string, branch: string): Promise<void> {
 	await git(repo, "branch", "-D", branch);
+}
+
+/** A killed git leaves `index.lock` behind, and every later git command in that worktree would fail on it. */
+export async function clearIndexLock(cwd: string): Promise<void> {
+	const gitDir = await git(cwd, "rev-parse", "--absolute-git-dir");
+	if (gitDir.ok) rmSync(join(gitDir.out, "index.lock"), { force: true });
 }
 
 export async function removeWorktree(repo: string, path: string): Promise<void> {

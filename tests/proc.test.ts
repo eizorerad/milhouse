@@ -51,6 +51,20 @@ describe("run", () => {
 		}
 	});
 
+	it("does not call a command that already finished a timeout while its pipes drain", async () => {
+		const out = await run("sleep 30 & echo $!", [], {
+			cwd: tempDir(),
+			shell: true,
+			timeoutMs: 400,
+		});
+		try {
+			expect(out.code).toBe(0);
+			expect(out.timedOut).toBe(false);
+		} finally {
+			process.kill(Number(out.stdout.trim()), "SIGKILL");
+		}
+	});
+
 	it("can stop what an agent left running after it finished", async () => {
 		const out = await run("sleep 30 & echo $!", [], { cwd: tempDir(), shell: true, reap: true });
 		const straggler = Number(out.stdout.trim());

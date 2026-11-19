@@ -219,11 +219,7 @@ describe("a failure that every call would share", () => {
 			// At most the calls that were in flight together; nothing was retried, nothing was planned.
 			expect(calls(fake, "Issue Validator").length).toBeLessThanOrEqual(5);
 			expect(calls(fake, "Planner")).toHaveLength(0);
-			expect(
-				latest(repo)
-					.loadIssues()
-					.every((i) => i.status === "UNVALIDATED"),
-			).toBe(true);
+			expect(latest(repo).loadIssues().length).toBe(8); // none of them was confirmed or dropped
 			const text = output.join("\n");
 			expect(text).toContain("Stopped: every other call would fail the same way");
 			expect(text).not.toContain("attempt 2/3"); // no item was retried

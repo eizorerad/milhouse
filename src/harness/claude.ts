@@ -1,7 +1,13 @@
 /** Claude Code: one `claude -p` process per call. It reports its own cost in USD. */
 
 import { extractJson, tail } from "../util.ts";
-import { type AgentOptions, type AgentResult, EngineError, type Harness } from "./types.ts";
+import {
+	type AgentOptions,
+	type AgentResult,
+	EngineError,
+	type Harness,
+	USAGE_ERROR,
+} from "./types.ts";
 
 /** Logged out, out of credit or out of quota: no other call will do better. */
 const SYSTEMIC =
@@ -66,6 +72,7 @@ export const claude: Harness = {
 		if (!result) {
 			throw new EngineError(
 				`claude exited with ${out.code} and no result. ${tail(out.stderr, 500)}`,
+				{ systemic: USAGE_ERROR.test(out.stderr) || SYSTEMIC.test(out.stderr) },
 			);
 		}
 		const costUsd = typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0;

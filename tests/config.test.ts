@@ -104,6 +104,24 @@ describe("loadConfig", () => {
 		expect(error.message).not.toContain("--verbose");
 		expect(error.message).not.toContain('"-p"'); // a profile for Codex; for Claude -p is the print mode
 
+		const models = projectWith(
+			'export default { harnessArgs: { claude: ["--model", "x"], codex: ["-m", "x", "--model=y"] } };',
+		);
+		const modelError = (await loadConfig(models).catch((e) => e)).message;
+		expect(modelError).toContain('harnessArgs.claude: "--model"');
+		expect(modelError).toContain('harnessArgs.codex: "-m"');
+		expect(modelError).toContain('harnessArgs.codex: "--model"');
+
+		const attached = projectWith(
+			'export default { harnessArgs: { claude: ["-pfoo"], codex: ["-oanswer.txt", "-sworkspace-write", "--", "-pprofile"] } };',
+		);
+		const attachedError = (await loadConfig(attached).catch((e) => e)).message;
+		expect(attachedError).toContain('harnessArgs.claude: "-p"');
+		expect(attachedError).toContain('harnessArgs.codex: "-o"');
+		expect(attachedError).toContain('harnessArgs.codex: "-s"');
+		expect(attachedError).toContain('harnessArgs.codex: "--"');
+		expect(attachedError.match(/harnessArgs\.codex: "-p"/)).toBeNull();
+
 		const claudePrint = projectWith(`export default { harnessArgs: { claude: ["-p"] } };`);
 		expect((await loadConfig(claudePrint).catch((e) => e)).message).toContain(
 			'harnessArgs.claude: "-p"',

@@ -182,6 +182,50 @@ describe("what exec may build on", () => {
 		expect(await go(repo, testConfig({ pipeline: ["scan"] }))).toBe(true); // reading is fine
 	});
 
+	it("also refuses when an earlier phase reads the checkout again: a resumed run that still has to validate", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo, testConfig({ pipeline: ["scan"] }))).toBe(true);
+		writeFile(repo, "wip.ts", "export const wip = 1;\n");
+		await expect(go(repo, testConfig(), { resume: true })).rejects.toThrow(/untracked/);
+		expect(calls(fake, "Issue Validator")).toHaveLength(0);
+	});
+
+	it("will not carry on from a ref that moved ahead of every commit that was accepted", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo, noMerge())).toBe(true);
+		const store = latest(repo);
+		const tip = await revParse(repo, store.ref);
+		const tree = await git(repo, "rev-parse", `${tip}^{tree}`);
+		await git(
+			repo,
+			"update-ref",
+			store.ref,
+			await git(repo, "commit-tree", tree, "-p", tip, "-m", "x"),
+		);
+
+		const problem = await prepareWorktree(store, testConfig());
+		expect(problem).toContain("setup failed");
+		expect(problem).toContain("outside Milhouse");
+		// ... but a tip that is already part of the user's branch is nothing to worry about
+		await git(repo, "update-ref", store.ref, await revParse(repo, "HEAD"));
+		expect(await prepareWorktree(store, testConfig())).toBeNull();
+	});
+
+	it("will not publish when the run recorded no accepted commit at all", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo, noMerge())).toBe(true);
+		const store = latest(repo);
+		store.updateTasks(
+			store.loadTasks().map((t) => t.id),
+			{ sha: undefined },
+		);
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(false);
+		expect(output.join("\n")).toContain("no accepted commit");
+	});
+
 	it("will not publish a ref that moved ahead of every commit that was reviewed", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();

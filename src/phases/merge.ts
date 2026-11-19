@@ -53,6 +53,9 @@ async function candidate(
 		};
 	}
 	if (config.gates.dod) {
+		// The branch may have changed what has to be installed (a lockfile): check what a fresh install gives.
+		const failedSetup = await prepareWorktree(store, config, { setupAgain: true });
+		if (failedSetup) return { error: `The merged work could not be set up:\n${failedSetup}` };
 		const failure = await runProjectChecks(store.worktree, config.commands);
 		if (failure) {
 			return {
@@ -101,9 +104,11 @@ export async function mergePhase(store: RunStore, config: Config): Promise<Outco
 	if (!(await isAncestor(repo, tip, head))) {
 		// About to move the user's branch: to a commit that was reviewed, not to one a restored ref points at.
 		const reviewed = new Set(verified.flatMap((t) => (t.sha ? [t.sha] : [])));
-		if (reviewed.size > 0 && !reviewed.has(tip)) {
+		if (!reviewed.has(tip)) {
 			return fail(
-				`The accepted tip of this run (${tip.slice(0, 8)}) is none of the commits that were reviewed, so nothing was merged. Inspect ${store.ref}; it was changed outside Milhouse.`,
+				reviewed.size === 0
+					? `The run has no accepted commit recorded for its verified tasks, so nothing was merged. Inspect ${store.ref}.`
+					: `The accepted tip of this run (${tip.slice(0, 8)}) is none of the commits that were reviewed, so nothing was merged. Inspect ${store.ref}; it was changed outside Milhouse.`,
 			);
 		}
 		const result = await candidate(store, config, head, tip);

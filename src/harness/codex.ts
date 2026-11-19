@@ -7,7 +7,13 @@
  */
 
 import { tail } from "../util.ts";
-import { type AgentOptions, type AgentResult, EngineError, type Harness } from "./types.ts";
+import {
+	type AgentOptions,
+	type AgentResult,
+	EngineError,
+	type Harness,
+	USAGE_ERROR,
+} from "./types.ts";
 
 /** A bad login, an unknown model or deployment, a spent quota: the same for every call. */
 const SYSTEMIC =
@@ -77,7 +83,9 @@ export const codex: Harness = {
 			];
 			const reason = reasons.find((r) => typeof r === "string" && r !== "");
 			const detail = typeof reason === "string" ? reason : `exit code ${out.code}, no result`;
-			throw new EngineError(`codex failed: ${detail}`, { systemic: SYSTEMIC.test(detail) });
+			throw new EngineError(`codex failed: ${detail}`, {
+				systemic: SYSTEMIC.test(detail) || (stream.length === 0 && USAGE_ERROR.test(detail)),
+			});
 		}
 		const answer = stream.findLast(
 			(e) => e.type === "item.completed" && e.item?.type === "agent_message",

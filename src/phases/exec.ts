@@ -19,6 +19,7 @@ import {
 	acceptCommit,
 	addedLines,
 	branchExists,
+	clearIndexLock,
 	commitSubjects,
 	deleteBranch,
 	diffPatch,
@@ -255,6 +256,8 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 					timeoutMs: 30 * MINUTE,
 				});
 			} catch (err) {
+				// The agent was killed or crashed, perhaps in the middle of a commit.
+				if (err instanceof EngineError) await clearIndexLock(work.dir);
 				if (err instanceof EngineError && err.systemic) {
 					throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, { systemic: true });
 				}
@@ -283,7 +286,12 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		}
 		if (existsSync(store.worktree)) {
 			try {
-				await parkWorktree(store.workDir, store.worktree, parkBranch(group.issue.id));
+				await parkWorktree(
+					store.workDir,
+					store.worktree,
+					parkBranch(group.issue.id),
+					await revParse(store.workDir, store.ref),
+				);
 			} catch (err) {
 				// What is in the worktree is the only copy of the attempt: leave it alone, and stop everything.
 				throw new Error(

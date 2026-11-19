@@ -103,6 +103,8 @@ const RESERVED_ARGS: Record<HarnessName, string[]> = {
 		"--no-session-persistence",
 		"--max-turns",
 		"--max-budget-usd",
+		"--model", // set `model` instead
+		"--", // everything after it would be read as the prompt
 	],
 	codex: [
 		"--json",
@@ -118,6 +120,9 @@ const RESERVED_ARGS: Record<HarnessName, string[]> = {
 		"--output-last-message",
 		"--output-schema",
 		"--add-dir",
+		"-m", // Codex refuses an option that is given twice: set `model` instead
+		"--model",
+		"--",
 	],
 };
 
@@ -152,8 +157,9 @@ function validate(config: Config): void {
 		if (!known(config.harness)) errors.push(`harness must be one of ${HARNESS_NAMES.join(", ")}`);
 		for (const name of HARNESS_NAMES) {
 			for (const arg of config.harnessArgs[name]) {
-				const option = arg.split("=")[0];
-				if (RESERVED_ARGS[name].includes(option)) {
+				// --name=value is the option --name, and -xvalue is the option -x
+				const option = arg.startsWith("--") ? arg.split("=")[0] : arg.slice(0, 2);
+				if (arg.startsWith("-") && RESERVED_ARGS[name].includes(option)) {
 					errors.push(`harnessArgs.${name}: "${option}" is set by Milhouse and cannot be changed`);
 				}
 			}

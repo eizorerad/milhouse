@@ -2,6 +2,7 @@
 
 import {
 	existsSync,
+	linkSync,
 	mkdirSync,
 	readFileSync,
 	readdirSync,
@@ -228,6 +229,24 @@ function isAlive(pid: number): boolean {
 /** A takeover that has been going on this long was abandoned by a crashed starter. */
 const STALE_TAKEOVER_MS = 10_000;
 
+/**
+ * Create the lock file with its owner already inside it: written whole to a file of its own, then linked
+ * into place. Creating it empty and writing afterwards would let a second starter see a lock without an
+ * owner, take it for a dead one's and clear it. Throws EEXIST when somebody holds the lock.
+ */
+function createLock(path: string): void {
+	const mine = `${path}.${process.pid}.tmp`;
+	writeFileSync(mine, String(process.pid));
+	try {
+		linkSync(mine, path);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "EEXIST") throw err;
+		writeFileSync(path, String(process.pid), { flag: "wx" }); // a filesystem without hard links
+	} finally {
+		rmSync(mine, { force: true });
+	}
+}
+
 /** One milhouse per repository at a time. Returns the release function (also runs on exit). */
 export function acquireLock(workDir: string): () => void {
 	const path = join(workDir, STATE_DIR, "lock");
@@ -236,7 +255,7 @@ export function acquireLock(workDir: string): () => void {
 
 	for (let attempt = 0; attempt < 50; attempt++) {
 		try {
-			writeFileSync(path, String(process.pid), { flag: "wx" });
+			createLock(path);
 			const release = () => {
 				process.off("exit", release);
 				rmSync(path, { force: true });

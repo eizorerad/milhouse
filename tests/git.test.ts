@@ -5,6 +5,7 @@ import {
 	acceptCommit,
 	addedLines,
 	branchExists,
+	clearIndexLock,
 	commitSubjects,
 	currentBranch,
 	deleteRef,
@@ -316,6 +317,20 @@ describe("the run worktree", () => {
 		expect(await git(repo, "show", "mh-failed/P1:only-new.txt")).toBe("the only copy");
 	});
 
+	it("does not overwrite an earlier parked attempt with an attempt that produced nothing", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const path = join(repo, ".milhouse", "work", "r1");
+		await ensureWorktree(repo, path, REF, base);
+		const attempt = await commitFile(path, "attempt.txt", "a", "[T1] the first attempt");
+		await parkWorktree(repo, path, "mh-failed/P1", base);
+		expect(await revParse(repo, "mh-failed/P1")).toBe(attempt);
+
+		await resetWorktree(path, REF); // the next attempt starts from the accepted state ...
+		await parkWorktree(repo, path, "mh-failed/P1", base); // ... and gets nowhere (the agent could not run)
+		expect(await revParse(repo, "mh-failed/P1")).toBe(attempt); // the first one is still there
+	});
+
 	it("parks a clean worktree as it is, without adding a wip commit", async () => {
 		const repo = await makeRepo();
 		const path = join(repo, ".milhouse", "work", "r1");
@@ -343,6 +358,20 @@ describe("the run worktree", () => {
 		writeFile(path, "unsaved.txt", "unsaved");
 		await expect(parkWorktree(repo, path, "bad..name")).rejects.toThrow(/could not be kept/);
 		expect(readFile(path, "unsaved.txt")).toBe("unsaved"); // nothing was reset
+	});
+
+	it("clears the index.lock that a killed git leaves behind, which would fail every later command", async () => {
+		const repo = await makeRepo();
+		const path = join(repo, ".milhouse", "work", "r1");
+		await ensureWorktree(repo, path, REF, await revParse(repo, "HEAD"));
+		const gitDir = await git(path, "rev-parse", "--absolute-git-dir");
+		writeFileSync(join(gitDir, "index.lock"), "");
+		writeFile(path, "new.txt", "x");
+		await expect(git(path, "add", "-A")).rejects.toThrow(/index\.lock/);
+
+		await clearIndexLock(path);
+		await git(path, "add", "-A"); // works again
+		await clearIndexLock(path); // and clearing nothing is fine
 	});
 
 	it("refuses to delete a worktree that git has locked", async () => {

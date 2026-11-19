@@ -16,7 +16,7 @@ export interface AgentOptions {
 	tools: "read" | "all";
 	/** Cap for this single call in USD. Claude only: Codex does not report a cost. */
 	maxBudgetUsd?: number;
-	/** From the config. They go first, so Milhouse's own arguments win where both set the same option. */
+	/** From the config (options that Milhouse sets itself are rejected there). They go first. */
 	extraArgs?: string[];
 }
 
@@ -36,6 +36,10 @@ export interface EngineErrorOptions {
 	/** Neither can any other call: the login, the model or the quota is the problem. The phase stops. */
 	systemic?: boolean;
 }
+
+/** What a CLI says when it rejects its command line: the same for every call, retrying cannot help. */
+export const USAGE_ERROR =
+	/unexpected argument|unknown option|unrecognized (?:option|argument)|cannot be used multiple times|unknown argument/i;
 
 export class EngineError extends Error {
 	readonly costUsd: number;

@@ -92,7 +92,8 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		// A full resume skips finished phases; an explicitly requested phase always runs.
 		const todo =
 			opts.only || !opts.resume ? wanted : wanted.filter((phase) => !done.includes(phase));
-		if (!existing && todo.includes("exec") && (await isDirty(workDir, { untracked: true }))) {
+		const readsCheckout = todo.some((p) => p === "scan" || p === "validate" || p === "plan");
+		if (todo.includes("exec") && readsCheckout && (await isDirty(workDir, { untracked: true }))) {
 			// Scan and validate would read these files; exec starts from the last commit and would not have them.
 			throw new Error(
 				"The working tree has untracked files, which exec would not see (it starts from the last commit). Commit them, add them to .gitignore, or stash them: git stash -u",

@@ -43,7 +43,7 @@ class Tail {
 		this.size += chunk.length;
 		if (this.size > this.limit * 2) {
 			const all = Buffer.concat(this.chunks);
-			this.chunks = [all.subarray(all.length - this.limit)];
+			this.chunks = [Buffer.from(all.subarray(all.length - this.limit))]; // a copy: a view keeps `all` alive
 			this.size = this.limit;
 			this.truncated = true;
 		}
@@ -136,6 +136,7 @@ export function run(file: string, args: string[], opts: RunOptions): Promise<Run
 		// "close" waits until every holder of the pipes is gone, "exit" does not: a command that started a
 		// background server has finished when it exits.
 		child.on("exit", (code) => {
+			clearTimeout(timer); // it finished in time: draining its pipes must not turn that into a timeout
 			drain = setTimeout(() => finish(code), DRAIN_MS);
 		});
 		child.on("close", (code) => finish(code));

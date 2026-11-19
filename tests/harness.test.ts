@@ -235,6 +235,56 @@ describe("reading Codex's event stream", () => {
 	});
 });
 
+describe("a command line the CLI rejects", () => {
+	it("is the same for every call, so it stops the phase instead of failing each item three times", () => {
+		const cases: Array<[string, () => unknown]> = [
+			[
+				"codex repeated flag",
+				() =>
+					codex.parse(
+						out(
+							"",
+							2,
+							"error: the argument '--sandbox <SANDBOX_MODE>' cannot be used multiple times",
+						),
+						opts(),
+					),
+			],
+			[
+				"codex unknown flag",
+				() => codex.parse(out("", 2, "error: unexpected argument '--bogus' found"), opts()),
+			],
+			[
+				"claude unknown flag",
+				() => claude.parse(out("", 1, "error: unknown option '--bogus'"), opts()),
+			],
+			[
+				"claude logged out, said on stderr only",
+				() => claude.parse(out("", 1, "Not logged in \u00b7 Please run /login"), opts()),
+			],
+		];
+		for (const [name, parse] of cases) {
+			let error: EngineError | undefined;
+			try {
+				parse();
+			} catch (err) {
+				error = err as EngineError;
+			}
+			expect([name, error?.systemic]).toEqual([name, true]);
+		}
+	});
+
+	it("is not confused with an ordinary failure that printed nothing", () => {
+		let error: EngineError | undefined;
+		try {
+			codex.parse(out("", 1, "killed"), opts());
+		} catch (err) {
+			error = err as EngineError;
+		}
+		expect(error?.systemic).toBe(false);
+	});
+});
+
 describe("reading Claude's result", () => {
 	const result = (over: object) =>
 		JSON.stringify({
