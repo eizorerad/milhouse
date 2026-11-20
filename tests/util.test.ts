@@ -22,6 +22,13 @@ describe("extractJson", () => {
 		expect(extractJson(text)).toBe('{"status": "CONFIRMED"}');
 	});
 
+	it("is not fooled by brackets in the prose before or after the JSON", () => {
+		const before = 'I checked item [0] and the {} case. Result:\n{"items": [{"title": "x"}]}';
+		expect(JSON.parse(extractJson(before) as string)).toEqual({ items: [{ title: "x" }] });
+		const after = '{"ok": true, "list": [1, 2, 3]} (see [1])';
+		expect(extractJson(after)).toBe('{"ok": true, "list": [1, 2, 3]}');
+	});
+
 	it("handles escaped quotes", () => {
 		expect(JSON.parse(extractJson('{"a": "say \\"hi\\" }"}') as string).a).toBe('say "hi" }');
 	});

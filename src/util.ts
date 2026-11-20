@@ -67,24 +67,41 @@ function closingIndex(text: string, start: number): number {
 	return -1;
 }
 
-/** First parseable JSON object or array in free-form model output (fenced or not). */
+const OPENING_BRACKET = /[[{]/g;
+
+/** Index of the first `[` or `{` at or after `from`, or -1. */
+function nextOpening(text: string, from: number): number {
+	OPENING_BRACKET.lastIndex = from;
+	return OPENING_BRACKET.exec(text)?.index ?? -1;
+}
+
+function isJson(text: string): boolean {
+	try {
+		JSON.parse(text);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The largest JSON object or array in free-form model output (fenced or not). The answer is the largest:
+ * the prose around it may hold brackets of its own, such as `[0]` or `{}`.
+ */
 export function extractJson(text: string): string | null {
-	let start = text.search(/[[{]/);
+	let best: string | null = null;
+	let start = nextOpening(text, 0);
 	while (start !== -1) {
 		const end = closingIndex(text, start);
-		if (end !== -1) {
-			const candidate = text.slice(start, end + 1);
-			try {
-				JSON.parse(candidate);
-				return candidate;
-			} catch {
-				// Not JSON (e.g. a bracket in prose) — try the next opening bracket.
-			}
+		const candidate = end === -1 ? "" : text.slice(start, end + 1);
+		if (isJson(candidate)) {
+			if (best === null || candidate.length > best.length) best = candidate;
+			start = nextOpening(text, end + 1); // brackets inside belong to this value
+		} else {
+			start = nextOpening(text, start + 1); // a bracket in prose: try the next one
 		}
-		const next = text.slice(start + 1).search(/[[{]/);
-		start = next === -1 ? -1 : start + 1 + next;
 	}
-	return null;
+	return best;
 }
 
 /** Parse model output as JSON (structured output or fenced block). Throws a short error. */
