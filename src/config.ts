@@ -37,6 +37,7 @@ export const DEFAULTS: Config = {
 	project: { name: "", language: "", framework: "", description: "" },
 	commands: { setup: "", build: "", lint: "", test: "" },
 	commandTimeoutMinutes: 10,
+	allowUnchecked: false,
 	rules: [],
 	neverTouch: [],
 	gates: {
@@ -44,6 +45,7 @@ export const DEFAULTS: Config = {
 		diffHygiene: true,
 		placeholder: true,
 		dod: true,
+		baseline: true,
 		// Where trailing spaces mean something, and a TODO in the text is not unfinished code.
 		ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
 	},
@@ -252,6 +254,17 @@ export async function loadConfig(workDir: string, overrides: Plain = {}): Promis
 	return config;
 }
 
+const EMPTY_COMMANDS = 'commands: { setup: "", build: "", lint: "", test: "" },';
+
+/** The config file `milhouse init` writes, with the commands that were found in the project. */
+export function configTemplate(found: Partial<Config["commands"]>): string {
+	const commands = { ...DEFAULTS.commands, ...found };
+	const values = Object.entries(commands).map(
+		([slot, command]) => `${slot}: ${JSON.stringify(command)}`,
+	);
+	return CONFIG_TEMPLATE.replace(EMPTY_COMMANDS, `commands: { ${values.join(", ")} },`);
+}
+
 export const CONFIG_TEMPLATE = `// Milhouse config. Every key is optional; the values below are the defaults.
 export default {
   // The agent that runs every step: "claude" (Claude Code) or "codex" (Codex CLI).
@@ -294,6 +307,9 @@ export default {
   commands: { setup: "", build: "", lint: "", test: "" },
   // The longest that one setup, build, lint or test command may run, in minutes.
   commandTimeoutMinutes: 10,
+  // Without a command only an agent reviews the work and nothing merges by itself, so exec refuses to start.
+  // true: start anyway (also: --allow-unchecked).
+  allowUnchecked: false,
 
   // Rules injected into every prompt, and globs agents must not change (enforced after exec).
   rules: [],
@@ -301,12 +317,14 @@ export default {
 
   // evidence: validate cites real code. placeholder: no new TODO/FIXME/stubs. diffHygiene: no trailing whitespace or conflict markers.
   // dod: commands pass and the reviewer confirms the acceptance criteria.
+  // baseline: the commands must pass on the starting commit before the run spends anything; otherwise every issue fails for what was broken already.
   // ignore: files that placeholder and diffHygiene skip (patterns as in .gitignore; a list here replaces the default).
   gates: {
     evidence: true,
     diffHygiene: true,
     placeholder: true,
     dod: true,
+    baseline: true,
     ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
   },
 };

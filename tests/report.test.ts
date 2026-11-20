@@ -37,9 +37,25 @@ describe("generateReport", () => {
 			total: 3,
 			byStatus: { CONFIRMED: 2, FALSE: 1 },
 		});
-		expect(report.tasks).toEqual({ total: 4, byStatus: { merged: 2, failed: 2 } });
+		expect(report.tasks).toEqual({ total: 4, byStatus: { merged: 2, failed: 2 }, checked: 0 });
 		expect(report.failures).toEqual([{ issue: "Title of P3", error: "tests failed\nmore detail" }]);
 		expect(report.cost.total).toBe(1.5);
+	});
+
+	it("counts the accepted tasks that a project command checked", () => {
+		const store = RunStore.create(tempDir(), undefined, BASE);
+		store.saveIssues([issue("P1")]);
+		store.saveTasks([
+			task("T1", "P1", { status: "verified", checks_passed: true }),
+			task("T2", "P1", { status: "verified", checks_passed: false }),
+			task("T3", "P1", { status: "merged", checks_passed: true }),
+			task("T4", "P1", { status: "failed" }),
+		]);
+		const report = generateReport(store);
+		expect(report.tasks.checked).toBe(2);
+		expect(formatReport(report, "terminal")).toContain(
+			"2 of 3 accepted tasks passed a project check",
+		);
 	});
 
 	it("handles a run with no issues at all", () => {

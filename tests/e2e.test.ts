@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { isDirty, refExists } from "../src/git.ts";
 import { acquireLock } from "../src/lock.ts";
+import { RunStore } from "../src/state.ts";
 import {
 	TWO_ISSUES,
 	allStatus,
 	calls,
+	captureConsole,
 	cleanupTempDirs,
 	commitFile,
 	git,
@@ -19,14 +21,13 @@ import {
 	readFile,
 	resetFakeAgentEnv,
 	setScenario,
-	silenceConsole,
 	tempDir,
 	testConfig,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-silenceConsole();
+const output = captureConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
@@ -377,6 +378,37 @@ describe("single phases", () => {
 		await expect(go(repo, testConfig(), { resume: true, runId: "nope" })).rejects.toThrow(
 			/not found/,
 		);
+	});
+});
+
+describe("a run without project checks", () => {
+	it("is refused before it costs anything", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await expect(go(repo, testConfig({ commands: { test: "" } }))).rejects.toThrow(
+			/No build, lint or test command.*--allow-unchecked/s,
+		);
+		expect(RunStore.list(repo)).toEqual([]);
+		expect(fake.journal()).toHaveLength(0);
+	});
+
+	it("goes ahead when allowUnchecked is set, and says what the waiting work lacks", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({ commands: { test: "" }, allowUnchecked: true });
+		expect(await go(repo, config)).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
+		expect(await mainSubjects(repo)).toEqual(["initial"]); // nothing merged by itself
+		expect(output.join("\n")).toContain("no project check ran");
+	});
+
+	it("does not stand in the way of a merge by hand", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({ commands: { test: "" }, allowUnchecked: true });
+		await go(repo, config);
+		expect(await go(repo, config, { only: "merge" })).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 });
 

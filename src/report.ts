@@ -2,18 +2,21 @@
 
 import { formatCost } from "./cost.ts";
 import type { RunStore } from "./state.ts";
-import type { RunCost, RunMeta } from "./types.ts";
+import type { RunCost, RunMeta, TaskStatus } from "./types.ts";
 import { formatDuration } from "./ui.ts";
 
 export interface RunReport {
 	meta: RunMeta;
 	issues: { total: number; byStatus: Record<string, number> };
-	tasks: { total: number; byStatus: Record<string, number> };
+	/** `checked`: accepted tasks (verified or merged) for which a project command passed. */
+	tasks: { total: number; byStatus: Record<string, number>; checked: number };
 	/** One entry per issue with failed tasks. */
 	failures: Array<{ issue: string; error: string }>;
 	cost: RunCost;
 	durationMs: number;
 }
+
+const ACCEPTED: TaskStatus[] = ["verified", "merged"];
 
 function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
 	const counts: Record<string, number> = {};
@@ -38,7 +41,11 @@ export function generateReport(store: RunStore): RunReport {
 			total: issues.length,
 			byStatus: countBy(issues, (i) => i.status),
 		},
-		tasks: { total: tasks.length, byStatus: countBy(tasks, (t) => t.status) },
+		tasks: {
+			total: tasks.length,
+			byStatus: countBy(tasks, (t) => t.status),
+			checked: tasks.filter((t) => ACCEPTED.includes(t.status) && t.checks_passed).length,
+		},
 		failures: [...failed].map(([id, error]) => ({ issue: titles.get(id) ?? id, error })),
 		cost: store.loadCost(),
 		durationMs: new Date(meta.updated_at).getTime() - new Date(meta.created_at).getTime(),
@@ -53,6 +60,7 @@ const counts = (byKey: Record<string, number>): string =>
 export function formatReport(report: RunReport, format: "terminal" | "md"): string {
 	const { meta, issues, tasks, failures, cost } = report;
 	const md = format === "md";
+	const accepted = (tasks.byStatus.verified ?? 0) + (tasks.byStatus.merged ?? 0);
 	const heading = (text: string) => (md ? `\n## ${text}\n` : `\n${text}:`);
 	const lines = [
 		md ? "# Milhouse run report" : `Run ${meta.id} (${meta.status})`,
@@ -63,6 +71,7 @@ export function formatReport(report: RunReport, format: "terminal" | "md"): stri
 		`${issues.total} found: ${counts(issues.byStatus)}`,
 		heading("Tasks"),
 		`${tasks.total} total: ${counts(tasks.byStatus)}`,
+		accepted > 0 ? `${tasks.checked} of ${accepted} accepted tasks passed a project check` : "",
 		heading("Cost"),
 		formatCost(cost),
 	];

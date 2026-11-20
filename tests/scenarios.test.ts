@@ -206,7 +206,8 @@ describe("what the pipeline tells you", () => {
 	it("keeps unchecked work for manual merge even if a test is configured on resume", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
-		expect(await go(repo, testConfig({ commands: { setup: "true", test: "  " } }))).toBe(true);
+		const unchecked = testConfig({ commands: { setup: "true", test: "  " }, allowUnchecked: true });
+		expect(await go(repo, unchecked)).toBe(true);
 		const store = latest(repo);
 		const tip = await git(repo, "rev-parse", store.ref);
 		expect(await mainSubjects(repo)).toEqual(["initial"]);
@@ -330,6 +331,34 @@ describe("what exec may build on", () => {
 		setScenario({});
 		expect(await go(repo, config, { resume: true })).toBe(true);
 		expect(readFile(repo, ".milhouse/work/setup-seen")).toContain(task.id);
+	});
+});
+
+describe("the starting commit", () => {
+	it("is checked before anything is spent: a run cannot pass checks that fail without it", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({
+			commands: { test: "echo broken >&2; exit 1" },
+			gates: { baseline: true },
+		});
+		expect(await go(repo, config)).toBe(false);
+		expect(fake.journal()).toHaveLength(0);
+		expect(latest(repo).loadMeta().status).toBe("failed");
+		expect(output.join("\n")).toContain("fail on the starting commit");
+		expect(output.join("\n")).toContain("broken");
+	});
+
+	it("lets the run go on when its checks pass, or when the check of the starting commit is off", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const passing = testConfig({ commands: { test: "true" }, gates: { baseline: true } });
+		expect(await go(repo, passing)).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
+
+		const other = await makeRepo();
+		const off = testConfig({ commands: { test: "true" }, gates: { baseline: false } });
+		expect(await go(other, off)).toBe(true);
 	});
 });
 

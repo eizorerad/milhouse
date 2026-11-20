@@ -1,5 +1,6 @@
 /** The pipeline: preflight, open or resume a run, run the phases in order, finish with an honest status. */
 
+import { checkBase } from "./baseline.ts";
 import { agentSteps, describeAgents, projectChecksEnabled, stepHarness } from "./config.ts";
 import { CostTracker, formatCost, formatUsd } from "./cost.ts";
 import { HARNESSES } from "./engine.ts";
@@ -115,6 +116,15 @@ function announce(store: RunStore, config: Config, todo: Phase[], cost: CostTrac
 	}
 }
 
+/** Exec with nothing to run as a check is only an agent's opinion, and its work never merges by itself. */
+function refuseUnchecked(config: Config, todo: Phase[]): void {
+	if (!todo.includes("exec") || !config.gates.dod || config.allowUnchecked) return;
+	if (projectChecksEnabled(config)) return;
+	throw new Error(
+		"No build, lint or test command is configured, so an agent alone would review the work and nothing would merge by itself. Set commands.test (or build, lint) in .milhouse/config.ts (`milhouse init` suggests them), or run with --allow-unchecked.",
+	);
+}
+
 /** Returns true when everything that was asked for succeeded. */
 export async function runPipeline(config: Config, opts: PipelineOptions = {}): Promise<boolean> {
 	const workDir = opts.workDir ?? process.cwd();
@@ -128,6 +138,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		// A full resume skips finished phases; an explicitly requested phase always runs.
 		const todo =
 			opts.only || !opts.resume ? wanted : wanted.filter((phase) => !done.includes(phase));
+		refuseUnchecked(config, todo);
 		await refuseUntracked(workDir, todo);
 		requireAgents(config, todo); // before a new run leaves anything behind
 		const store =
@@ -139,6 +150,13 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		const cost = new CostTracker(store.loadCost(), config.budget, (c) => store.saveCost(c));
 
 		announce(store, config, todo, cost);
+
+		const broken = todo.includes("exec") ? await checkBase(store, config) : null;
+		if (broken) {
+			log.error(broken);
+			store.finish("failed");
+			return false;
+		}
 
 		let failures = 0;
 		for (const phase of todo) {
@@ -219,10 +237,14 @@ async function finish(
 
 /** Verified work that no merge has taken to the branch yet. */
 function hintMerge(store: RunStore): void {
-	const waiting = store.loadTasks().filter((t) => t.status === "verified").length;
-	if (waiting > 0) {
-		log.info(
-			`${waiting} verified task(s) wait in ${store.ref}. To merge: milhouse --merge --run-id ${store.runId}`,
-		);
-	}
+	const waiting = store.loadTasks().filter((t) => t.status === "verified");
+	if (waiting.length === 0) return;
+	const unchecked = waiting.filter((t) => !t.checks_passed).length;
+	const note =
+		unchecked > 0
+			? `; for ${unchecked} of them no project check ran, an agent only reviewed them`
+			: "";
+	log.info(
+		`${waiting.length} verified task(s) wait in ${store.ref}${note}. To merge: milhouse --merge --run-id ${store.runId}`,
+	);
 }

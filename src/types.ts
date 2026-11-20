@@ -43,6 +43,8 @@ export interface Config {
 	commands: { setup: string; build: string; lint: string; test: string };
 	/** Minutes that one setup, build, lint or test command may take. */
 	commandTimeoutMinutes: number;
+	/** Run exec although no build, lint or test command is set: an agent alone reviews the work. */
+	allowUnchecked: boolean;
 	/** Extra rules injected into every prompt. */
 	rules: string[];
 	/** Globs agents must not change. Enforced after every exec attempt. */
@@ -52,6 +54,8 @@ export interface Config {
 		diffHygiene: boolean;
 		placeholder: boolean;
 		dod: boolean;
+		/** The checks must pass on the starting commit before the run spends anything. */
+		baseline: boolean;
 		/** Files that the `placeholder` and `diffHygiene` gates do not look at (patterns as in .gitignore). */
 		ignore: string[];
 	};

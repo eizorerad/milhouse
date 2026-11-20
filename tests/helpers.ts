@@ -81,7 +81,9 @@ export function projectWith(configSource?: string): string {
 export function testConfig(overrides: Record<string, unknown> = {}): Config {
 	const base = deepMerge(DEFAULTS as unknown as Record<string, unknown>, {
 		budget: 0,
-		commands: { test: "git diff --check HEAD^ HEAD" },
+		commands: { test: "git diff --check HEAD^ HEAD" }, // there is no HEAD^ on the starting commit:
+		gates: { baseline: false }, // the checks of the starting commit are tested on their own
+
 		phases: {
 			scan: { retries: 0 },
 			validate: { retries: 0 },
