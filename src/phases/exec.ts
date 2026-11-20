@@ -317,15 +317,11 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 					`${errorMessage(err)}\nThe attempt is still in ${store.worktree}. Save what you need from it, then run: milhouse --resume (it starts again from the accepted work).`,
 				);
 			}
-			store.logEvent({
-				event: "parked",
-				issue: group.issue.id,
-				branch: parkBranch(group.issue.id),
-			});
 			// Not just a reset: a failed attempt may have installed dependencies that the next issue would
 			// silently build on. A fresh worktree (and its setup) starts every issue from what was accepted.
 			await discardWorktree(store);
 		}
+		store.logEvent({ event: "failed", issue: group.issue.id });
 		// Keep the start of the message: markers such as REVIEW_UNAVAILABLE are recognised by their prefix.
 		store.updateTasks(ids, { status: "failed", error: outcome.error.slice(0, 2000) });
 	},

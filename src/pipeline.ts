@@ -157,9 +157,12 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 
 		announce(store, config, todo, cost);
 
-		const broken = todo.includes("exec") ? await checkBase(store, config) : null;
+		const broken = todo.includes("exec")
+			? await checkBase(store, config).catch(errorMessage)
+			: null;
 		if (broken) {
 			log.error(broken);
+			store.logEvent({ event: "baseline-failed", error: broken.slice(0, 2000) });
 			store.finish("failed");
 			return false;
 		}
@@ -249,10 +252,7 @@ function hintMerge(store: RunStore): void {
 	const waiting = store.loadTasks().filter((t) => t.status === "verified");
 	if (waiting.length === 0) return;
 	const unchecked = waiting.filter((t) => !t.checks_passed).length;
-	const note =
-		unchecked > 0
-			? `; for ${unchecked} of them no project check ran, an agent only reviewed them`
-			: "";
+	const note = unchecked > 0 ? `; for ${unchecked} of them no project check ran` : "";
 	log.info(
 		`${waiting.length} verified task(s) wait in ${store.ref}${note}. To merge: milhouse --merge --run-id ${store.runId}`,
 	);

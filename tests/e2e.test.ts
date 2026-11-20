@@ -381,6 +381,16 @@ describe("single phases", () => {
 	});
 });
 
+describe("what the consolidator is told", () => {
+	it("what each task does, not only its title: it cannot judge a dependency from a title", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const [asked] = calls(fake, "Consistency Manager");
+		expect(asked.prompt).toContain("- what it does: first");
+	});
+});
+
 describe("the log of a run", () => {
 	it("keeps what the reviewer said, also for work that was accepted in the end", async () => {
 		useFakeAgent({ reject: { "Add greeting": 1 } });
@@ -403,6 +413,22 @@ describe("the log of a run", () => {
 	});
 });
 
+describe("the log of a run that fails", () => {
+	it("says that an issue failed, without inventing a branch for it", async () => {
+		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(false);
+		const text = readFile(repo, `.milhouse/runs/${latest(repo).runId}/events.jsonl`);
+		const events = text
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(events.filter((e) => e.event === "attempt-failed").length).toBeGreaterThan(0);
+		expect(events.filter((e) => e.event === "failed")).toHaveLength(1);
+		expect(events.some((e) => e.event === "parked" || e.branch !== undefined)).toBe(false);
+	});
+});
+
 describe("a run without project checks", () => {
 	it("is refused before it costs anything", async () => {
 		const fake = useFakeAgent({});
@@ -422,14 +448,15 @@ describe("a run without project checks", () => {
 		expect(allStatus(repo, "verified")).toBe(true);
 		expect(await mainSubjects(repo)).toEqual(["initial"]); // nothing merged by itself
 		expect(output.join("\n")).toContain("no project check ran");
+		expect(output.join("\n")).not.toContain("reviewed them");
 	});
 
 	it("does not stand in the way of a merge by hand", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
-		const config = testConfig({ commands: { test: "" }, allowUnchecked: true });
-		await go(repo, config);
-		expect(await go(repo, config, { only: "merge" })).toBe(true);
+		await go(repo, testConfig({ commands: { test: "" }, allowUnchecked: true }));
+		const withoutPermission = testConfig({ commands: { test: "" } });
+		expect(await go(repo, withoutPermission, { only: "merge" })).toBe(true);
 		expect(allStatus(repo, "merged")).toBe(true);
 	});
 });

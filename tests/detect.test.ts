@@ -59,15 +59,32 @@ describe("detectCommands", () => {
 			test: "go test ./...",
 		});
 		expect(detectCommands(project({ "pytest.ini": "" }))).toEqual({ test: "python3 -m pytest" });
-		expect(detectCommands(project({ "tests/test_app.py": "" }))).toEqual({
-			test: "python3 -m unittest discover -s tests",
+		const unittest = project({ "tests/test_app.py": "import unittest\n" });
+		expect(detectCommands(unittest)).toEqual({ test: "python3 -m unittest discover -s tests" });
+	});
+
+	it("does not guess unittest from a file name: a pytest-style test would be found by nothing", () => {
+		const dir = project({ "tests/test_sum.py": "def test_sum():\n    assert 1 + 1 == 3\n" });
+		expect(detectCommands(dir)).toEqual({});
+		const withMake = project({
+			"tests/test_sum.py": "def test_sum():\n    assert False\n",
+			Makefile: "test:\n\tpytest\n",
 		});
+		expect(detectCommands(withMake)).toEqual({ test: "make test" });
+	});
+
+	it("survives odd files: a file called tests, an empty script, an assignment that looks like a target", () => {
+		expect(detectCommands(project({ tests: "not a folder" }))).toEqual({});
+		expect(detectCommands(project({ "package.json": scripts({ test: "  ", lint: "" }) }))).toEqual(
+			{},
+		);
+		expect(detectCommands(project({ Makefile: "build:=gcc\ntest::=pytest\n" }))).toEqual({});
 	});
 
 	it("runs the tests of every language in a project that has several", () => {
 		const dir = project({
 			"package.json": scripts({ test: "node --test" }),
-			"tests/test_a.py": "",
+			"tests/test_a.py": "import unittest\n",
 		});
 		expect(detectCommands(dir).test).toBe("npm run test && python3 -m unittest discover -s tests");
 	});
@@ -87,6 +104,13 @@ describe("detectCommands", () => {
 describe("configTemplate", () => {
 	it("is the plain template when nothing was found", () => {
 		expect(configTemplate({})).toBe(CONFIG_TEMPLATE);
+	});
+
+	it("keeps a command that holds $ signs as it is, and says that the commands were found", () => {
+		const text = configTemplate({ test: "echo $& $$ $1" });
+		expect(text).toContain('test: "echo $& $$ $1"');
+		expect(text).toContain("Found in this project");
+		expect(configTemplate({})).not.toContain("Found in this project");
 	});
 
 	it("writes the commands that were found, as the config's own values", () => {

@@ -74,6 +74,9 @@ function makeAsk(
 			if (allowance !== undefined && allowance <= 0) {
 				throw new EngineError("the budget is used up", { fatal: true });
 			}
+			// A call that starts with no time left would get no timer at all, or a negative one.
+			if (cost.remainingMs() <= 0)
+				throw new EngineError("the time limit is used up", { fatal: true });
 			// The step's own rules come last, after the role, the task and the global rules.
 			const stepRules = config.phases[step].rules.map((rule) => `- ${rule}`).join("\n");
 			const extra = section("Extra rules for this step", stepRules);
@@ -127,11 +130,7 @@ export async function runPhase<TItem, TValue>(
 			const limit = cost.limitReached();
 			if (limit) {
 				const used = limit === "time" ? "the time limit is used up" : "the budget is used up";
-				const error = lastError
-					? `${lastError}\n(stopped: ${used})`
-					: limit === "time"
-						? "time limit reached"
-						: "budget exhausted";
+				const error = lastError ? `${lastError}\n(stopped: ${used})` : used;
 				return { ok: false, error, skipped: attempt === 0 };
 			}
 			try {

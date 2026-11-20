@@ -143,7 +143,7 @@ function initProject(workDir: string): void {
 	log.success(
 		lines.length === 0
 			? `Created ${STATE_DIR}/config.ts. Set commands.test/lint/build so exec can check its work.`
-			: `Created ${STATE_DIR}/config.ts with the commands this project defines. They run on every issue, so check them:\n${lines.join("\n")}`,
+			: `Created ${STATE_DIR}/config.ts with the commands this project defines. Build, lint and test run on every issue (setup when the worktree is made), so check them:\n${lines.join("\n")}`,
 	);
 }
 

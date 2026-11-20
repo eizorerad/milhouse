@@ -1,7 +1,7 @@
 /** Git helpers. Every function takes the directory to run in first. Nothing here touches the user's files. */
 
-import { existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { type RunResult, run } from "./proc.ts";
 import { MINUTE, tail } from "./util.ts";
 
@@ -190,6 +190,8 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 	// Raw output: trailing whitespace on the very last added line must survive.
 	const result = await gitRun(
 		cwd,
+		"-c",
+		"core.quotePath=false", // the names of non-ASCII files as they are
 		"diff",
 		"--text",
 		"-U0",
@@ -213,7 +215,7 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 	for (let i = 0; i < rows.length; i++) {
 		const row = rows[i];
 		if (row.startsWith("+++ ")) {
-			file = row.slice(4).replace(/^b\//, "");
+			file = row.slice(4).replace(/\t.*$/, "").replace(/^b\//, ""); // git ends a name with a space in it with a tab
 			continue;
 		}
 		const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(row);
@@ -264,6 +266,7 @@ export async function ensureWorktree(
 
 	rmSync(path, { recursive: true, force: true }); // a leftover directory that is not a worktree
 	await git(repo, "worktree", "prune");
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); // it holds a copy of the project: the owner only
 	await gitOrThrow(repo, "worktree", "add", "--detach", path, ref);
 	return { created: true };
 }

@@ -75,12 +75,32 @@ describe("loadConfig", () => {
 		expect(set.phases.exec.timeoutMinutes).toBe(60);
 		expect(set.phases.scan.timeoutMinutes).toBe(15); // untouched default
 
+		const longest = projectWith(
+			"export default { commandTimeoutMinutes: 1440, phases: { exec: { timeoutMinutes: 1440 } } };",
+		);
+		expect((await loadConfig(longest)).commandTimeoutMinutes).toBe(1440);
+		const tooLong = await loadConfig(
+			projectWith("export default { commandTimeoutMinutes: 1441 };"),
+		).catch((e) => e);
+		expect(tooLong.message).toContain(
+			"commandTimeoutMinutes must be a number above 0 and at most 1440",
+		);
+
 		const bad = projectWith(
 			"export default { commandTimeoutMinutes: 0, phases: { scan: { timeoutMinutes: -1 } } };",
 		);
 		const error = await loadConfig(bad).catch((e) => e);
 		expect(error.message).toContain("commandTimeoutMinutes must be a number above 0");
 		expect(error.message).toContain("phases.scan.timeoutMinutes must be a number above 0");
+	});
+
+	it("rejects patterns with an exception (!), which neverTouch and gates.ignore do not support", async () => {
+		const dir = projectWith(
+			'export default { neverTouch: ["*.lock", "!keep.lock"], gates: { ignore: ["!a.md"] } };',
+		);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error.message).toContain('neverTouch: "!keep.lock" cannot start with "!"');
+		expect(error.message).toContain('gates.ignore: "!a.md" cannot start with "!"');
 	});
 
 	it("takes a time limit for the whole command, and rejects a negative one", async () => {

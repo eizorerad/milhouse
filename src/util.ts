@@ -67,14 +67,6 @@ function closingIndex(text: string, start: number): number {
 	return -1;
 }
 
-const OPENING_BRACKET = /[[{]/g;
-
-/** Index of the first `[` or `{` at or after `from`, or -1. */
-function nextOpening(text: string, from: number): number {
-	OPENING_BRACKET.lastIndex = from;
-	return OPENING_BRACKET.exec(text)?.index ?? -1;
-}
-
 function isJson(text: string): boolean {
 	try {
 		JSON.parse(text);
@@ -89,17 +81,21 @@ function isJson(text: string): boolean {
  * the prose around it may hold brackets of its own, such as `[0]` or `{}`.
  */
 export function extractJson(text: string): string | null {
+	// A bracket after the last closing one of its kind cannot be closed: not worth a look.
+	const lastClose: Record<string, number> = {
+		"{": text.lastIndexOf("}"),
+		"[": text.lastIndexOf("]"),
+	};
 	let best: string | null = null;
-	let start = nextOpening(text, 0);
-	while (start !== -1) {
+	for (let start = 0; start < text.length; start++) {
+		const open = text[start];
+		if ((open !== "{" && open !== "[") || start > lastClose[open]) continue;
 		const end = closingIndex(text, start);
-		const candidate = end === -1 ? "" : text.slice(start, end + 1);
-		if (isJson(candidate)) {
-			if (best === null || candidate.length > best.length) best = candidate;
-			start = nextOpening(text, end + 1); // brackets inside belong to this value
-		} else {
-			start = nextOpening(text, start + 1); // a bracket in prose: try the next one
-		}
+		if (end === -1) continue;
+		const candidate = text.slice(start, end + 1);
+		if (!isJson(candidate)) continue; // a bracket in prose: try the next one
+		if (best === null || candidate.length > best.length) best = candidate;
+		start = end; // brackets inside belong to this value
 	}
 	return best;
 }

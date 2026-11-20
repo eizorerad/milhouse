@@ -41,7 +41,8 @@ function fromPackageJson(dir: string): Commands {
 	// npm's own placeholder for a missing test is not a test.
 	const script = (name: string): string | undefined => {
 		const body = scripts[name];
-		const usable = typeof body === "string" && !body.includes("no test specified");
+		const usable =
+			typeof body === "string" && body.trim() !== "" && !body.includes("no test specified");
 		return usable ? `${tool.run} ${name}` : undefined;
 	};
 	const found = {
@@ -60,20 +61,29 @@ const fromGo = (dir: string): Commands =>
 		? { build: "go build ./...", lint: "go vet ./...", test: "go test ./..." }
 		: {};
 
+/** Whether a test file in `folder` is written for unittest: a pytest-style function would be found by nothing. */
+function usesUnittest(folder: string): boolean {
+	try {
+		return readdirSync(folder).some(
+			(name) =>
+				/^test.*\.py$/.test(name) && readFileSync(join(folder, name), "utf-8").includes("unittest"),
+		);
+	} catch {
+		return false; // no such folder, or not a folder
+	}
+}
+
 function fromPython(dir: string): Commands {
 	if (has(dir, "pytest.ini") || read(dir, "pyproject.toml").includes("pytest")) {
 		return { test: "python3 -m pytest" };
 	}
-	const tests = join(dir, "tests");
-	const hasTests =
-		existsSync(tests) && readdirSync(tests).some((name) => /^test.*\.py$/.test(name));
-	return hasTests ? { test: "python3 -m unittest discover -s tests" } : {};
+	return usesUnittest(join(dir, "tests")) ? { test: "python3 -m unittest discover -s tests" } : {};
 }
 
 function fromMakefile(dir: string): Commands {
 	const makefile = read(dir, "Makefile");
 	const target = (name: string): string | undefined =>
-		new RegExp(`^${name}:`, "m").test(makefile) ? `make ${name}` : undefined;
+		new RegExp(`^${name}:(?![:=])`, "m").test(makefile) ? `make ${name}` : undefined;
 	return { build: target("build"), lint: target("lint"), test: target("test") };
 }
 

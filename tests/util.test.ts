@@ -29,6 +29,13 @@ describe("extractJson", () => {
 		expect(extractJson(after)).toBe('{"ok": true, "list": [1, 2, 3]}');
 	});
 
+	it("does not slow down on a long run of brackets that never close", () => {
+		const text = `{"ok": true}${"[".repeat(50_000)}${"{".repeat(50_000)}`;
+		const started = performance.now();
+		expect(extractJson(text)).toBe('{"ok": true}');
+		expect(performance.now() - started).toBeLessThan(500);
+	});
+
 	it("handles escaped quotes", () => {
 		expect(JSON.parse(extractJson('{"a": "say \\"hi\\" }"}') as string).a).toBe('say "hi" }');
 	});

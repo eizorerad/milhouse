@@ -210,6 +210,14 @@ function validate(config: Config): void {
 		if (!Number.isFinite(config.maxMinutes) || config.maxMinutes < 0) {
 			errors.push("maxMinutes must be a finite number >= 0");
 		}
+		for (const [name, patterns] of [
+			["neverTouch", config.neverTouch],
+			["gates.ignore", config.gates.ignore],
+		] as const) {
+			for (const pattern of patterns.filter((p) => p.startsWith("!"))) {
+				errors.push(`${name}: "${pattern}" cannot start with "!": exceptions are not supported`);
+			}
+		}
 		if (!validLimit(config.commandTimeoutMinutes)) {
 			errors.push("commandTimeoutMinutes must be a number above 0 and at most 1440");
 		}
@@ -258,17 +266,6 @@ export async function loadConfig(workDir: string, overrides: Plain = {}): Promis
 	return config;
 }
 
-const EMPTY_COMMANDS = 'commands: { setup: "", build: "", lint: "", test: "" },';
-
-/** The config file `milhouse init` writes, with the commands that were found in the project. */
-export function configTemplate(found: Partial<Config["commands"]>): string {
-	const commands = { ...DEFAULTS.commands, ...found };
-	const values = Object.entries(commands).map(
-		([slot, command]) => `${slot}: ${JSON.stringify(command)}`,
-	);
-	return CONFIG_TEMPLATE.replace(EMPTY_COMMANDS, `commands: { ${values.join(", ")} },`);
-}
-
 export const CONFIG_TEMPLATE = `// Milhouse config. Every key is optional; the values below are the defaults.
 export default {
   // The agent that runs every step: "claude" (Claude Code) or "codex" (Codex CLI).
@@ -305,8 +302,8 @@ export default {
   // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: it cannot be capped.
   budget: 50,
 
-  // The longest that one milhouse command may run, in minutes, for every agent: no call outlasts it and no new
-  // one starts. 0 = unlimited. A resumed run gets the full time again.
+  // The longest that the agents of one milhouse command may work, in minutes: no call outlasts it and no new one
+  // starts (a check that has begun runs on to commandTimeoutMinutes). 0 = unlimited. Every command gets the full time.
   maxMinutes: 0,
 
   project: { name: "", language: "", framework: "", description: "" },
@@ -319,7 +316,8 @@ export default {
   // true: start anyway (also: --allow-unchecked).
   allowUnchecked: false,
 
-  // Rules injected into every prompt, and globs agents must not change (enforced after exec).
+  // Rules injected into every prompt, and patterns of files that agents must not change (as in .gitignore, without
+  // "!"; enforced after exec).
   rules: [],
   neverTouch: [], // e.g. ["migrations/**", ".env*"]
 
@@ -337,3 +335,20 @@ export default {
   },
 };
 `;
+
+const EMPTY_COMMANDS = 'commands: { setup: "", build: "", lint: "", test: "" },';
+
+/** The config file `milhouse init` writes, with the commands that were found in the project. */
+export function configTemplate(found: Partial<Config["commands"]>): string {
+	const values = (["setup", "build", "lint", "test"] as const).map(
+		(slot) => `${slot}: ${JSON.stringify(found[slot] ?? "")}`,
+	);
+	const note = Object.keys(found).length
+		? "// Found in this project by `milhouse init`. Check them: build, lint and test run on every issue.\n  "
+		: "";
+	// A function, not a string: a `$` in a command is not a replacement pattern.
+	return CONFIG_TEMPLATE.replace(
+		EMPTY_COMMANDS,
+		() => `${note}commands: { ${values.join(", ")} },`,
+	);
+}

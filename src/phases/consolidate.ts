@@ -27,7 +27,7 @@ function consolidatePrompt(tasks: Task[], lastError?: string): string {
 	const list = tasks
 		.map(
 			(t) =>
-				`### [${t.id}] ${t.title}\n- issue: ${t.issue_id}\n- files: ${t.files.join(", ") || "none"}\n- depends on: ${t.depends_on.join(", ") || "none"}`,
+				`### [${t.id}] ${t.title}\n- issue: ${t.issue_id}\n- what it does: ${t.description.trim() || "(not said)"}\n- files: ${t.files.join(", ") || "none"}\n- depends on: ${t.depends_on.join(", ") || "none"}`,
 		)
 		.join("\n\n");
 	return prompt(

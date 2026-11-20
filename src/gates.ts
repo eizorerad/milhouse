@@ -10,15 +10,16 @@ import { MINUTE, tail } from "./util.ts";
 export const COMMAND_TIMEOUT_MS = 10 * MINUTE;
 
 /**
- * A test for files that match one of `patterns`, written like .gitignore lines: a trailing "/" means
- * "everything below", a pattern with a slash starts at the repository root, one without (`.env*`)
- * matches at any depth.
+ * A test for files that match one of `patterns`, written like .gitignore lines but without exceptions (`!`):
+ * a name is a file or a directory with everything below it, a pattern with a slash in it or in front of it
+ * starts at the repository root, one without (`.env*`, `cache/`) matches at any depth.
  */
 export function globMatcher(patterns: string[]): (file: string) => boolean {
-	const globs = patterns.map((raw) => {
-		const rooted = raw.startsWith("/");
-		const pattern = (rooted ? raw.slice(1) : raw).replace(/\/$/, "/**");
-		return new Bun.Glob(rooted || pattern.includes("/") ? pattern : `**/${pattern}`);
+	const globs = patterns.flatMap((raw) => {
+		const name = raw.replace(/^\//, "").replace(/\/$/, "");
+		const anchored = raw.startsWith("/") || name.includes("/");
+		const path = anchored ? name : `**/${name}`;
+		return [new Bun.Glob(path), new Bun.Glob(`${path}/**`)];
 	});
 	return (file) => globs.some((glob) => glob.match(file));
 }

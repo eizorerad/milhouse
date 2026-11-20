@@ -57,6 +57,19 @@ describe("forbiddenFiles", () => {
 		expect(forbiddenFiles(files, ["app/keys/"])).toEqual(["app/keys/a.pem"]);
 	});
 
+	it("treats a name as the file or directory of that name, with everything below it", () => {
+		const files = ["secrets/key", "app/secrets/key", "secrets.md", "sub/cache/a", "cache.txt"];
+		expect(forbiddenFiles(files, ["secrets"])).toEqual(["secrets/key", "app/secrets/key"]);
+		expect(forbiddenFiles(files, ["cache/"])).toEqual(["sub/cache/a"]); // a directory at any depth
+		expect(forbiddenFiles(files, ["/cache/"])).toEqual([]); // only at the root
+	});
+
+	it("roots a file name that starts with a slash", () => {
+		const files = ["a.ts", "sub/a.ts"];
+		expect(forbiddenFiles(files, ["/a.ts"])).toEqual(["a.ts"]);
+		expect(forbiddenFiles(files, ["a.ts"])).toEqual(["a.ts", "sub/a.ts"]);
+	});
+
 	it("matches nothing without patterns", () => {
 		expect(forbiddenFiles(["a.ts"], [])).toEqual([]);
 	});

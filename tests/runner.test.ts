@@ -199,6 +199,22 @@ describe("runPhase edge cases", () => {
 	});
 });
 
+describe("runPhase and the time limit", () => {
+	it("starts no call once the limit has passed, even when it passed while the attempt got ready", async () => {
+		const fake = useFakeAgent({});
+		const { store, config } = setup();
+		const cost = new CostTracker(emptyCost(), 0, () => {}, 30); // 30 ms
+		const def = phase(async (_n, ctx) => {
+			await sleep(60);
+			return ctx.ask("## Role: Planner");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect(outcome.ok).toBe(false);
+		expect((outcome as { error: string }).error).toContain("time limit");
+		expect(fake.journal()).toHaveLength(0);
+	});
+});
+
 describe("runPhase and the agent", () => {
 	it("charges failed calls too, retries engine errors and keeps the real error text", async () => {
 		useFakeAgent({ fail: { Planner: { message: "overloaded", cost: 0.3 } } });
