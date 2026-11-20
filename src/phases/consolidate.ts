@@ -40,7 +40,7 @@ function consolidatePrompt(tasks: Task[], lastError?: string): string {
 			"Task",
 			[
 				"1. duplicates: tasks that do the same work (usually in different issues). Keep one, list the others in `remove`.",
-				"2. cross_dependencies: a task that needs the result of a task from ANOTHER issue: shared files, shared interfaces, or tests that only pass once the other issue's fix is in. This decides which issue runs first, so declare every such link.",
+				"2. cross_dependencies: a task that cannot work without a change that a task from ANOTHER issue makes: its code calls something the other task adds or changes, or its tests only pass with that change. This decides which issue runs first, and an issue whose dependency failed is not attempted, so declare only such links. Do not link tasks only because they edit the same file, run the same test suite or regenerate the same generated file.",
 				"Use only the ids listed above. Return empty lists when nothing applies.",
 			].join("\n"),
 		),
