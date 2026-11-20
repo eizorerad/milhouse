@@ -199,6 +199,43 @@ describe("runPhase edge cases", () => {
 	});
 });
 
+describe("runPhase and the time limit", () => {
+	it("starts no call once the limit has passed, even when it passed while the attempt got ready", async () => {
+		const fake = useFakeAgent({});
+		const { store, config } = setup();
+		const cost = new CostTracker(emptyCost(), 0, () => {}, 30); // 30 ms
+		const def = phase(async (_n, ctx) => {
+			await sleep(60);
+			return ctx.ask("## Role: Planner");
+		});
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect(outcome.ok).toBe(false);
+		expect((outcome as { error: string }).error).toContain("time limit");
+		expect(fake.journal()).toHaveLength(0);
+	});
+
+	it("reads the time that is left once for a call, so that it cannot reach zero between check and timer", async () => {
+		useFakeAgent({});
+		const { store, config } = setup();
+		const cost = new CostTracker(emptyCost(), 0, () => {}, 60_000);
+		let reads = 0;
+		const real = cost.remainingMs.bind(cost);
+		cost.remainingMs = () => {
+			reads++;
+			return real();
+		};
+		let readsForTheCall = 0;
+		const def = phase(async (_n, ctx) => {
+			const before = reads;
+			const answer = await ctx.ask("## Role: Planner");
+			readsForTheCall = reads - before;
+			return answer;
+		});
+		await runPhase(def, store, config, cost);
+		expect(readsForTheCall).toBe(1);
+	});
+});
+
 describe("runPhase and the agent", () => {
 	it("charges failed calls too, retries engine errors and keeps the real error text", async () => {
 		useFakeAgent({ fail: { Planner: { message: "overloaded", cost: 0.3 } } });

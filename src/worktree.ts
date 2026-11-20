@@ -1,6 +1,7 @@
 /** The run's worktree, ready to use: created at the accepted ref, with `commands.setup` done. */
 
 import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { commandTimeoutMs } from "./config.ts";
 import { runChecks } from "./gates.ts";
 import { deleteRef, ensureWorktree, isAncestor, removeWorktree, resolveRef } from "./git.ts";
 import type { RunStore } from "./state.ts";
@@ -44,7 +45,7 @@ export async function prepareWorktree(
 	const failure = await runChecks(
 		store.worktree,
 		{ setup: config.commands.setup },
-		{ reap: false },
+		{ reap: false, timeoutMs: commandTimeoutMs(config) },
 	);
 	if (failure) {
 		await removeWorktree(store.workDir, store.worktree);
@@ -56,8 +57,9 @@ export async function prepareWorktree(
 
 /** Remove the worktree and its setup marker. */
 export async function discardWorktree(store: RunStore): Promise<void> {
+	const marker = setupMarker(store); // before the removal: a run of 0.5.1 changes its place once its worktree is gone
 	await removeWorktree(store.workDir, store.worktree);
-	rmSync(setupMarker(store), { force: true });
+	rmSync(marker, { force: true });
 }
 
 /** Remove the run's worktree, and its ref once everything in it is part of the user's branch. */

@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { projectChecksEnabled } from "../config.ts";
+import { commandTimeoutMs, projectChecksEnabled } from "../config.ts";
 import { runProjectChecks } from "../gates.ts";
 import {
 	acceptCommit,
@@ -47,7 +47,9 @@ async function mergeCandidate(
 		// The branch may have changed what has to be installed (a lockfile): check what a fresh install gives.
 		const failedSetup = await prepareWorktree(store, config, { setupAgain: true });
 		if (failedSetup) return { error: `The merged work could not be set up:\n${failedSetup}` };
-		const failure = await runProjectChecks(store.worktree, config.commands);
+		const failure = await runProjectChecks(store.worktree, config.commands, {
+			timeoutMs: commandTimeoutMs(config),
+		});
 		if (failure) {
 			return {
 				error: `Merging would break the checks, so nothing was merged. The verified work stays in ${store.ref}.\n${failure}`,

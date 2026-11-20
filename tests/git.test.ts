@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	acceptCommit,
@@ -117,6 +117,28 @@ describe("repository state", () => {
 	});
 });
 
+describe("a new worktree", () => {
+	it("leaves no ref behind when the folder above it cannot be made", async () => {
+		const repo = await makeRepo();
+		const root = tempDir();
+		writeFile(root, "file", "x"); // a file where a folder should be
+		const path = join(root, "file", "inside", "run-x");
+		const base = await revParse(repo, "HEAD");
+		await expect(ensureWorktree(repo, path, "refs/milhouse/run-x", base)).rejects.toThrow();
+		expect(await refExists(repo, "refs/milhouse/run-x")).toBe(false);
+	});
+
+	it("gets the folders above it for its owner only: it holds a copy of the project", async () => {
+		const repo = await makeRepo();
+		const root = tempDir();
+		const path = join(root, "one", "two", "run-x");
+		await ensureWorktree(repo, path, "refs/milhouse/run-x", await revParse(repo, "HEAD"));
+		for (const folder of [join(root, "one"), join(root, "one", "two")]) {
+			expect(statSync(folder).mode & 0o777).toBe(0o700);
+		}
+	});
+});
+
 describe("history between two commits", () => {
 	it("lists only the subjects after `from` (a bracketed id must not match the whole history)", async () => {
 		const repo = await makeRepo();
@@ -179,6 +201,29 @@ describe("history between two commits", () => {
 		expect(added).toContainEqual({ file: "src/app.ts", text: "// TODO: later" });
 		expect(added).toContainEqual({ file: "docs/readme.md", text: "world" });
 		expect(added.some((a) => a.text === "export const two = 2;")).toBe(false);
+	});
+
+	it("names a file with a space or a non-ASCII letter as it is", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		writeFile(repo, "docs/café.md", "one\n");
+		writeFile(repo, "user guide.md", "two\n");
+		await git(repo, "add", "-A");
+		await git(repo, "commit", "-q", "-m", "add");
+		const files = (await addedLines(repo, base)).map((a) => a.file).sort();
+		expect(files).toEqual(["docs/café.md", "user guide.md"]);
+	});
+
+	it("leaves out binary files: their bytes are not text to check", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		writeFile(repo, "logo.png", "PNG\u0000 \nmore\n");
+		writeFile(repo, "src/app.ts", "export const app = 1;\nexport const two = 2;\n// note\n");
+		await git(repo, "add", "-A");
+		await git(repo, "commit", "-q", "-m", "add");
+		const added = await addedLines(repo, base);
+		expect(added.some((a) => a.file === "logo.png")).toBe(false);
+		expect(added).toContainEqual({ file: "src/app.ts", text: "// note" });
 	});
 
 	it("still sees added lines when .gitattributes tries to hide the diff", async () => {

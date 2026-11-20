@@ -61,6 +61,8 @@ export async function makeRepo(dir = tempDir()): Promise<string> {
 	await git(dir, "config", "user.name", "Test");
 	await git(dir, "config", "commit.gpgsign", "false");
 	await commitFile(dir, "src/app.ts", "export const app = 1;\nexport const two = 2;\n", "initial");
+	// Worktrees stay inside the repository: tests read what setup commands leave beside them.
+	process.env.MILHOUSE_WORK_DIR = join(dir, ".milhouse", "work");
 	return dir;
 }
 
@@ -79,7 +81,9 @@ export function projectWith(configSource?: string): string {
 export function testConfig(overrides: Record<string, unknown> = {}): Config {
 	const base = deepMerge(DEFAULTS as unknown as Record<string, unknown>, {
 		budget: 0,
-		commands: { test: "git diff --check HEAD^ HEAD" },
+		commands: { test: "git diff --check HEAD^ HEAD" }, // there is no HEAD^ on the starting commit:
+		gates: { baseline: false }, // the checks of the starting commit are tested on their own
+
 		phases: {
 			scan: { retries: 0 },
 			validate: { retries: 0 },
@@ -155,6 +159,7 @@ export function resetFakeAgentEnv(): void {
 		"FAKE_AGENT_STATE",
 		"FAKE_AGENT_SCENARIO",
 		"MILHOUSE_RETRY_DELAY_MS",
+		"MILHOUSE_WORK_DIR",
 	]) {
 		delete process.env[key];
 	}

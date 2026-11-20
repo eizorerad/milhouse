@@ -11,7 +11,7 @@ git clone --depth 1 https://github.com/eizorerad/milhouse.git && cd milhouse
 bun install && bun link        # puts `milhouse` on your PATH
 
 cd your-project                # a git repo, on the branch you want changed
-milhouse init                  # writes .milhouse/config.ts: set commands.test / lint / build
+milhouse init                  # writes .milhouse/config.ts with the commands your project defines: check them
 milhouse "fix authentication bugs"   # starts a run; commit or stash your work first
 ```
 
@@ -39,12 +39,17 @@ scan → validate → plan → consolidate → exec → merge
 | `evidence` (validate) | issues whose cited file does not exist, or whose snippet is not found at the cited lines (give or take five) |
 | `placeholder` | new `TODO` / `FIXME` / "not implemented" stubs |
 | `diffHygiene` | trailing whitespace and conflict markers in added lines |
+| `baseline` | a run whose `commands.build` / `lint` / `test` already fail on the starting commit: it stops before scan spends anything, because it could not tell its own mistakes from what was broken before. If the failure is what the run should fix, set `gates.baseline: false`. The checks run in the worktree that exec uses next, so what they leave there (ignored by git) stays |
 | `dod` | failing `commands.build` / `lint` / `test`; a reviewer that finds unmet acceptance criteria or unnecessary complexity in the change |
 | always on | tasks without a commit, uncommitted leftovers, history that drops accepted commits, any commit touching a `neverTouch` path or `.milhouse/` (renames and merges included), checks that move HEAD or rewrite tracked files |
+
+`placeholder` and `diffHygiene` skip binary files and the files that `gates.ignore` names (patterns as in `.gitignore`; by default `*.md`, `*.tsv`, `*.csv`, `*.patch` and `*.diff`, where trailing spaces or a TODO in the text are not mistakes). A list in the config replaces the default. Conflict markers in the skipped files are not looked for either, and a change of more than 32 MB is refused whatever the list says.
 
 **Keep changes simple.** The planner and executor look for a direct change that fits the existing code. To send work back for complexity, the reviewer must point to the code and explain a simpler alternative that preserves behaviour, safeguards and tests. For example, it can point to an existing parser that the patch duplicates. Line count and style preferences are not grounds for rejection.
 
 **Automatic merge** requires at least one build, lint or test command to have run on the accepted commit, with all checks passing. Setup alone does not count. If your branch advanced, the new merge commit must pass project checks too. A conflict or failing check leaves your branch untouched.
+
+**No checks, no run.** Without a build, lint or test command only an agent reviews the work and nothing merges by itself, so exec refuses to start (also when it resumes a run of 0.5.1); `allowUnchecked: true` in the config, or `--allow-unchecked` for one run, lets it go on. `gates.dod: false` switches the checks and the review off together and is not refused. `milhouse init` writes the commands your project defines (`package.json` scripts, Cargo, Go, Python tests, Makefile targets) into the config. They run on every issue, so check them before the first run. `milhouse --report` says how many accepted tasks passed a project check.
 
 If no project check ran, the work waits in `refs/milhouse/<run-id>`. Adding a test command before `--resume` does not count as running it. After inspecting the changes, use `milhouse --merge --run-id <run-id>` to accept them yourself. A manual fast-forward does not rerun checks; if a merge commit is needed, its configured checks still apply when `gates.dod` is on.
 
@@ -52,10 +57,10 @@ If no project check ran, the work waits in `refs/milhouse/<run-id>`. Adding a te
 
 - **Claude:** read-only steps and the reviewer get only `Read`, `Grep` and `Glob`. Your MCP servers (mail, payments, …) are never loaded, and the repository's own `.claude/settings.json` (hooks, env, API URL) is ignored; your user-level Claude settings apply.
 - **Codex:** read-only steps run in Codex's read-only sandbox (nothing can be written), which is not a tool allowlist and does not cover MCP tools. Your Codex configuration applies as it is, MCP servers and plugins included (see Harnesses).
-- **exec runs the agent with permissions bypassed** (`--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex): the agent can run any command as you, inside the run's worktree. Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
+- **exec runs the agent with permissions bypassed** (`--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex): the agent can run any command as you, inside the run's worktree (by default in `~/.cache/milhouse`, or in `$XDG_CACHE_HOME/milhouse` when that is an absolute path: outside your project, so that a command in it cannot find what is installed in your project's own directories. If you set `MILHOUSE_WORK_DIR`, choose a folder outside your project too, and keep it the same for the life of a run). Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
 - Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Files that appear in your checkout during a run (an editor's, the OS's) never block its merge; before a run that includes exec, untracked files do stop it, because exec starts from the last commit and would not see them. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
 - Your git hooks run for the agents' commits (agents are told to use `--no-verify` if a commit-message rule rejects `[<task id>] <title>`); Milhouse's own commits skip them. `GIT_DIR` and friends inherited from a caller never reach agents or checks, and without a git identity commits use `milhouse <milhouse@localhost>`.
-- Claude's cost is its own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`. Codex reports tokens, not dollars: they are counted and shown, but `budget` cannot limit them.
+- Claude's cost is its own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`. Codex reports tokens, not dollars: they are counted and shown, but `budget` cannot limit them. `maxMinutes` is a clock for one command, Codex included. It starts when the run begins, once the configuration is read (the check of the starting commit counts): no agent call outlasts it and no new one starts, while a check that has begun runs on to `commandTimeoutMinutes`.
 - Ctrl-C, SIGTERM and a closed terminal stop the agents too. After `kill -9` an agent may keep running: check `ps` before resuming.
 - One Milhouse per checkout at a time (`.milhouse/lock`). A command that never stops printing cannot exhaust memory (only the last 32 MB are kept), and what an agent or a check leaves running in the background is stopped when it finishes (unless it detached itself from the process group).
 
@@ -77,13 +82,15 @@ A step uses the model of its own harness: the global `model` does not apply to a
 
 ## Configuration
 
-`milhouse init` (or `milhouse --init`) writes `.milhouse/config.ts` with every option and its default. It works with uncommitted changes, leaves an existing config alone, and does not start any agents. The options that matter:
+`milhouse init` (or `milhouse --init`) writes `.milhouse/config.ts` with every option and its default; only `commands` holds what it found in your project. It works with uncommitted changes, leaves an existing config alone, and does not start any agents. The options that matter:
 
 ```ts
 export default {
   harness: "claude",                     // or "codex"; per step: phases.<step>.harness
   model: "",                             // "" = claude: sonnet, codex: your Codex config; per step: phases.<step>.model
   budget: 50,                            // USD per run, 0 = unlimited
+  maxMinutes: 0,                         // the clock of one command, for every agent: no call outlasts it, no new one starts; 0 = unlimited
+  commandTimeoutMinutes: 10,             // the longest one setup, build, lint or test command may run
   commands: { setup: "bun install", build: "", lint: "bunx biome check .", test: "bun test" },
   neverTouch: ["migrations/**", ".env*"],
   rules: ["Use parameterized SQL queries"],
@@ -92,11 +99,11 @@ export default {
 };
 ```
 
-Unknown keys and wrong types are errors, so a typo cannot silently disable a rule. `commands.setup` runs whenever the worktree is created (also after a failed issue); what it installs must be ignored by git (`node_modules`, `.venv`). The other commands run on every issue and must leave the files alone. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
+`phases.<step>.timeoutMinutes` sets how long one agent call of a step may take (scan 15, exec 30, verify 10, the rest 5). `neverTouch` and `gates.ignore` patterns are written like `.gitignore` lines, without exceptions (`!` is an error): a name such as `.env*` or `secrets` matches a file or directory at any depth with everything below it (`cache/`: directories only), a pattern with a slash inside or in front (`migrations/**`, `/LICENSE`) starts at the repository root. Unknown keys and wrong types are errors, so a typo cannot silently disable a rule. `commands.setup` runs whenever the worktree is created (also after a failed issue); what it installs must be ignored by git (`node_modules`, `.venv`). The worktree holds the committed files only: submodules and ignored files such as `.env` are not in it, so let `setup` fetch what the checks need (for example `git submodule update --init --recursive`). The other commands run on every issue and must leave the files alone. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
 
 ### One agent per step
 
-Every step has its own `harness`, `model`, `rules`, `retries` and, for the two steps that run items in parallel, `workers`. A full example for fixing bugs (paste it into `.milhouse/config.ts`, then `milhouse "fix the bugs in src/auth"`):
+Every step has its own `harness`, `model`, `rules`, `retries`, `timeoutMinutes` and, for the two steps that run items in parallel, `workers`. A full example for fixing bugs (paste it into `.milhouse/config.ts`, then `milhouse "fix the bugs in src/auth"`):
 
 ```ts
 // Claude reads the code and does the work; Codex checks the findings (many at once) and reviews the result.
@@ -134,7 +141,8 @@ milhouse --report [--format md] run summary: issues, tasks, failures, cost
 milhouse --list-runs            list runs
 milhouse --clean [--days 30]    delete finished runs
 milhouse init                   create .milhouse/config.ts (also: --init)
-  --scope <text>  --workers <n>  --harness <claude|codex>  --model <name>  --run-id <id>  -v  -V  -h
+  --scope <text>  --workers <n>  --harness <claude|codex>  --model <name>  --run-id <id>
+  --allow-unchecked  -v  -V  -h
 ```
 
 Unknown flags are an error; with no arguments you get the help. It works from any subdirectory. The exit code is 0 only if everything that was asked for succeeded.
@@ -145,12 +153,21 @@ Unknown flags are an error; with no arguments you get the help. It works from an
 
 ```
 .milhouse/config.ts          your config (commit it)
-.milhouse/runs/<run-id>/     meta.json  issues.json  tasks.json  cost.json
-.milhouse/work/<run-id>/     the exec worktree
+.milhouse/runs/<run-id>/     meta.json  issues.json  tasks.json  cost.json  events.jsonl
+~/.cache/milhouse/<project>/<run-id>/  the exec worktree (MILHOUSE_WORK_DIR moves it; a run of 0.5.1 keeps .milhouse/work/<run-id>/ while that exists)
 refs/milhouse/<run-id>       accepted work; mh-failed/<issue-id> holds failed attempts
 ```
 
-Everything under `.milhouse/` except `config.ts` is ignored by git (`.milhouse/.gitignore`). `--clean` keeps accepted work that was never merged.
+`events.jsonl` has one JSON object per line: every failed attempt with its reason, every verdict of the reviewer with its reason (approvals too), whether each issue was accepted or failed, and why a run stopped at its starting commit. Everything under `.milhouse/` except `config.ts` is ignored by git (`.milhouse/.gitignore`). `--clean` keeps accepted work that was never merged.
+
+## Upgrading from 0.5.1
+
+- exec refuses to start without a build, lint or test command: set one in your `.milhouse/config.ts` (`milhouse init` writes what a project defines, but leaves an existing config alone), or pass `--allow-unchecked`.
+- A run whose checks already fail on the starting commit stops before it spends anything. Set `gates.baseline: false` to go on anyway.
+- `placeholder` and `diffHygiene` skip binary files and, by default, `*.md`, `*.tsv`, `*.csv`, `*.patch` and `*.diff` (`gates.ignore`).
+- `neverTouch` patterns without a slash (`.env*`, `LICENSE`) now match at any depth, as in `.gitignore`; write `/LICENSE` for the root only. A pattern that starts with `!` is an error now (before, it matched in an odd way).
+- The worktree moved out of `.milhouse/work` into `~/.cache/milhouse` (`MILHOUSE_WORK_DIR` overrides it); a run that began with 0.5.1 keeps its old one for as long as that folder exists.
+- New options: `maxMinutes`, `commandTimeoutMinutes`, `phases.<step>.timeoutMinutes`, `allowUnchecked`, `gates.baseline`, `gates.ignore`. Old configs load unchanged.
 
 ## Upgrading from 0.3
 

@@ -5,7 +5,7 @@ import type { PhaseDef } from "../runner.ts";
 import { arrayOf, object } from "../schema.ts";
 import type { Task } from "../types.ts";
 import { log } from "../ui.ts";
-import { MINUTE, parseJson, stringList } from "../util.ts";
+import { parseJson, stringList } from "../util.ts";
 
 export interface Consolidation {
 	duplicates: Array<{ keep: string; remove: string[] }>;
@@ -27,7 +27,7 @@ function consolidatePrompt(tasks: Task[], lastError?: string): string {
 	const list = tasks
 		.map(
 			(t) =>
-				`### [${t.id}] ${t.title}\n- issue: ${t.issue_id}\n- files: ${t.files.join(", ") || "none"}\n- depends on: ${t.depends_on.join(", ") || "none"}`,
+				`### [${t.id}] ${t.title}\n- issue: ${t.issue_id}\n- what it does: ${t.description.trim() || "(not said)"}\n- files: ${t.files.join(", ") || "none"}\n- depends on: ${t.depends_on.join(", ") || "none"}`,
 		)
 		.join("\n\n");
 	return prompt(
@@ -40,7 +40,7 @@ function consolidatePrompt(tasks: Task[], lastError?: string): string {
 			"Task",
 			[
 				"1. duplicates: tasks that do the same work (usually in different issues). Keep one, list the others in `remove`.",
-				"2. cross_dependencies: a task that needs the result of a task from ANOTHER issue: shared files, shared interfaces, or tests that only pass once the other issue's fix is in. This decides which issue runs first, so declare every such link.",
+				"2. cross_dependencies: a task that cannot work without a change that a task from ANOTHER issue makes: its code calls something the other task adds or changes, or its tests only pass with that change. This decides which issue runs first, and an issue whose dependency failed is not attempted, so declare only such links. Do not link tasks only because they edit the same file, run the same test suite or regenerate the same generated file.",
 				"Use only the ids listed above. Return empty lists when nothing applies.",
 			].join("\n"),
 		),
@@ -146,7 +146,6 @@ export const consolidatePhase: PhaseDef<Task[], Consolidation> = {
 		const text = await ctx.ask(consolidatePrompt(tasks, ctx.lastError), {
 			schema: CONSOLIDATE_SCHEMA,
 			maxTurns: 20,
-			timeoutMs: 5 * MINUTE,
 		});
 		return parseConsolidation(text);
 	},

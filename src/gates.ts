@@ -9,10 +9,27 @@ import { MINUTE, tail } from "./util.ts";
 
 export const COMMAND_TIMEOUT_MS = 10 * MINUTE;
 
-/** Files that match one of the `neverTouch` globs. A trailing "/" means "everything below". */
+/**
+ * A test for files that match one of `patterns`, written like .gitignore lines but without exceptions (`!`):
+ * a name is a file or a directory with everything below it (with a slash at its end: a directory), a pattern
+ * with a slash in it or in front of it starts at the repository root, one without (`.env*`, `cache/`) matches
+ * at any depth.
+ */
+export function globMatcher(patterns: string[]): (file: string) => boolean {
+	const globs = patterns.flatMap((raw) => {
+		const name = raw.replace(/^\/+/, "").replace(/\/+$/, "");
+		if (!name) return [];
+		const anchored = raw.startsWith("/") || name.includes("/");
+		const path = anchored ? name : `**/${name}`;
+		const below = new Bun.Glob(`${path}/**`);
+		return raw.endsWith("/") ? [below] : [new Bun.Glob(path), below];
+	});
+	return (file) => globs.some((glob) => glob.match(file));
+}
+
+/** Files that match one of the `neverTouch` patterns. */
 export function forbiddenFiles(files: string[], patterns: string[]): string[] {
-	const globs = patterns.map((p) => new Bun.Glob(p.endsWith("/") ? `${p}**` : p));
-	return files.filter((file) => globs.some((glob) => glob.match(file)));
+	return files.filter(globMatcher(patterns));
 }
 
 const TRAILING_SPACE = /[ \t]+$/;
@@ -83,11 +100,11 @@ export async function runChecks(
 export async function runProjectChecks(
 	dir: string,
 	commands: Config["commands"],
-	passed?: string[],
+	opts: { passed?: string[]; timeoutMs?: number } = {},
 ): Promise<string | null> {
 	const before = await revParse(dir, "HEAD");
 	const { build, lint, test } = commands;
-	const failure = await runChecks(dir, { build, lint, test }, { passed });
+	const failure = await runChecks(dir, { build, lint, test }, opts);
 	await gitOrThrow(dir, "clean", "-fd"); // what the commands generated: the tree was clean before them
 	if (failure) return failure;
 	if ((await revParse(dir, "HEAD")) !== before) {

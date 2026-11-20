@@ -5,7 +5,7 @@ import { context, describeIssue, feedback, prompt, role, section } from "../prom
 import type { Ctx, PhaseDef } from "../runner.ts";
 import { arrayOf, object } from "../schema.ts";
 import type { Evidence, Issue } from "../types.ts";
-import { MINUTE, parseJson } from "../util.ts";
+import { parseJson } from "../util.ts";
 
 const VERDICTS = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] as const;
 
@@ -70,7 +70,6 @@ export const validatePhase: PhaseDef<Issue, Verdict> = {
 		const text = await ctx.ask(validatePrompt(issue, ctx), {
 			schema: VALIDATE_SCHEMA,
 			maxTurns: 30,
-			timeoutMs: 5 * MINUTE,
 		});
 		const verdict = parseJson<Verdict>(text, "Validate");
 		if (!VERDICTS.includes(verdict.status))

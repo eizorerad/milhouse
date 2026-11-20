@@ -65,6 +65,7 @@ describe('the README example "One agent per step"', () => {
 		// The example installs and tests with bun; this repository has neither.
 		const config = deepMerge(loaded as unknown as Record<string, unknown>, {
 			budget: 0,
+			allowUnchecked: true,
 			commands: { setup: "", test: "" },
 		}) as unknown as Config;
 		expect(await go(repo, config)).toBe(true);

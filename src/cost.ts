@@ -29,10 +29,14 @@ export function formatCost(cost: RunCost): string {
 
 /** Single mutable cell for a run's spending, shared by parallel workers. */
 export class CostTracker {
+	private readonly startedAt = Date.now();
+
 	constructor(
 		private cost: RunCost,
 		private readonly budget: number,
 		private readonly persist: (cost: RunCost) => void,
+		/** How long this command may run in all, in milliseconds; 0 = no limit. */
+		private readonly timeLimitMs = 0,
 	) {}
 
 	get current(): RunCost {
@@ -57,8 +61,20 @@ export class CostTracker {
 		this.persist(this.cost);
 	}
 
+	/** Which limit stops new work: the money or the time. Null while neither is used up. */
+	limitReached(): "budget" | "time" | null {
+		if (this.budget > 0 && this.cost.total >= this.budget) return "budget";
+		return this.remainingMs() <= 0 ? "time" : null;
+	}
+
 	exceeded(): boolean {
-		return this.budget > 0 && this.cost.total >= this.budget;
+		return this.limitReached() !== null;
+	}
+
+	/** Milliseconds left of the time limit; infinite without one. */
+	remainingMs(): number {
+		if (this.timeLimitMs <= 0) return Number.POSITIVE_INFINITY;
+		return this.timeLimitMs - (Date.now() - this.startedAt);
 	}
 
 	private reserved = 0;

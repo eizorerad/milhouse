@@ -1,15 +1,21 @@
 /** Run state: JSON files under .milhouse/runs/<id>/. Writes are atomic; corrupt files fail loudly. */
 
+import { createHash } from "node:crypto";
 import {
+	constants,
+	closeSync,
 	existsSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
 	readdirSync,
 	renameSync,
 	rmSync,
 	writeFileSync,
+	writeSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { emptyCost } from "./cost.ts";
 import type { Issue, Phase, RunCost, RunMeta, RunStatus, Task } from "./types.ts";
 import { errorMessage, generateId, now } from "./util.ts";
@@ -60,9 +66,23 @@ export class RunStore {
 		return `refs/milhouse/${this.runId}`;
 	}
 
-	/** Worktree where exec works. Its HEAD is detached; accepted work is recorded in `ref`. */
+	/**
+	 * Worktree where exec works. Its HEAD is detached; accepted work is recorded in `ref`.
+	 * It is outside the project: inside it, a command would find the packages installed in the project's own
+	 * directory, and checks would pass on work that does not install them. It is not in the temporary folder,
+	 * which other users share and which may be small or mounted noexec. MILHOUSE_WORK_DIR moves it elsewhere.
+	 */
 	get worktree(): string {
-		return join(this.workDir, STATE_DIR, "work", this.runId);
+		const earlier = join(this.workDir, STATE_DIR, "work", this.runId); // where 0.5.1 put it
+		if (existsSync(earlier)) return earlier;
+		const chosen = process.env.MILHOUSE_WORK_DIR?.trim();
+		if (chosen) return join(resolve(chosen), this.runId);
+		// By default the user's cache folder (XDG_CACHE_HOME if it is an absolute path), and in it one for this
+		// project: two clones may have a run of the same id.
+		const xdg = process.env.XDG_CACHE_HOME?.trim();
+		const cache = xdg && isAbsolute(xdg) ? xdg : join(homedir(), ".cache");
+		const project = createHash("sha1").update(this.workDir).digest("hex").slice(0, 10);
+		return join(cache, "milhouse", project, this.runId);
 	}
 
 	private file(name: string): string {
@@ -123,6 +143,22 @@ export class RunStore {
 
 	finish(status: RunStatus): void {
 		this.patchMeta({ status });
+	}
+
+	// ─── Log ─────────────────────────────────────────────────────────
+
+	/** Adds one line to the run's log (events.jsonl): what happened, for whoever reads the run afterwards. */
+	logEvent(event: Record<string, unknown>): void {
+		mkdirSync(dirname(this.file("events.jsonl")), { recursive: true });
+		// Not through a symlink that somebody planted, as writeJson does not either.
+		const flags =
+			constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW;
+		const fd = openSync(this.file("events.jsonl"), flags, 0o600);
+		try {
+			writeSync(fd, `${JSON.stringify({ at: now(), ...event })}\n`);
+		} finally {
+			closeSync(fd);
+		}
 	}
 
 	// ─── Cost ────────────────────────────────────────────────────────

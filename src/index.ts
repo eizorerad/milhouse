@@ -5,7 +5,8 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import pkg from "../package.json";
-import { CONFIG_TEMPLATE, ConfigError, loadConfig, stepHarness } from "./config.ts";
+import { ConfigError, configTemplate, loadConfig, stepHarness } from "./config.ts";
+import { detectCommands } from "./detect.ts";
 import { repoRoot } from "./git.ts";
 import { acquireLock } from "./lock.ts";
 import { runPipeline } from "./pipeline.ts";
@@ -40,6 +41,7 @@ Options:
   --scope <text>   What to look for (same as the positional text)
   --workers <n>    Parallel agents for validate and plan
   --harness <name> Agent for every step: claude or codex
+  --allow-unchecked  Run exec without a build, lint or test command (an agent alone reviews the work)
   --model <name>   Model for every step (of the steps' harness)
   --run-id <id>    Pick the run for --resume, --report and single phases
   -v, --verbose    Debug output
@@ -64,6 +66,7 @@ const OPTIONS = {
 	consolidate: flag,
 	exec: flag,
 	merge: flag,
+	"allow-unchecked": flag,
 	days: { type: "string" },
 	scope: { type: "string" },
 	workers: { type: "string" },
@@ -134,9 +137,13 @@ function initProject(workDir: string): void {
 		log.warn(`${configPath} already exists`);
 		return;
 	}
-	writeFileSync(configPath, CONFIG_TEMPLATE);
+	const found = detectCommands(workDir);
+	writeFileSync(configPath, configTemplate(found));
+	const lines = Object.entries(found).map(([slot, command]) => `  ${slot}: ${command}`);
 	log.success(
-		`Created ${STATE_DIR}/config.ts. Set commands.test/lint/build so exec can check its work.`,
+		lines.length === 0
+			? `Created ${STATE_DIR}/config.ts. Set commands.test/lint/build so exec can check its work.`
+			: `Created ${STATE_DIR}/config.ts with the commands this project defines. Build, lint and test run on every issue (setup when the worktree is made), so check them:\n${lines.join("\n")}`,
 	);
 }
 
@@ -224,7 +231,10 @@ async function main(argv: string[]): Promise<number> {
 
 	const workers = positiveInt(values.workers, "--workers");
 	const harness = parseHarness(values.harness);
-	const loaded = await loadConfig(workDir, workerOverrides(workers));
+	const loaded = await loadConfig(workDir, {
+		...workerOverrides(workers),
+		...(values["allow-unchecked"] ? { allowUnchecked: true } : {}),
+	});
 	const chosen = harness ? withHarness(loaded, harness) : loaded;
 	const config = values.model ? withModel(chosen, values.model) : chosen;
 	printBanner(pkg.version);

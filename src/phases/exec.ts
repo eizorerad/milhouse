@@ -8,11 +8,13 @@
  */
 
 import { existsSync } from "node:fs";
+import { commandTimeoutMs } from "../config.ts";
 import { EngineError } from "../engine.ts";
 import {
 	findPlaceholders,
 	findWhitespaceProblems,
 	forbiddenFiles,
+	globMatcher,
 	runProjectChecks,
 } from "../gates.ts";
 import {
@@ -35,7 +37,7 @@ import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
 import type { RunStore } from "../state.ts";
 import type { Config, Task } from "../types.ts";
-import { MINUTE, errorMessage, parseJson, tail } from "../util.ts";
+import { errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
 import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
 import { REVIEW_SCHEMA, bullets, execPrompt, reviewPrompt } from "./exec-prompts.ts";
@@ -90,15 +92,16 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 	}
 
 	// .milhouse/ is milhouse's own: its config is executed as code, so no commit may change it.
-	const protectedPaths = [...config.neverTouch, ".milhouse/"];
+	const protectedPaths = [...config.neverTouch, "/.milhouse"]; // also a file or a link of that name
 	const forbidden = forbiddenFiles(await touchedFiles(work.dir, work.accepted), protectedPaths);
 	if (forbidden.length > 0) {
 		return `Commits touched files that must never be modified: ${forbidden.join(", ")}. Rewrite the history so that no commit after ${tip} touches them (for example git reset --soft ${tip}, restore those files, then commit per task again).`;
 	}
 
+	const ignored = globMatcher(config.gates.ignore);
 	const added =
 		config.gates.placeholder || config.gates.diffHygiene
-			? await addedLines(work.dir, work.accepted)
+			? (await addedLines(work.dir, work.accepted)).filter(({ file }) => !ignored(file))
 			: [];
 	if (config.gates.placeholder) {
 		const found = findPlaceholders(added);
@@ -113,7 +116,10 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 		}
 	}
 	if (config.gates.dod) {
-		const failure = await runProjectChecks(work.dir, config.commands, work.passedChecks);
+		const failure = await runProjectChecks(work.dir, config.commands, {
+			passed: work.passedChecks,
+			timeoutMs: commandTimeoutMs(config),
+		});
 		if (failure) return failure;
 	}
 	return null;
@@ -159,7 +165,6 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 				cwd: work.dir,
 				schema: REVIEW_SCHEMA,
 				maxTurns: 25,
-				timeoutMs: 10 * MINUTE,
 			});
 		} catch (err) {
 			// An agent failure (outage, budget) goes back to the runner, which backs off and retries.
@@ -179,6 +184,7 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 	}
 	if (!verdicts) throw new Error(`${REVIEW_UNAVAILABLE}: ${failure}`);
 
+	ctx.store.logEvent({ event: "review", issue: group.issue.id, verdicts });
 	const reasons = rejectionReasons(verdicts, group.tasks);
 	if (reasons.length > 0) throw new Error(`The reviewer rejected the work:\n${bullets(reasons)}`);
 }
@@ -239,7 +245,6 @@ async function implement(
 		await ctx.ask(execPrompt(group, done, ctx.config, problem), {
 			cwd: work.dir,
 			tools: "all",
-			timeoutMs: 30 * MINUTE,
 		});
 	} catch (err) {
 		// The agent was killed or crashed, perhaps in the middle of a commit.
@@ -294,6 +299,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		const ids = group.tasks.map((t) => t.id);
 		if (outcome.ok) {
 			store.updateTasks(ids, { status: "verified", error: undefined });
+			store.logEvent({ event: "accepted", issue: group.issue.id, sha: outcome.value });
 			await deleteBranch(store.workDir, parkBranch(group.issue.id)); // a stale parked attempt
 			return;
 		}
@@ -315,6 +321,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 			// silently build on. A fresh worktree (and its setup) starts every issue from what was accepted.
 			await discardWorktree(store);
 		}
+		store.logEvent({ event: "failed", issue: group.issue.id });
 		// Keep the start of the message: markers such as REVIEW_UNAVAILABLE are recognised by their prefix.
 		store.updateTasks(ids, { status: "failed", error: outcome.error.slice(0, 2000) });
 	},

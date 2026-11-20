@@ -1,7 +1,7 @@
 /** Git helpers. Every function takes the directory to run in first. Nothing here touches the user's files. */
 
-import { existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { type RunResult, run } from "./proc.ts";
 import { MINUTE, tail } from "./util.ts";
 
@@ -190,6 +190,8 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 	// Raw output: trailing whitespace on the very last added line must survive.
 	const result = await gitRun(
 		cwd,
+		"-c",
+		"core.quotePath=false", // the names of non-ASCII files as they are
 		"diff",
 		"--text",
 		"-U0",
@@ -213,7 +215,7 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 	for (let i = 0; i < rows.length; i++) {
 		const row = rows[i];
 		if (row.startsWith("+++ ")) {
-			file = row.slice(4).replace(/^b\//, "");
+			file = row.slice(4).replace(/\t.*$/, "").replace(/^b\//, ""); // git ends a name with a space in it with a tab
 			continue;
 		}
 		const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(row);
@@ -230,7 +232,9 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 			added.push({ file, text: rows[i].slice(1) });
 		}
 	}
-	return added;
+	// --text prints a binary file too, as lines with NUL bytes in them: they are not text to check.
+	const binary = new Set(added.filter(({ text }) => text.includes("\0")).map(({ file }) => file));
+	return added.filter(({ file }) => !binary.has(file));
 }
 
 // The reviewer only ever reads the start of these, so a huge diff is cut off instead of refused.
@@ -257,6 +261,8 @@ export async function ensureWorktree(
 	ref: string,
 	baseSha: string,
 ): Promise<{ created: boolean }> {
+	// First, so that a failure leaves no ref behind. The worktree holds a copy of the project: the owner only.
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	if (!(await refExists(repo, ref))) await gitOrThrow(repo, "update-ref", ref, baseSha);
 	if (existsSync(join(path, ".git"))) return { created: false };
 

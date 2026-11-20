@@ -13,6 +13,8 @@ export type RunStatus = "running" | "completed" | "failed" | "stopped";
 
 export interface StepOptions {
 	retries: number;
+	/** Minutes that one call of this step may take. */
+	timeoutMinutes: number;
 	/** Empty string = the global model (when the step runs on the global harness) or the harness default. */
 	model: string;
 	/** Empty string = the global harness. */
@@ -36,14 +38,29 @@ export interface Config {
 	phases: Record<AgentStep, StepOptions>;
 	/** USD limit for one run. 0 = unlimited. */
 	budget: number;
+	/** Minutes that one command may run in all, whatever the agent. 0 = unlimited. */
+	maxMinutes: number;
 	project: { name: string; language: string; framework: string; description: string };
 	/** Shell commands run inside the worktree. An empty string skips the command. */
 	commands: { setup: string; build: string; lint: string; test: string };
+	/** Minutes that one setup, build, lint or test command may take. */
+	commandTimeoutMinutes: number;
+	/** Run exec although no build, lint or test command is set: an agent alone reviews the work. */
+	allowUnchecked: boolean;
 	/** Extra rules injected into every prompt. */
 	rules: string[];
 	/** Globs agents must not change. Enforced after every exec attempt. */
 	neverTouch: string[];
-	gates: { evidence: boolean; diffHygiene: boolean; placeholder: boolean; dod: boolean };
+	gates: {
+		evidence: boolean;
+		diffHygiene: boolean;
+		placeholder: boolean;
+		dod: boolean;
+		/** The checks must pass on the starting commit before the run spends anything. */
+		baseline: boolean;
+		/** Files that the `placeholder` and `diffHygiene` gates do not look at (patterns as in .gitignore). */
+		ignore: string[];
+	};
 }
 
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";

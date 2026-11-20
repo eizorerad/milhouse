@@ -55,11 +55,67 @@ describe("loadConfig", () => {
 	});
 
 	it("rejects values of the wrong type", async () => {
-		const dir = projectWith(`export default { budget: "lots", failFast: "yes", neverTouch: "x" };`);
+		const dir = projectWith(
+			`export default { budget: "lots", failFast: "yes", neverTouch: "x", gates: { ignore: "*.md" } };`,
+		);
 		const error = await loadConfig(dir).catch((e) => e);
 		expect(error.message).toContain("budget must be a number");
 		expect(error.message).toContain("failFast must be a boolean");
 		expect(error.message).toContain("neverTouch must be an array of strings");
+		expect(error.message).toContain("gates.ignore must be an array of strings");
+	});
+
+	it("takes the time that agents and checks may run from the config, and rejects a limit that is not positive", async () => {
+		const set = await loadConfig(
+			projectWith(
+				"export default { commandTimeoutMinutes: 30, phases: { exec: { timeoutMinutes: 60 } } };",
+			),
+		);
+		expect(set.commandTimeoutMinutes).toBe(30);
+		expect(set.phases.exec.timeoutMinutes).toBe(60);
+		expect(set.phases.scan.timeoutMinutes).toBe(15); // untouched default
+
+		const longest = projectWith(
+			"export default { commandTimeoutMinutes: 1440, phases: { exec: { timeoutMinutes: 1440 } } };",
+		);
+		expect((await loadConfig(longest)).commandTimeoutMinutes).toBe(1440);
+		const tooLong = await loadConfig(
+			projectWith("export default { commandTimeoutMinutes: 1441 };"),
+		).catch((e) => e);
+		expect(tooLong.message).toContain(
+			"commandTimeoutMinutes must be a number above 0 and at most 1440",
+		);
+
+		const bad = projectWith(
+			"export default { commandTimeoutMinutes: 0, phases: { scan: { timeoutMinutes: -1 } } };",
+		);
+		const error = await loadConfig(bad).catch((e) => e);
+		expect(error.message).toContain("commandTimeoutMinutes must be a number above 0");
+		expect(error.message).toContain("phases.scan.timeoutMinutes must be a number above 0");
+	});
+
+	it("rejects patterns with an exception (!), which neverTouch and gates.ignore do not support", async () => {
+		const dir = projectWith(
+			'export default { neverTouch: ["*.lock", "!keep.lock"], gates: { ignore: ["!a.md"] } };',
+		);
+		const error = await loadConfig(dir).catch((e) => e);
+		expect(error.message).toContain('neverTouch: "!keep.lock" cannot start with "!"');
+		const hidden = projectWith('export default { neverTouch: ["/!x", "//!y"] };');
+		const slashed = await loadConfig(hidden).catch((e) => e);
+		expect(slashed.message).toContain('neverTouch: "/!x" cannot start with "!"');
+		expect(slashed.message).toContain('neverTouch: "//!y" cannot start with "!"');
+		expect(error.message).toContain('gates.ignore: "!a.md" cannot start with "!"');
+	});
+
+	it("takes a time limit for the whole command, and rejects a negative one", async () => {
+		expect((await loadConfig(projectWith("export default { maxMinutes: 90 };"))).maxMinutes).toBe(
+			90,
+		);
+		expect((await loadConfig(projectWith())).maxMinutes).toBe(0); // no limit
+		const error = await loadConfig(projectWith("export default { maxMinutes: -5 };")).catch(
+			(e) => e,
+		);
+		expect(error.message).toContain("maxMinutes must be a finite number >= 0");
 	});
 
 	it("accepts the two harnesses, globally and per step, with their extra arguments", async () => {

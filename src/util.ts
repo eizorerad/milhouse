@@ -67,24 +67,37 @@ function closingIndex(text: string, start: number): number {
 	return -1;
 }
 
-/** First parseable JSON object or array in free-form model output (fenced or not). */
-export function extractJson(text: string): string | null {
-	let start = text.search(/[[{]/);
-	while (start !== -1) {
-		const end = closingIndex(text, start);
-		if (end !== -1) {
-			const candidate = text.slice(start, end + 1);
-			try {
-				JSON.parse(candidate);
-				return candidate;
-			} catch {
-				// Not JSON (e.g. a bracket in prose) — try the next opening bracket.
-			}
-		}
-		const next = text.slice(start + 1).search(/[[{]/);
-		start = next === -1 ? -1 : start + 1 + next;
+function isJson(text: string): boolean {
+	try {
+		JSON.parse(text);
+		return true;
+	} catch {
+		return false;
 	}
-	return null;
+}
+
+/**
+ * The largest JSON object or array in free-form model output (fenced or not). The answer is the largest:
+ * the prose around it may hold brackets of its own, such as `[0]` or `{}`.
+ */
+export function extractJson(text: string): string | null {
+	// A bracket after the last closing one of its kind cannot be closed: not worth a look.
+	const lastClose: Record<string, number> = {
+		"{": text.lastIndexOf("}"),
+		"[": text.lastIndexOf("]"),
+	};
+	let best: string | null = null;
+	for (let start = 0; start < text.length; start++) {
+		const open = text[start];
+		if ((open !== "{" && open !== "[") || start > lastClose[open]) continue;
+		const end = closingIndex(text, start);
+		if (end === -1) continue;
+		const candidate = text.slice(start, end + 1);
+		if (!isJson(candidate)) continue; // a bracket in prose: try the next one
+		if (best === null || candidate.length > best.length) best = candidate;
+		start = end; // brackets inside belong to this value
+	}
+	return best;
 }
 
 /** Parse model output as JSON (structured output or fenced block). Throws a short error. */

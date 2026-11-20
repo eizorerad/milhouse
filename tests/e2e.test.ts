@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { isDirty, refExists } from "../src/git.ts";
 import { acquireLock } from "../src/lock.ts";
+import { RunStore } from "../src/state.ts";
 import {
 	TWO_ISSUES,
 	allStatus,
 	calls,
+	captureConsole,
 	cleanupTempDirs,
 	commitFile,
 	git,
@@ -19,14 +21,13 @@ import {
 	readFile,
 	resetFakeAgentEnv,
 	setScenario,
-	silenceConsole,
 	tempDir,
 	testConfig,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
 
-silenceConsole();
+const output = captureConsole();
 
 afterEach(() => {
 	cleanupTempDirs();
@@ -145,6 +146,13 @@ describe("repair loop", () => {
 		const [task] = latest(repo).loadTasks();
 		expect(readFile(repo, `${task.id}.txt`)).not.toContain("TODO");
 		expect(calls(fake, "Truth Verifier")).toHaveLength(1); // only the fixed work was reviewed
+	});
+
+	it("does not check the files that gates.ignore names", async () => {
+		const fake = useFakeAgent({ exec: { "Add greeting": "todo-first" } });
+		const repo = await makeRepo();
+		expect(await go(repo, testConfig({ gates: { ignore: ["*.txt"] } }))).toBe(true);
+		expect(calls(fake, "Executor")).toHaveLength(1); // the TODO was not sent back
 	});
 
 	it("sends back files left uncommitted in the worktree", async () => {
@@ -370,6 +378,86 @@ describe("single phases", () => {
 		await expect(go(repo, testConfig(), { resume: true, runId: "nope" })).rejects.toThrow(
 			/not found/,
 		);
+	});
+});
+
+describe("what the consolidator is told", () => {
+	it("what each task does, not only its title: it cannot judge a dependency from a title", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const [asked] = calls(fake, "Consistency Manager");
+		expect(asked.prompt).toContain("- what it does: first");
+	});
+});
+
+describe("the log of a run", () => {
+	it("keeps what the reviewer said, also for work that was accepted in the end", async () => {
+		useFakeAgent({ reject: { "Add greeting": 1 } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const text = readFile(repo, `.milhouse/runs/${latest(repo).runId}/events.jsonl`);
+		const events = text
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+
+		const reviews = events.filter((e) => e.event === "review");
+		expect(reviews).toHaveLength(2);
+		expect(reviews[0].verdicts[0].passed).toBe(false);
+		expect(reviews[1].verdicts[0].passed).toBe(true);
+		expect(reviews[1].verdicts[0].reason).not.toBe("");
+		const failed = events.find((e) => e.event === "attempt-failed");
+		expect(failed.error).toContain("The reviewer rejected the work");
+		expect(events.some((e) => e.event === "accepted")).toBe(true);
+	});
+});
+
+describe("the log of a run that fails", () => {
+	it("says that an issue failed, without inventing a branch for it", async () => {
+		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(false);
+		const text = readFile(repo, `.milhouse/runs/${latest(repo).runId}/events.jsonl`);
+		const events = text
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(events.filter((e) => e.event === "attempt-failed").length).toBeGreaterThan(0);
+		expect(events.filter((e) => e.event === "failed")).toHaveLength(1);
+		expect(events.some((e) => e.event === "parked" || e.branch !== undefined)).toBe(false);
+	});
+});
+
+describe("a run without project checks", () => {
+	it("is refused before it costs anything", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await expect(go(repo, testConfig({ commands: { test: "" } }))).rejects.toThrow(
+			/No build, lint or test command.*--allow-unchecked/s,
+		);
+		expect(RunStore.list(repo)).toEqual([]);
+		expect(fake.journal()).toHaveLength(0);
+	});
+
+	it("goes ahead when allowUnchecked is set, and says what the waiting work lacks", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({ commands: { test: "" }, allowUnchecked: true });
+		expect(await go(repo, config)).toBe(true);
+		expect(allStatus(repo, "verified")).toBe(true);
+		expect(await mainSubjects(repo)).toEqual(["initial"]); // nothing merged by itself
+		expect(output.join("\n")).toContain("no project check ran");
+		expect(output.join("\n")).not.toContain("reviewed them");
+	});
+
+	it("does not stand in the way of a merge by hand", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await go(repo, testConfig({ commands: { test: "" }, allowUnchecked: true }));
+		const withoutPermission = testConfig({ commands: { test: "" } });
+		expect(await go(repo, withoutPermission, { only: "merge" })).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 });
 

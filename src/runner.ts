@@ -23,7 +23,6 @@ export interface AskOptions {
 	cwd?: string;
 	schema?: object;
 	maxTurns?: number;
-	timeoutMs?: number;
 	/** Default "read". */
 	tools?: "read" | "all";
 }
@@ -55,7 +54,6 @@ export class GiveUp extends Error {}
 /** Throw to leave an item untouched for now: nothing is recorded, --resume picks it up again. */
 export class Skip extends Error {}
 
-const DEFAULT_TIMEOUT_MS = 10 * MINUTE;
 const retryDelayMs = (): number => Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 2000);
 const firstLine = (text: string): string => text.split("\n")[0].slice(0, 160);
 
@@ -76,6 +74,9 @@ function makeAsk(
 			if (allowance !== undefined && allowance <= 0) {
 				throw new EngineError("the budget is used up", { fatal: true });
 			}
+			// Read once: a call that starts with no time left would get no timer at all, or a negative one.
+			const remaining = cost.remainingMs();
+			if (remaining <= 0) throw new EngineError("the time limit is used up", { fatal: true });
 			// The step's own rules come last, after the role, the task and the global rules.
 			const stepRules = config.phases[step].rules.map((rule) => `- ${rule}`).join("\n");
 			const extra = section("Extra rules for this step", stepRules);
@@ -85,7 +86,7 @@ function makeAsk(
 				model: stepModel(config, step),
 				schema: o.schema,
 				maxTurns: o.maxTurns,
-				timeoutMs: o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+				timeoutMs: Math.min(config.phases[step].timeoutMinutes * MINUTE, remaining),
 				tools: o.tools ?? "read",
 				maxBudgetUsd: allowance,
 				extraArgs: config.harnessArgs[harness],
@@ -126,10 +127,10 @@ export async function runPhase<TItem, TValue>(
 		for (let attempt = 0; attempt <= options.retries; attempt++) {
 			// Another worker found that every call would fail: calls in flight finish, no new one starts.
 			if (stopped) return { ok: false, error: stopped, skipped: true };
-			if (cost.exceeded()) {
-				const error = lastError
-					? `${lastError}\n(stopped: the budget is used up)`
-					: "budget exhausted";
+			const limit = cost.limitReached();
+			if (limit) {
+				const used = limit === "time" ? "the time limit is used up" : "the budget is used up";
+				const error = lastError ? `${lastError}\n(stopped: ${used})` : used;
 				return { ok: false, error, skipped: attempt === 0 };
 			}
 			try {
@@ -137,6 +138,13 @@ export async function runPhase<TItem, TValue>(
 			} catch (err) {
 				if (err instanceof Skip) return { ok: false, error: err.message, skipped: true };
 				lastError = errorMessage(err);
+				store.logEvent({
+					event: "attempt-failed",
+					phase: def.name,
+					item: label,
+					attempt: attempt + 1,
+					error: lastError.slice(0, 2000),
+				});
 				progress.note(
 					`${label}: attempt ${attempt + 1}/${options.retries + 1} failed: ${firstLine(lastError)}`,
 				);

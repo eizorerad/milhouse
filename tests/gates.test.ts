@@ -44,6 +44,45 @@ describe("forbiddenFiles", () => {
 		expect(forbiddenFiles(files, ["src/app.ts"])).toEqual(["src/app.ts"]);
 	});
 
+	it("matches a pattern without a slash at any depth, like .gitignore", () => {
+		const files = ["app/.env", "services/api/.env.production", "web/yarn.lock", "src/env.ts"];
+		expect(forbiddenFiles(files, [".env*"])).toEqual(["app/.env", "services/api/.env.production"]);
+		expect(forbiddenFiles(files, ["*.lock"])).toEqual(["web/yarn.lock"]);
+	});
+
+	it("keeps a pattern with a slash relative to the repository root", () => {
+		const files = ["migrations/001.sql", "app/migrations/001.sql", "app/keys/a.pem"];
+		expect(forbiddenFiles(files, ["migrations/**"])).toEqual(["migrations/001.sql"]);
+		expect(forbiddenFiles(files, ["/migrations/"])).toEqual(["migrations/001.sql"]);
+		expect(forbiddenFiles(files, ["app/keys/"])).toEqual(["app/keys/a.pem"]);
+	});
+
+	it("treats a name as the file or directory of that name, with everything below it", () => {
+		const files = ["secrets/key", "app/secrets/key", "secrets.md", "sub/cache/a", "cache.txt"];
+		expect(forbiddenFiles(files, ["secrets"])).toEqual(["secrets/key", "app/secrets/key"]);
+		expect(forbiddenFiles(files, ["cache/"])).toEqual(["sub/cache/a"]); // a directory at any depth
+		expect(forbiddenFiles(files, ["/cache/"])).toEqual([]); // only at the root
+	});
+
+	it("lets a name with a trailing slash match directories only, as .gitignore does", () => {
+		const files = ["cache", "sub/cache", "sub/cache/a", "cache/b"];
+		expect(forbiddenFiles(files, ["cache/"])).toEqual(["sub/cache/a", "cache/b"]);
+		expect(forbiddenFiles(files, ["cache"])).toEqual(files); // a name: file or directory
+		expect(forbiddenFiles(files, ["cache//"])).toEqual(["sub/cache/a", "cache/b"]);
+	});
+
+	it("ignores an empty pattern and the slashes around a name", () => {
+		const files = ["cache", "cache/a", "a.ts"];
+		expect(forbiddenFiles(files, ["", "/", "///"])).toEqual([]);
+		expect(forbiddenFiles(files, ["//cache"])).toEqual(["cache", "cache/a"]);
+	});
+
+	it("roots a file name that starts with a slash", () => {
+		const files = ["a.ts", "sub/a.ts"];
+		expect(forbiddenFiles(files, ["/a.ts"])).toEqual(["a.ts"]);
+		expect(forbiddenFiles(files, ["a.ts"])).toEqual(["a.ts", "sub/a.ts"]);
+	});
+
 	it("matches nothing without patterns", () => {
 		expect(forbiddenFiles(["a.ts"], [])).toEqual([]);
 	});

@@ -3,25 +3,30 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { checkBase } from "../src/baseline.ts";
 import { ensureWorktree, refExists, revParse } from "../src/git.ts";
-import { prepareWorktree } from "../src/worktree.ts";
+import { RunStore } from "../src/state.ts";
+import { discardWorktree, prepareWorktree } from "../src/worktree.ts";
 import {
 	TWO_ISSUES,
 	allStatus,
 	calls,
 	captureConsole,
 	cleanupTempDirs,
+	commitFile,
 	git,
 	go,
 	latest,
 	mainSubjects,
 	makeRepo,
+	makeTask,
 	noMerge,
 	readFile,
 	resetFakeAgentEnv,
 	setScenario,
 	tempDir,
 	testConfig,
+	unsetEnv,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
@@ -205,7 +210,8 @@ describe("what the pipeline tells you", () => {
 	it("keeps unchecked work for manual merge even if a test is configured on resume", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
-		expect(await go(repo, testConfig({ commands: { setup: "true", test: "  " } }))).toBe(true);
+		const unchecked = testConfig({ commands: { setup: "true", test: "  " }, allowUnchecked: true });
+		expect(await go(repo, unchecked)).toBe(true);
 		const store = latest(repo);
 		const tip = await git(repo, "rev-parse", store.ref);
 		expect(await mainSubjects(repo)).toEqual(["initial"]);
@@ -332,7 +338,188 @@ describe("what exec may build on", () => {
 	});
 });
 
+describe("the starting commit", () => {
+	it("is checked before anything is spent: a run cannot pass checks that fail without it", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({
+			commands: { test: "echo broken >&2; exit 1" },
+			gates: { baseline: true },
+		});
+		expect(await go(repo, config)).toBe(false);
+		expect(fake.journal()).toHaveLength(0);
+		expect(latest(repo).loadMeta().status).toBe("failed");
+		expect(output.join("\n")).toContain("fail on the starting commit");
+		expect(output.join("\n")).toContain("broken");
+		const store = latest(repo);
+		expect(existsSync(store.worktree)).toBe(false); // nothing of the run is left behind
+		expect(await refExists(repo, store.ref)).toBe(false);
+		const events = readFile(repo, `.milhouse/runs/${store.runId}/events.jsonl`);
+		expect(events).toContain("baseline-failed");
+	});
+
+	it("stops the run, and says why, when the check cannot be made at all", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const elsewhere = tempDir();
+		writeFile(elsewhere, "not-a-folder", "x"); // a file where the worktree's parent folder should be
+		process.env.MILHOUSE_WORK_DIR = join(elsewhere, "not-a-folder", "inside");
+		const config = testConfig({ commands: { test: "true" }, gates: { baseline: true } });
+		expect(await go(repo, config)).toBe(false);
+		expect(fake.journal()).toHaveLength(0);
+		expect(latest(repo).loadMeta().status).toBe("failed");
+		expect(await refExists(repo, latest(repo).ref)).toBe(false); // no ref of the run is left behind
+	});
+
+	it("checks in a new worktree: what a killed session left in the old one does not count", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		await ensureWorktree(repo, store.worktree, store.ref, base);
+		writeFile(store.worktree, "stale.txt", "left by a killed session");
+		const config = testConfig({
+			commands: { test: "test ! -f stale.txt" },
+			gates: { baseline: true },
+		});
+		expect(await checkBase(store, config)).toBeNull();
+	});
+
+	it("checks the commit that the run started from, whatever the ref of the run says", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		await commitFile(repo, "later.txt", "newer", "later");
+		await git(repo, "update-ref", store.ref, await revParse(repo, "HEAD"));
+		const config = testConfig({
+			commands: { test: "test ! -f later.txt" },
+			gates: { baseline: true },
+		});
+		expect(await checkBase(store, config)).toBeNull();
+	});
+
+	it("does not touch the ref of a run with verified work, whatever its tasks say about their commits", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		const work = await commitFile(repo, "work.txt", "done", "T-1 work");
+		await git(repo, "update-ref", store.ref, work);
+		store.saveTasks([makeTask("T-1", { status: "verified" })]); // no sha recorded
+		const config = testConfig({ commands: { test: "true" }, gates: { baseline: true } });
+		expect(await checkBase(store, config)).toBeNull();
+		expect(await revParse(repo, store.ref)).toBe(work);
+	});
+
+	it("leaves a run alone once it has accepted work: its starting commit was usable", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		store.saveTasks([makeTask("T-1", { sha: base, status: "pending" })]);
+		const failing = testConfig({ commands: { test: "exit 1" }, gates: { baseline: true } });
+		expect(await checkBase(store, failing)).toBeNull();
+	});
+
+	it("stops the run when the setup of the check fails, before any agent works", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({
+			commands: { setup: "exit 7", test: "true" },
+			gates: { baseline: true },
+		});
+		expect(await go(repo, config)).toBe(false);
+		expect(fake.journal()).toHaveLength(0);
+		expect(output.join("\n")).toContain("setup failed");
+		expect(output.join("\n")).not.toContain("gates.baseline"); // the run could not fix a setup
+	});
+
+	it("checks the starting commit only when the config asks for it: one more run of the checks", async () => {
+		useFakeAgent({});
+		const runsOfCheck = async (baseline: boolean): Promise<number> => {
+			const repo = await makeRepo();
+			const config = testConfig({
+				commands: { test: "echo ran >> ../checks.log" },
+				gates: { baseline },
+			});
+			expect(await go(repo, config)).toBe(true);
+			return readFile(repo, ".milhouse/work/checks.log").trim().split("\n").length;
+		};
+		expect((await runsOfCheck(true)) - (await runsOfCheck(false))).toBe(1);
+	});
+
+	it("lets the run go on when its checks pass", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const passing = testConfig({ commands: { test: "true" }, gates: { baseline: true } });
+		expect(await go(repo, passing)).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
+	});
+});
+
+describe("time limits from the config", () => {
+	it("stops an agent call after the minutes set for its step", async () => {
+		useFakeAgent({ sleep: { "Lead Investigator": 5_000 } });
+		const repo = await makeRepo();
+		const config = testConfig({ phases: { scan: { timeoutMinutes: 0.005 } } }); // 300 ms
+		expect(await go(repo, config)).toBe(false);
+		expect(output.join("\n")).toContain("timed out");
+	});
+
+	it("stops the run when maxMinutes is used up, and no call may outlast it", async () => {
+		const fake = useFakeAgent({ sleep: { "Lead Investigator": 5_000 } });
+		const repo = await makeRepo();
+		const started = Date.now();
+		expect(await go(repo, testConfig({ maxMinutes: 0.01 }))).toBe(false); // 600 ms
+		expect(Date.now() - started).toBeLessThan(3_000); // the scan call was cut short, not waited for
+		expect(output.join("\n")).toContain("time limit");
+		expect(calls(fake, "Planner")).toHaveLength(0);
+	});
+
+	it("stops a check after commandTimeoutMinutes, and tells the executor", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({ commands: { test: "sleep 5" }, commandTimeoutMinutes: 0.005 });
+		expect(await go(repo, config)).toBe(false);
+		expect(calls(fake, "Executor")[1].prompt).toContain("timed out");
+	});
+});
+
 describe("what agents and checks do to the worktree", () => {
+	it("removes the setup marker of a worktree that an earlier version put inside the project", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		unsetEnv("MILHOUSE_WORK_DIR");
+		const store = RunStore.create(repo, undefined, {
+			branch: "main",
+			sha: await revParse(repo, "HEAD"),
+		});
+		const old = join(repo, ".milhouse", "work", store.runId);
+		await ensureWorktree(repo, old, store.ref, store.loadMeta().base_sha);
+		writeFile(repo, `.milhouse/work/${store.runId}.ready`, "");
+		await discardWorktree(store);
+		expect(existsSync(old)).toBe(false);
+		expect(existsSync(`${old}.ready`)).toBe(false);
+	});
+
+	it("works in a worktree outside the project, and removes it when the run is complete", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		unsetEnv("MILHOUSE_WORK_DIR"); // the default place, in the user's cache folder (a temporary one here)
+		const cache = tempDir();
+		const home = process.env.XDG_CACHE_HOME;
+		process.env.XDG_CACHE_HOME = cache;
+		try {
+			expect(await go(repo)).toBe(true);
+			const store = latest(repo);
+			const [executor] = calls(fake, "Executor");
+			expect(executor.cwd.startsWith(repo)).toBe(false);
+			expect(executor.cwd).toContain(store.runId);
+			expect(store.worktree.startsWith(join(cache, "milhouse"))).toBe(true);
+			expect(existsSync(store.worktree)).toBe(false);
+		} finally {
+			if (home === undefined) unsetEnv("XDG_CACHE_HOME");
+			else process.env.XDG_CACHE_HOME = home;
+		}
+	});
+
 	it("stops, and leaves the attempt where it is, when a failed attempt cannot be kept", async () => {
 		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
 		const repo = await makeRepo();
@@ -351,6 +538,21 @@ describe("what agents and checks do to the worktree", () => {
 		expect(await go(repo)).toBe(false);
 		expect(calls(fake, "Executor")[1].prompt).toContain(".milhouse/config.ts");
 		expect(allStatus(repo, "failed")).toBe(true);
+	});
+
+	it("never lets a commit make .milhouse a link either: its config would be run from elsewhere", async () => {
+		const fake = useFakeAgent({ exec: { "Add greeting": "milhouse-link" } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(false);
+		expect(calls(fake, "Executor")[1].prompt).toContain("must never be modified: .milhouse");
+		expect(allStatus(repo, "failed")).toBe(true);
+	});
+
+	it("protects the .milhouse/ of the project only, not one in a folder of an example", async () => {
+		useFakeAgent({ exec: { "Add greeting": "nested-milhouse" } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 
 	it("is not fooled by status.showUntrackedFiles=no: a leftover file is still sent back", async () => {
