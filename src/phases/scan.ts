@@ -45,6 +45,7 @@ function scanPrompt(scope: string, config: Config, lastError?: string): string {
 			[
 				"Explore the code and report the most important work items for the focus above, most important first (at most 10).",
 				"Every item must be specific, real and actionable. Name the files involved in the rationale.",
+				"Propose cleanup only when it solves a current problem in scope or the user explicitly asked for it. Possible future uses alone are not a problem.",
 				"Fields: type, title, rationale (why, with file references), severity, scope_impact (areas affected), strategy (suggested approach).",
 				"If nothing is worth doing, return an empty list.",
 			].join("\n"),

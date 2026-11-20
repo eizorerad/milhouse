@@ -1,6 +1,7 @@
 // Milhouse working on itself.
 export default {
-  project: { name: "milhouse", language: "TypeScript", framework: "Bun", description: "CLI that orchestrates Claude Code" },
+  harness: "codex",
+  project: { name: "milhouse", language: "TypeScript", framework: "Bun", description: "CLI that orchestrates Claude Code and Codex" },
   commands: {
     setup: "bun install --frozen-lockfile",
     build: "bunx tsc --noEmit",

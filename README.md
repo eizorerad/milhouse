@@ -15,6 +15,8 @@ milhouse init                  # writes .milhouse/config.ts: set commands.test /
 milhouse "fix authentication bugs"   # starts a run; commit or stash your work first
 ```
 
+**Choose a harness:** Set `harness: "codex"` or `harness: "claude"` at the top level of your project's `.milhouse/config.ts`. New projects default to Claude. For one run, use `milhouse --harness codex "your task"`.
+
 ## How it works
 
 ```
@@ -37,8 +39,10 @@ scan → validate → plan → consolidate → exec → merge
 | `evidence` (validate) | issues whose cited file does not exist, or whose snippet is not found at the cited lines (give or take five) |
 | `placeholder` | new `TODO` / `FIXME` / "not implemented" stubs |
 | `diffHygiene` | trailing whitespace and conflict markers in added lines |
-| `dod` | failing `commands.build` / `lint` / `test`; a reviewer that rejects the acceptance criteria |
+| `dod` | failing `commands.build` / `lint` / `test`; a reviewer that finds unmet acceptance criteria or unnecessary complexity in the change |
 | always on | tasks without a commit, uncommitted leftovers, history that drops accepted commits, any commit touching a `neverTouch` path or `.milhouse/` (renames and merges included), checks that move HEAD or rewrite tracked files |
+
+**Keep changes simple.** The planner and executor look for a direct change that fits the existing code. To send work back for complexity, the reviewer must point to the code and explain a simpler alternative that preserves behaviour, safeguards and tests. For example, it can point to an existing parser that the patch duplicates. Line count and style preferences are not grounds for rejection.
 
 **Automatic merge** requires at least one build, lint or test command to have run on the accepted commit, with all checks passing. Setup alone does not count. If your branch advanced, the new merge commit must pass project checks too. A conflict or failing check leaves your branch untouched.
 
@@ -57,7 +61,9 @@ If no project check ran, the work waits in `refs/milhouse/<run-id>`. Adding a te
 
 ## Harnesses
 
-Milhouse drives Claude Code (`claude`) or Codex (`codex`). `harness` picks the agent for every step, and any step can name its own: `phases.verify.harness: "codex"` lets Codex review what Claude wrote. `--harness codex` switches a whole run.
+Each step inherits the project's `harness` unless it names its own. For example, with `harness: "claude"` and `phases: { verify: { harness: "codex" } }`, Claude does the work and Codex reviews it.
+
+The `--harness` flag overrides even the per-step settings for that run.
 
 | | Claude Code | Codex |
 |---|---|---|

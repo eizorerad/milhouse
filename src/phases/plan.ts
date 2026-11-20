@@ -48,6 +48,7 @@ function planPrompt(issue: Issue, config: Config, lastError?: string): string {
 			"Task",
 			[
 				"Break the issue into as few small tasks as will do (1-5), in execution order. Each task is one logical change that fits in one commit. A fix and its test belong in the same task.",
+				"Start with the code that already owns this behaviour. Prefer the direct change that fits the project; add a dependency, configuration option or abstraction only when a current requirement calls for it.",
 				"Every task must leave the repository green: the build, lint and tests pass after its commit. Never plan a task whose purpose is a failing test, a red/green split or any broken intermediate state.",
 				"- key: a short local name such as t1, t2",
 				"- depends_on: keys of EARLIER tasks it needs (never later ones)",
