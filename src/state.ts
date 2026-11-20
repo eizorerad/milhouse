@@ -9,6 +9,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { emptyCost } from "./cost.ts";
 import type { Issue, Phase, RunCost, RunMeta, RunStatus, Task } from "./types.ts";
@@ -60,9 +61,15 @@ export class RunStore {
 		return `refs/milhouse/${this.runId}`;
 	}
 
-	/** Worktree where exec works. Its HEAD is detached; accepted work is recorded in `ref`. */
+	/**
+	 * Worktree where exec works. Its HEAD is detached; accepted work is recorded in `ref`.
+	 * It is outside the project: inside it, a command would find the packages installed in the project's own
+	 * directory, and checks would pass on work that does not install them. MILHOUSE_WORK_DIR moves it elsewhere.
+	 */
 	get worktree(): string {
-		return join(this.workDir, STATE_DIR, "work", this.runId);
+		const earlier = join(this.workDir, STATE_DIR, "work", this.runId); // where 0.5.1 put it
+		if (existsSync(earlier)) return earlier;
+		return join(process.env.MILHOUSE_WORK_DIR || join(tmpdir(), "milhouse"), this.runId);
 	}
 
 	private file(name: string): string {

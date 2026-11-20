@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RunStore } from "../src/state.ts";
-import { BASE, cleanupTempDirs, makeIssue, makeTask, tempDir } from "./helpers.ts";
+import { BASE, cleanupTempDirs, makeIssue, makeTask, tempDir, unsetEnv } from "./helpers.ts";
 
-afterEach(cleanupTempDirs);
+afterEach(() => {
+	cleanupTempDirs();
+	unsetEnv("MILHOUSE_WORK_DIR");
+});
 
 /** Where this file's own runs start; the first test checks that it is recorded as given. */
 const START = { branch: "main", sha: "abc123" };
@@ -12,6 +15,32 @@ const START = { branch: "main", sha: "abc123" };
 /** Issues titled "Issue <id>" that are not validated yet; tasks titled "Task <id>". */
 const issue = (id: string) => makeIssue(id, { title: `Issue ${id}`, status: "UNVALIDATED" });
 const task = (id: string) => makeTask(id, { title: `Task ${id}` });
+
+describe("the worktree of a run", () => {
+	it("is outside the project, so that nothing installed in the project is found from it", () => {
+		unsetEnv("MILHOUSE_WORK_DIR");
+		const dir = tempDir();
+		const store = RunStore.create(dir, undefined, START);
+		expect(store.worktree.startsWith(dir)).toBe(false);
+		expect(store.worktree.endsWith(store.runId)).toBe(true);
+	});
+
+	it("is under MILHOUSE_WORK_DIR when that is set", () => {
+		const place = tempDir();
+		process.env.MILHOUSE_WORK_DIR = place;
+		const store = RunStore.create(tempDir(), undefined, START);
+		expect(store.worktree).toBe(join(place, store.runId));
+	});
+
+	it("stays where a run of an earlier version put it", () => {
+		unsetEnv("MILHOUSE_WORK_DIR");
+		const dir = tempDir();
+		const store = RunStore.create(dir, undefined, START);
+		const old = join(dir, ".milhouse", "work", store.runId);
+		mkdirSync(old, { recursive: true });
+		expect(store.worktree).toBe(old);
+	});
+});
 
 describe("RunStore", () => {
 	it("creates a run with its starting point and ignore file", () => {
@@ -67,10 +96,10 @@ describe("RunStore", () => {
 	});
 
 	it("derives the accepted-work ref and the worktree from the run id", () => {
-		const dir = tempDir();
-		const store = new RunStore(dir, "run-1");
+		unsetEnv("MILHOUSE_WORK_DIR");
+		const store = new RunStore(tempDir(), "run-1");
 		expect(store.ref).toBe("refs/milhouse/run-1");
-		expect(store.worktree).toBe(join(dir, ".milhouse", "work", "run-1"));
+		expect(store.worktree.endsWith(join("milhouse", "run-1"))).toBe(true);
 	});
 
 	it("fails loudly on a corrupt state file instead of silently resetting it", () => {

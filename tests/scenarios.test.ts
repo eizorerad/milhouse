@@ -22,6 +22,7 @@ import {
 	setScenario,
 	tempDir,
 	testConfig,
+	unsetEnv,
 	useFakeAgent,
 	writeFile,
 } from "./helpers.ts";
@@ -351,6 +352,18 @@ describe("time limits from the config", () => {
 });
 
 describe("what agents and checks do to the worktree", () => {
+	it("works in a worktree outside the project, and removes it when the run is complete", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		unsetEnv("MILHOUSE_WORK_DIR"); // the default place
+		expect(await go(repo)).toBe(true);
+		const store = latest(repo);
+		const [executor] = calls(fake, "Executor");
+		expect(executor.cwd.startsWith(repo)).toBe(false);
+		expect(executor.cwd).toContain(store.runId);
+		expect(existsSync(store.worktree)).toBe(false);
+	});
+
 	it("stops, and leaves the attempt where it is, when a failed attempt cannot be kept", async () => {
 		useFakeAgent({ exec: { "Add greeting": "never-commits" } });
 		const repo = await makeRepo();

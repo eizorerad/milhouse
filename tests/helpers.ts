@@ -61,6 +61,8 @@ export async function makeRepo(dir = tempDir()): Promise<string> {
 	await git(dir, "config", "user.name", "Test");
 	await git(dir, "config", "commit.gpgsign", "false");
 	await commitFile(dir, "src/app.ts", "export const app = 1;\nexport const two = 2;\n", "initial");
+	// Worktrees stay inside the repository: tests read what setup commands leave beside them.
+	process.env.MILHOUSE_WORK_DIR = join(dir, ".milhouse", "work");
 	return dir;
 }
 
@@ -155,6 +157,7 @@ export function resetFakeAgentEnv(): void {
 		"FAKE_AGENT_STATE",
 		"FAKE_AGENT_SCENARIO",
 		"MILHOUSE_RETRY_DELAY_MS",
+		"MILHOUSE_WORK_DIR",
 	]) {
 		delete process.env[key];
 	}
