@@ -453,15 +453,25 @@ describe("prompts", () => {
 		expect(text).toContain("`a.ts:3-5`");
 	});
 
-	it("tells the executor what is left, what is done and what failed before", () => {
+	it("tells the executor what is left and what is done", () => {
+		const t1 = task("T-1", { title: "First", checks: ["bun test"], acceptance: ["it works"] });
+		const t2 = task("T-2", { title: "Second" });
+		const text = execPrompt(group("P1", [t1, t2]), [t1], config);
+		expect(text).toContain("### [T-2] Second");
+		expect(text).not.toContain("### [T-1] First");
+		expect(text).toContain("- [T-1] First"); // listed as already committed
+		expect(text).toContain("`[<task id>] <task title>`");
+	});
+
+	it("keeps the requirements of committed tasks in front of the executor when it repairs them", () => {
 		const t1 = task("T-1", { title: "First", checks: ["bun test"], acceptance: ["it works"] });
 		const t2 = task("T-2", { title: "Second" });
 		const text = execPrompt(group("P1", [t1, t2]), [t1], config, "tests failed: boom");
 		expect(text).toContain("### [T-2] Second");
-		expect(text).not.toContain("### [T-1] First");
-		expect(text).toContain("- [T-1] First"); // listed as already committed
+		expect(text).toContain("### [T-1] First");
+		expect(text).toContain("it works"); // what the reviewer will check
+		expect(text).toContain("`bun test`");
 		expect(text).toContain("tests failed: boom");
-		expect(text).toContain("`[<task id>] <task title>`");
 	});
 
 	it("handles an executor prompt where everything is committed and only a fix is left", () => {

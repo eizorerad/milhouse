@@ -30,6 +30,8 @@ export function execPrompt(
 ): string {
 	const doneIds = new Set(done.map((t) => t.id));
 	const remaining = group.tasks.filter((t) => !doneIds.has(t.id));
+	// A repair must keep every requirement the reviewer checks, not only the one that failed last.
+	const requirements = lastError ? done.map(taskBlock).join("\n\n") : "";
 	return prompt(
 		role(
 			"Executor",
@@ -44,6 +46,7 @@ export function execPrompt(
 				: "Every task is committed already. Only the problem below remains.",
 		),
 		section("Already committed (do not redo)", bullets(done.map((t) => `[${t.id}] ${t.title}`))),
+		section("Requirements of the committed tasks (the reviewer still checks them)", requirements),
 		feedback(lastError),
 		section(
 			"Protocol",
