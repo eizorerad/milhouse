@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { checkBase } from "../src/baseline.ts";
 import { ensureWorktree, refExists, revParse } from "../src/git.ts";
 import { RunStore } from "../src/state.ts";
 import { discardWorktree, prepareWorktree } from "../src/worktree.ts";
@@ -12,11 +13,13 @@ import {
 	calls,
 	captureConsole,
 	cleanupTempDirs,
+	commitFile,
 	git,
 	go,
 	latest,
 	mainSubjects,
 	makeRepo,
+	makeTask,
 	noMerge,
 	readFile,
 	resetFakeAgentEnv,
@@ -365,6 +368,42 @@ describe("the starting commit", () => {
 		expect(await go(repo, config)).toBe(false);
 		expect(fake.journal()).toHaveLength(0);
 		expect(latest(repo).loadMeta().status).toBe("failed");
+		expect(await refExists(repo, latest(repo).ref)).toBe(false); // no ref of the run is left behind
+	});
+
+	it("checks in a new worktree: what a killed session left in the old one does not count", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		await ensureWorktree(repo, store.worktree, store.ref, base);
+		writeFile(store.worktree, "stale.txt", "left by a killed session");
+		const config = testConfig({
+			commands: { test: "test ! -f stale.txt" },
+			gates: { baseline: true },
+		});
+		expect(await checkBase(store, config)).toBeNull();
+	});
+
+	it("checks the commit that the run started from, whatever the ref of the run says", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		await commitFile(repo, "later.txt", "newer", "later");
+		await git(repo, "update-ref", store.ref, await revParse(repo, "HEAD"));
+		const config = testConfig({
+			commands: { test: "test ! -f later.txt" },
+			gates: { baseline: true },
+		});
+		expect(await checkBase(store, config)).toBeNull();
+	});
+
+	it("leaves a run alone once it has accepted work: its starting commit was usable", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		store.saveTasks([makeTask("T-1", { sha: base, status: "pending" })]);
+		const failing = testConfig({ commands: { test: "exit 1" }, gates: { baseline: true } });
+		expect(await checkBase(store, failing)).toBeNull();
 	});
 
 	it("stops the run when the setup of the check fails, before any agent works", async () => {
@@ -486,6 +525,13 @@ describe("what agents and checks do to the worktree", () => {
 		expect(await go(repo)).toBe(false);
 		expect(calls(fake, "Executor")[1].prompt).toContain(".milhouse/config.ts");
 		expect(allStatus(repo, "failed")).toBe(true);
+	});
+
+	it("protects the .milhouse/ of the project only, not one in a folder of an example", async () => {
+		useFakeAgent({ exec: { "Add greeting": "nested-milhouse" } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 
 	it("is not fooled by status.showUntrackedFiles=no: a leftover file is still sent back", async () => {

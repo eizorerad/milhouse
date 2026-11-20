@@ -11,15 +11,18 @@ export const COMMAND_TIMEOUT_MS = 10 * MINUTE;
 
 /**
  * A test for files that match one of `patterns`, written like .gitignore lines but without exceptions (`!`):
- * a name is a file or a directory with everything below it, a pattern with a slash in it or in front of it
- * starts at the repository root, one without (`.env*`, `cache/`) matches at any depth.
+ * a name is a file or a directory with everything below it (with a slash at its end: a directory), a pattern
+ * with a slash in it or in front of it starts at the repository root, one without (`.env*`, `cache/`) matches
+ * at any depth.
  */
 export function globMatcher(patterns: string[]): (file: string) => boolean {
 	const globs = patterns.flatMap((raw) => {
-		const name = raw.replace(/^\//, "").replace(/\/$/, "");
+		const name = raw.replace(/^\/+/, "").replace(/\/+$/, "");
+		if (!name) return [];
 		const anchored = raw.startsWith("/") || name.includes("/");
 		const path = anchored ? name : `**/${name}`;
-		return [new Bun.Glob(path), new Bun.Glob(`${path}/**`)];
+		const below = new Bun.Glob(`${path}/**`);
+		return raw.endsWith("/") ? [below] : [new Bun.Glob(path), below];
 	});
 	return (file) => globs.some((glob) => glob.match(file));
 }

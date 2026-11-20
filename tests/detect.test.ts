@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { CONFIG_TEMPLATE, configTemplate } from "../src/config.ts";
 import { detectCommands } from "../src/detect.ts";
 import { cleanupTempDirs, tempDir, writeFile } from "./helpers.ts";
@@ -13,6 +15,10 @@ function project(files: Record<string, string>): string {
 }
 
 const scripts = (body: Record<string, string>) => JSON.stringify({ scripts: body });
+
+/** A test that unittest finds: only a TestCase is. */
+const CASE =
+	"import unittest\n\nclass A(unittest.TestCase):\n    def test_a(self):\n        pass\n";
 
 describe("detectCommands", () => {
 	it("finds nothing in an empty project", () => {
@@ -59,7 +65,7 @@ describe("detectCommands", () => {
 			test: "go test ./...",
 		});
 		expect(detectCommands(project({ "pytest.ini": "" }))).toEqual({ test: "python3 -m pytest" });
-		const unittest = project({ "tests/test_app.py": "import unittest\n" });
+		const unittest = project({ "tests/test_app.py": CASE });
 		expect(detectCommands(unittest)).toEqual({ test: "python3 -m unittest discover -s tests" });
 	});
 
@@ -73,6 +79,29 @@ describe("detectCommands", () => {
 		expect(detectCommands(withMake)).toEqual({ test: "make test" });
 	});
 
+	it("does not take a mere mention of unittest for a test that unittest would find", () => {
+		const mock = project({
+			"tests/test_mock.py":
+				"from unittest.mock import Mock\n\ndef test_mock():\n    assert Mock()\n",
+		});
+		expect(detectCommands(mock)).toEqual({});
+	});
+
+	it("finds a unittest file after a folder or a broken link that is named like one", () => {
+		const dir = project({ "tests/test_real.py": CASE });
+		for (const name of ["test_a.py", "test_b.py", "test_c.py"]) {
+			mkdirSync(join(dir, "tests", name)); // a folder: reading it fails
+		}
+		expect(detectCommands(dir)).toEqual({ test: "python3 -m unittest discover -s tests" });
+	});
+
+	it("knows a double-colon Makefile rule, but not an assignment", () => {
+		expect(detectCommands(project({ Makefile: "test::\n\tpytest\n" }))).toEqual({
+			test: "make test",
+		});
+		expect(detectCommands(project({ Makefile: "test::=pytest\nlint:=ruff\n" }))).toEqual({});
+	});
+
 	it("survives odd files: a file called tests, an empty script, an assignment that looks like a target", () => {
 		expect(detectCommands(project({ tests: "not a folder" }))).toEqual({});
 		expect(detectCommands(project({ "package.json": scripts({ test: "  ", lint: "" }) }))).toEqual(
@@ -84,7 +113,7 @@ describe("detectCommands", () => {
 	it("runs the tests of every language in a project that has several", () => {
 		const dir = project({
 			"package.json": scripts({ test: "node --test" }),
-			"tests/test_a.py": "import unittest\n",
+			"tests/test_a.py": CASE,
 		});
 		expect(detectCommands(dir).test).toBe("npm run test && python3 -m unittest discover -s tests");
 	});
@@ -111,6 +140,7 @@ describe("configTemplate", () => {
 		expect(text).toContain('test: "echo $& $$ $1"');
 		expect(text).toContain("Found in this project");
 		expect(configTemplate({})).not.toContain("Found in this project");
+		expect(configTemplate({ test: "" })).not.toContain("Found in this project"); // nothing was found
 	});
 
 	it("writes the commands that were found, as the config's own values", () => {

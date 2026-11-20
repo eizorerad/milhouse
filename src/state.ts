@@ -15,7 +15,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { emptyCost } from "./cost.ts";
 import type { Issue, Phase, RunCost, RunMeta, RunStatus, Task } from "./types.ts";
 import { errorMessage, generateId, now } from "./util.ts";
@@ -76,11 +76,13 @@ export class RunStore {
 		const earlier = join(this.workDir, STATE_DIR, "work", this.runId); // where 0.5.1 put it
 		if (existsSync(earlier)) return earlier;
 		const chosen = process.env.MILHOUSE_WORK_DIR?.trim();
-		// By default the user's cache folder, and in it one for this project: two clones may have a run of the same id.
-		const cache = process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
+		if (chosen) return join(resolve(chosen), this.runId);
+		// By default the user's cache folder (XDG_CACHE_HOME if it is an absolute path), and in it one for this
+		// project: two clones may have a run of the same id.
+		const xdg = process.env.XDG_CACHE_HOME?.trim();
+		const cache = xdg && isAbsolute(xdg) ? xdg : join(homedir(), ".cache");
 		const project = createHash("sha1").update(this.workDir).digest("hex").slice(0, 10);
-		const root = chosen ? resolve(chosen) : join(cache, "milhouse", project);
-		return join(root, this.runId);
+		return join(cache, "milhouse", project, this.runId);
 	}
 
 	private file(name: string): string {

@@ -261,12 +261,13 @@ export async function ensureWorktree(
 	ref: string,
 	baseSha: string,
 ): Promise<{ created: boolean }> {
+	// First, so that a failure leaves no ref behind. The worktree holds a copy of the project: the owner only.
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	if (!(await refExists(repo, ref))) await gitOrThrow(repo, "update-ref", ref, baseSha);
 	if (existsSync(join(path, ".git"))) return { created: false };
 
 	rmSync(path, { recursive: true, force: true }); // a leftover directory that is not a worktree
 	await git(repo, "worktree", "prune");
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); // it holds a copy of the project: the owner only
 	await gitOrThrow(repo, "worktree", "add", "--detach", path, ref);
 	return { created: true };
 }

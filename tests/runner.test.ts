@@ -215,6 +215,21 @@ describe("runPhase and the time limit", () => {
 	});
 });
 
+describe("runPhase and the time that is left", () => {
+	it("reads it once, so that it cannot reach zero between the check and the timer of the call", async () => {
+		useFakeAgent({ sleep: { Planner: 1_200 } });
+		const { store, config } = setup();
+		const cost = new CostTracker(emptyCost(), 0, () => {}, 100);
+		let reads = 0;
+		cost.remainingMs = () => (++reads <= 2 ? 1 : 0); // the clock ticks once more after the check
+		const def = phase((_n, ctx) => ctx.ask("## Role: Planner"));
+		const started = Date.now();
+		const [outcome] = await runPhase(def, store, config, cost);
+		expect(outcome.ok).toBe(false); // cut short at once, not run to its end
+		expect(Date.now() - started).toBeLessThan(900);
+	});
+});
+
 describe("runPhase and the agent", () => {
 	it("charges failed calls too, retries engine errors and keeps the real error text", async () => {
 		useFakeAgent({ fail: { Planner: { message: "overloaded", cost: 0.3 } } });

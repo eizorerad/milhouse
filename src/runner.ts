@@ -74,9 +74,9 @@ function makeAsk(
 			if (allowance !== undefined && allowance <= 0) {
 				throw new EngineError("the budget is used up", { fatal: true });
 			}
-			// A call that starts with no time left would get no timer at all, or a negative one.
-			if (cost.remainingMs() <= 0)
-				throw new EngineError("the time limit is used up", { fatal: true });
+			// Read once: a call that starts with no time left would get no timer at all, or a negative one.
+			const remaining = cost.remainingMs();
+			if (remaining <= 0) throw new EngineError("the time limit is used up", { fatal: true });
 			// The step's own rules come last, after the role, the task and the global rules.
 			const stepRules = config.phases[step].rules.map((rule) => `- ${rule}`).join("\n");
 			const extra = section("Extra rules for this step", stepRules);
@@ -86,7 +86,7 @@ function makeAsk(
 				model: stepModel(config, step),
 				schema: o.schema,
 				maxTurns: o.maxTurns,
-				timeoutMs: Math.min(config.phases[step].timeoutMinutes * MINUTE, cost.remainingMs()),
+				timeoutMs: Math.min(config.phases[step].timeoutMinutes * MINUTE, remaining),
 				tools: o.tools ?? "read",
 				maxBudgetUsd: allowance,
 				extraArgs: config.harnessArgs[harness],

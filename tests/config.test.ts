@@ -100,6 +100,10 @@ describe("loadConfig", () => {
 		);
 		const error = await loadConfig(dir).catch((e) => e);
 		expect(error.message).toContain('neverTouch: "!keep.lock" cannot start with "!"');
+		const hidden = projectWith('export default { neverTouch: ["/!x", "//!y"] };');
+		const slashed = await loadConfig(hidden).catch((e) => e);
+		expect(slashed.message).toContain('neverTouch: "/!x" cannot start with "!"');
+		expect(slashed.message).toContain('neverTouch: "//!y" cannot start with "!"');
 		expect(error.message).toContain('gates.ignore: "!a.md" cannot start with "!"');
 	});
 

@@ -39,6 +39,7 @@ interface Scenario {
 		| "own-branch"
 		| "reset-history"
 		| "milhouse-config"
+		| "nested-milhouse"
 	>;
 	/** [dependent issue title, base issue title]: the dependent's tasks depend on the base's first task. */
 	cross?: Array<[string, string]>;
@@ -274,6 +275,10 @@ switch (role) {
 		};
 
 		if (mode === "forbidden") writeFileSync(join(process.cwd(), "secrets.env"), "touched\n");
+		if (mode === "nested-milhouse") {
+			mkdirSync(join(process.cwd(), "examples", ".milhouse"), { recursive: true });
+			writeFileSync(join(process.cwd(), "examples", ".milhouse", "note.txt"), "an example\n");
+		}
 		if (mode === "milhouse-config") {
 			mkdirSync(join(process.cwd(), ".milhouse"), { recursive: true });
 			writeFileSync(

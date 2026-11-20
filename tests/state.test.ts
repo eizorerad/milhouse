@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import { RunStore } from "../src/state.ts";
 import { BASE, cleanupTempDirs, makeIssue, makeTask, tempDir, unsetEnv } from "./helpers.ts";
@@ -46,6 +47,15 @@ describe("the worktree of a run", () => {
 		process.env.MILHOUSE_WORK_DIR = "   ";
 		expect(new RunStore(tempDir(), "run-1").worktree.startsWith(" ")).toBe(false);
 		expect(new RunStore(tempDir(), "run-1").worktree).toContain("milhouse");
+	});
+
+	it("keeps to the cache folder of the user when XDG_CACHE_HOME is blank or not an absolute path", () => {
+		unsetEnv("MILHOUSE_WORK_DIR");
+		for (const value of ["   ", "relative/cache"]) {
+			process.env.XDG_CACHE_HOME = value;
+			const { worktree } = new RunStore(tempDir(), "run-1");
+			expect(worktree.startsWith(join(homedir(), ".cache", "milhouse"))).toBe(true);
+		}
 	});
 
 	it("is under MILHOUSE_WORK_DIR when that is set", () => {

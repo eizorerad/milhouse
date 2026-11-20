@@ -92,7 +92,7 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 	}
 
 	// .milhouse/ is milhouse's own: its config is executed as code, so no commit may change it.
-	const protectedPaths = [...config.neverTouch, ".milhouse/"];
+	const protectedPaths = [...config.neverTouch, "/.milhouse/"];
 	const forbidden = forbiddenFiles(await touchedFiles(work.dir, work.accepted), protectedPaths);
 	if (forbidden.length > 0) {
 		return `Commits touched files that must never be modified: ${forbidden.join(", ")}. Rewrite the history so that no commit after ${tip} touches them (for example git reset --soft ${tip}, restore those files, then commit per task again).`;

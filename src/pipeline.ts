@@ -158,12 +158,14 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		announce(store, config, todo, cost);
 
 		const broken = todo.includes("exec")
-			? await checkBase(store, config).catch(errorMessage)
+			? await checkBase(store, config).catch(
+					(err) => errorMessage(err) || "The check of the starting commit failed.",
+				)
 			: null;
 		if (broken) {
 			log.error(broken);
+			store.finish("failed"); // first: it is the status that a later command reads
 			store.logEvent({ event: "baseline-failed", error: broken.slice(0, 2000) });
-			store.finish("failed");
 			return false;
 		}
 
@@ -216,8 +218,9 @@ async function finish(
 ): Promise<boolean> {
 	const complete = config.pipeline.every((phase) => store.loadMeta().done.includes(phase));
 	const spent = formatCost(cost.current);
-	const budgetHint =
-		cost.limitReached() === "time"
+	const limit = cost.limitReached(); // once: the clock goes on while this function runs
+	const limitHint =
+		limit === "time"
 			? `The time limit of ${config.maxMinutes} minutes is used up: raise "maxMinutes" in .milhouse/config.ts, then run: milhouse --resume (every command gets the full time)`
 			: `The budget of ${formatUsd(config.budget)} is used up: raise "budget" in .milhouse/config.ts, then run: milhouse --resume`;
 	if (failures > 0) {
@@ -225,7 +228,7 @@ async function finish(
 		log.error(
 			`${failures} item(s) failed (${spent}). Details: milhouse --report. Retry with: milhouse --resume`,
 		);
-		if (cost.exceeded()) log.warn(budgetHint);
+		if (limit) log.warn(limitHint);
 		return false;
 	}
 	if (complete) {
@@ -239,8 +242,8 @@ async function finish(
 		return true;
 	}
 	store.finish("stopped");
-	if (cost.exceeded()) {
-		log.warn(`${budgetHint} (${spent})`);
+	if (limit) {
+		log.warn(`${limitHint} (${spent})`);
 		return false;
 	}
 	log.success(`Done: ${spent}. Summary: milhouse --report`);

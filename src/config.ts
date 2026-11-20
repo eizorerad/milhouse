@@ -214,7 +214,7 @@ function validate(config: Config): void {
 			["neverTouch", config.neverTouch],
 			["gates.ignore", config.gates.ignore],
 		] as const) {
-			for (const pattern of patterns.filter((p) => p.startsWith("!"))) {
+			for (const pattern of patterns.filter((p) => p.replace(/^\/+/, "").startsWith("!"))) {
 				errors.push(`${name}: "${pattern}" cannot start with "!": exceptions are not supported`);
 			}
 		}
@@ -266,7 +266,15 @@ export async function loadConfig(workDir: string, overrides: Plain = {}): Promis
 	return config;
 }
 
-export const CONFIG_TEMPLATE = `// Milhouse config. Every key is optional; the values below are the defaults.
+/** The config file `milhouse init` writes: every option with its default, and the commands found in the project. */
+export function configTemplate(found: Partial<Config["commands"]> = {}): string {
+	const commands = (["setup", "build", "lint", "test"] as const)
+		.map((slot) => `${slot}: ${JSON.stringify(found[slot] ?? "")}`)
+		.join(", ");
+	const note = Object.values(found).some(Boolean)
+		? "// Found in this project by `milhouse init`. Check them: build, lint and test run on every issue.\n  "
+		: "";
+	return `// Milhouse config. Every key is optional; the values below are the defaults.
 export default {
   // The agent that runs every step: "claude" (Claude Code) or "codex" (Codex CLI).
   // Any step can use the other one, e.g. phases: { verify: { harness: "codex" } } for an independent reviewer.
@@ -302,14 +310,15 @@ export default {
   // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: it cannot be capped.
   budget: 50,
 
-  // The longest that the agents of one milhouse command may work, in minutes: no call outlasts it and no new one
-  // starts (a check that has begun runs on to commandTimeoutMinutes). 0 = unlimited. Every command gets the full time.
+  // The clock of one milhouse command, in minutes, for every agent. It starts with the command (the check of the
+  // starting commit counts): no agent call outlasts it and no new one starts (a check that has begun runs on to
+  // commandTimeoutMinutes). 0 = unlimited. Every command gets the full time.
   maxMinutes: 0,
 
   project: { name: "", language: "", framework: "", description: "" },
 
   // At least one build/lint/test must pass for automatic merge. Setup alone does not count.
-  commands: { setup: "", build: "", lint: "", test: "" },
+  ${note}commands: { ${commands} },
   // The longest that one setup, build, lint or test command may run, in minutes.
   commandTimeoutMinutes: 10,
   // Without a command only an agent reviews the work and nothing merges by itself, so exec refuses to start.
@@ -324,7 +333,7 @@ export default {
   // evidence: validate cites real code. placeholder: no new TODO/FIXME/stubs. diffHygiene: no trailing whitespace or conflict markers.
   // dod: commands pass and the reviewer confirms the acceptance criteria.
   // baseline: the commands must pass on the starting commit before the run spends anything; otherwise every issue fails for what was broken already.
-  // ignore: files that placeholder and diffHygiene skip (patterns as in .gitignore; a list here replaces the default).
+  // ignore: files that placeholder and diffHygiene skip (patterns as in .gitignore, without "!"; a list here replaces the default).
   gates: {
     evidence: true,
     diffHygiene: true,
@@ -335,20 +344,6 @@ export default {
   },
 };
 `;
-
-const EMPTY_COMMANDS = 'commands: { setup: "", build: "", lint: "", test: "" },';
-
-/** The config file `milhouse init` writes, with the commands that were found in the project. */
-export function configTemplate(found: Partial<Config["commands"]>): string {
-	const values = (["setup", "build", "lint", "test"] as const).map(
-		(slot) => `${slot}: ${JSON.stringify(found[slot] ?? "")}`,
-	);
-	const note = Object.keys(found).length
-		? "// Found in this project by `milhouse init`. Check them: build, lint and test run on every issue.\n  "
-		: "";
-	// A function, not a string: a `$` in a command is not a replacement pattern.
-	return CONFIG_TEMPLATE.replace(
-		EMPTY_COMMANDS,
-		() => `${note}commands: { ${values.join(", ")} },`,
-	);
 }
+
+export const CONFIG_TEMPLATE = configTemplate();

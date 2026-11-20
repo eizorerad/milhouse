@@ -64,6 +64,13 @@ describe("forbiddenFiles", () => {
 		expect(forbiddenFiles(files, ["/cache/"])).toEqual([]); // only at the root
 	});
 
+	it("lets a name with a trailing slash match directories only, as .gitignore does", () => {
+		const files = ["cache", "sub/cache", "sub/cache/a", "cache/b"];
+		expect(forbiddenFiles(files, ["cache/"])).toEqual(["sub/cache/a", "cache/b"]);
+		expect(forbiddenFiles(files, ["cache"])).toEqual(files); // a name: file or directory
+		expect(forbiddenFiles(files, ["cache//"])).toEqual(["sub/cache/a", "cache/b"]);
+	});
+
 	it("roots a file name that starts with a slash", () => {
 		const files = ["a.ts", "sub/a.ts"];
 		expect(forbiddenFiles(files, ["/a.ts"])).toEqual(["a.ts"]);

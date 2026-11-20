@@ -61,12 +61,11 @@ const fromGo = (dir: string): Commands =>
 		? { build: "go build ./...", lint: "go vet ./...", test: "go test ./..." }
 		: {};
 
-/** Whether a test file in `folder` is written for unittest: a pytest-style function would be found by nothing. */
+/** Whether a test file in `folder` defines a TestCase: only that does unittest find, a pytest-style function it does not. */
 function usesUnittest(folder: string): boolean {
 	try {
 		return readdirSync(folder).some(
-			(name) =>
-				/^test.*\.py$/.test(name) && readFileSync(join(folder, name), "utf-8").includes("unittest"),
+			(name) => /^test.*\.py$/.test(name) && /\bTestCase\b/.test(read(folder, name)),
 		);
 	} catch {
 		return false; // no such folder, or not a folder
@@ -83,7 +82,7 @@ function fromPython(dir: string): Commands {
 function fromMakefile(dir: string): Commands {
 	const makefile = read(dir, "Makefile");
 	const target = (name: string): string | undefined =>
-		new RegExp(`^${name}:(?![:=])`, "m").test(makefile) ? `make ${name}` : undefined;
+		new RegExp(`^${name}:{1,2}(?![:=])`, "m").test(makefile) ? `make ${name}` : undefined;
 	return { build: target("build"), lint: target("lint"), test: target("test") };
 }
 
