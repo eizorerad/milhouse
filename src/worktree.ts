@@ -1,6 +1,7 @@
 /** The run's worktree, ready to use: created at the accepted ref, with `commands.setup` done. */
 
 import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { commandTimeoutMs } from "./config.ts";
 import { runChecks } from "./gates.ts";
 import { deleteRef, ensureWorktree, isAncestor, removeWorktree, resolveRef } from "./git.ts";
 import type { RunStore } from "./state.ts";
@@ -44,7 +45,7 @@ export async function prepareWorktree(
 	const failure = await runChecks(
 		store.worktree,
 		{ setup: config.commands.setup },
-		{ reap: false },
+		{ reap: false, timeoutMs: commandTimeoutMs(config) },
 	);
 	if (failure) {
 		await removeWorktree(store.workDir, store.worktree);

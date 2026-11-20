@@ -5,7 +5,7 @@ import type { PhaseDef } from "../runner.ts";
 import { arrayOf, object } from "../schema.ts";
 import type { Task } from "../types.ts";
 import { log } from "../ui.ts";
-import { MINUTE, parseJson, stringList } from "../util.ts";
+import { parseJson, stringList } from "../util.ts";
 
 export interface Consolidation {
 	duplicates: Array<{ keep: string; remove: string[] }>;
@@ -146,7 +146,6 @@ export const consolidatePhase: PhaseDef<Task[], Consolidation> = {
 		const text = await ctx.ask(consolidatePrompt(tasks, ctx.lastError), {
 			schema: CONSOLIDATE_SCHEMA,
 			maxTurns: 20,
-			timeoutMs: 5 * MINUTE,
 		});
 		return parseConsolidation(text);
 	},

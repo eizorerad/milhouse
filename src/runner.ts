@@ -23,7 +23,6 @@ export interface AskOptions {
 	cwd?: string;
 	schema?: object;
 	maxTurns?: number;
-	timeoutMs?: number;
 	/** Default "read". */
 	tools?: "read" | "all";
 }
@@ -55,7 +54,6 @@ export class GiveUp extends Error {}
 /** Throw to leave an item untouched for now: nothing is recorded, --resume picks it up again. */
 export class Skip extends Error {}
 
-const DEFAULT_TIMEOUT_MS = 10 * MINUTE;
 const retryDelayMs = (): number => Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 2000);
 const firstLine = (text: string): string => text.split("\n")[0].slice(0, 160);
 
@@ -85,7 +83,7 @@ function makeAsk(
 				model: stepModel(config, step),
 				schema: o.schema,
 				maxTurns: o.maxTurns,
-				timeoutMs: o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+				timeoutMs: config.phases[step].timeoutMinutes * MINUTE,
 				tools: o.tools ?? "read",
 				maxBudgetUsd: allowance,
 				extraArgs: config.harnessArgs[harness],

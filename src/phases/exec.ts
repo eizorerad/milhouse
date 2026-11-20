@@ -8,6 +8,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { commandTimeoutMs } from "../config.ts";
 import { EngineError } from "../engine.ts";
 import {
 	findPlaceholders,
@@ -36,7 +37,7 @@ import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
 import type { RunStore } from "../state.ts";
 import type { Config, Task } from "../types.ts";
-import { MINUTE, errorMessage, parseJson, tail } from "../util.ts";
+import { errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
 import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
 import { REVIEW_SCHEMA, bullets, execPrompt, reviewPrompt } from "./exec-prompts.ts";
@@ -115,7 +116,10 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 		}
 	}
 	if (config.gates.dod) {
-		const failure = await runProjectChecks(work.dir, config.commands, work.passedChecks);
+		const failure = await runProjectChecks(work.dir, config.commands, {
+			passed: work.passedChecks,
+			timeoutMs: commandTimeoutMs(config),
+		});
 		if (failure) return failure;
 	}
 	return null;
@@ -161,7 +165,6 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 				cwd: work.dir,
 				schema: REVIEW_SCHEMA,
 				maxTurns: 25,
-				timeoutMs: 10 * MINUTE,
 			});
 		} catch (err) {
 			// An agent failure (outage, budget) goes back to the runner, which backs off and retries.
@@ -241,7 +244,6 @@ async function implement(
 		await ctx.ask(execPrompt(group, done, ctx.config, problem), {
 			cwd: work.dir,
 			tools: "all",
-			timeoutMs: 30 * MINUTE,
 		});
 	} catch (err) {
 		// The agent was killed or crashed, perhaps in the middle of a commit.

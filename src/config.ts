@@ -13,7 +13,7 @@ import {
 	PHASES,
 	type Phase,
 } from "./types.ts";
-import { errorMessage } from "./util.ts";
+import { MINUTE, errorMessage } from "./util.ts";
 
 export class ConfigError extends Error {
 	override name = "ConfigError";
@@ -26,16 +26,17 @@ export const DEFAULTS: Config = {
 	pipeline: [...PHASES],
 	failFast: false,
 	phases: {
-		scan: { retries: 2, model: "", harness: "", rules: [] },
-		validate: { workers: 5, retries: 2, model: "", harness: "", rules: [] },
-		plan: { workers: 5, retries: 2, model: "", harness: "", rules: [] },
-		consolidate: { retries: 2, model: "", harness: "", rules: [] },
-		exec: { retries: 2, model: "", harness: "", rules: [] },
-		verify: { retries: 1, model: "", harness: "", rules: [] },
+		scan: { retries: 2, timeoutMinutes: 15, model: "", harness: "", rules: [] },
+		validate: { workers: 5, retries: 2, timeoutMinutes: 5, model: "", harness: "", rules: [] },
+		plan: { workers: 5, retries: 2, timeoutMinutes: 5, model: "", harness: "", rules: [] },
+		consolidate: { retries: 2, timeoutMinutes: 5, model: "", harness: "", rules: [] },
+		exec: { retries: 2, timeoutMinutes: 30, model: "", harness: "", rules: [] },
+		verify: { retries: 1, timeoutMinutes: 10, model: "", harness: "", rules: [] },
 	},
 	budget: 50,
 	project: { name: "", language: "", framework: "", description: "" },
 	commands: { setup: "", build: "", lint: "", test: "" },
+	commandTimeoutMinutes: 10,
 	rules: [],
 	neverTouch: [],
 	gates: {
@@ -133,6 +134,12 @@ const RESERVED_ARGS: Record<HarnessName, string[]> = {
 	],
 };
 
+/** What a call may take is limited to a day: a longer time would overflow the timer. */
+const validLimit = (minutes: number): boolean =>
+	Number.isFinite(minutes) && minutes > 0 && minutes <= 24 * 60;
+
+export const commandTimeoutMs = (config: Config): number => config.commandTimeoutMinutes * MINUTE;
+
 export function projectChecksEnabled({ gates, commands }: Config): boolean {
 	return gates.dod && [commands.build, commands.lint, commands.test].some((cmd) => cmd.trim());
 }
@@ -197,12 +204,18 @@ function validate(config: Config): void {
 		if (!Number.isFinite(config.budget) || config.budget < 0) {
 			errors.push("budget must be a finite number >= 0");
 		}
+		if (!validLimit(config.commandTimeoutMinutes)) {
+			errors.push("commandTimeoutMinutes must be a number above 0 and at most 1440");
+		}
 		for (const [step, options] of Object.entries(config.phases)) {
 			if (options.harness !== "" && !known(options.harness)) {
 				errors.push(`phases.${step}.harness must be "" or one of ${HARNESS_NAMES.join(", ")}`);
 			}
 			if (!Number.isInteger(options.retries) || options.retries < 0) {
 				errors.push(`phases.${step}.retries must be an integer >= 0`);
+			}
+			if (!validLimit(options.timeoutMinutes)) {
+				errors.push(`phases.${step}.timeoutMinutes must be a number above 0 and at most 1440`);
 			}
 			if (
 				options.workers !== undefined &&
@@ -262,13 +275,14 @@ export default {
   // an alias such as "opus" follows the newest) and rules (extra instructions for that step only).
   // An exec retry is a repair round that feeds the failure back to the agent.
   // verify is the reviewer that checks every issue inside exec.
+  // timeoutMinutes: the longest that one call of the step may take.
   phases: {
-    scan: { retries: 2 },
-    validate: { workers: 5, retries: 2 },
-    plan: { workers: 5, retries: 2 },
-    consolidate: { retries: 2 },
-    exec: { retries: 2 },
-    verify: { retries: 1 },
+    scan: { retries: 2, timeoutMinutes: 15 },
+    validate: { workers: 5, retries: 2, timeoutMinutes: 5 },
+    plan: { workers: 5, retries: 2, timeoutMinutes: 5 },
+    consolidate: { retries: 2, timeoutMinutes: 5 },
+    exec: { retries: 2, timeoutMinutes: 30 },
+    verify: { retries: 1, timeoutMinutes: 10 },
   },
 
   // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: it cannot be capped.
@@ -278,6 +292,8 @@ export default {
 
   // At least one build/lint/test must pass for automatic merge. Setup alone does not count.
   commands: { setup: "", build: "", lint: "", test: "" },
+  // The longest that one setup, build, lint or test command may run, in minutes.
+  commandTimeoutMinutes: 10,
 
   // Rules injected into every prompt, and globs agents must not change (enforced after exec).
   rules: [],

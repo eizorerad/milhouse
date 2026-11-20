@@ -332,6 +332,24 @@ describe("what exec may build on", () => {
 	});
 });
 
+describe("time limits from the config", () => {
+	it("stops an agent call after the minutes set for its step", async () => {
+		useFakeAgent({ sleep: { "Lead Investigator": 5_000 } });
+		const repo = await makeRepo();
+		const config = testConfig({ phases: { scan: { timeoutMinutes: 0.005 } } }); // 300 ms
+		expect(await go(repo, config)).toBe(false);
+		expect(output.join("\n")).toContain("timed out");
+	});
+
+	it("stops a check after commandTimeoutMinutes, and tells the executor", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({ commands: { test: "sleep 5" }, commandTimeoutMinutes: 0.005 });
+		expect(await go(repo, config)).toBe(false);
+		expect(calls(fake, "Executor")[1].prompt).toContain("timed out");
+	});
+});
+
 describe("what agents and checks do to the worktree", () => {
 	it("stops, and leaves the attempt where it is, when a failed attempt cannot be kept", async () => {
 		useFakeAgent({ exec: { "Add greeting": "never-commits" } });

@@ -65,6 +65,24 @@ describe("loadConfig", () => {
 		expect(error.message).toContain("gates.ignore must be an array of strings");
 	});
 
+	it("takes the time that agents and checks may run from the config, and rejects a limit that is not positive", async () => {
+		const set = await loadConfig(
+			projectWith(
+				"export default { commandTimeoutMinutes: 30, phases: { exec: { timeoutMinutes: 60 } } };",
+			),
+		);
+		expect(set.commandTimeoutMinutes).toBe(30);
+		expect(set.phases.exec.timeoutMinutes).toBe(60);
+		expect(set.phases.scan.timeoutMinutes).toBe(15); // untouched default
+
+		const bad = projectWith(
+			"export default { commandTimeoutMinutes: 0, phases: { scan: { timeoutMinutes: -1 } } };",
+		);
+		const error = await loadConfig(bad).catch((e) => e);
+		expect(error.message).toContain("commandTimeoutMinutes must be a number above 0");
+		expect(error.message).toContain("phases.scan.timeoutMinutes must be a number above 0");
+	});
+
 	it("accepts the two harnesses, globally and per step, with their extra arguments", async () => {
 		const dir = projectWith(
 			`export default { harness: "codex", harnessArgs: { codex: ["-p", "work"] }, phases: { verify: { harness: "claude", model: "haiku" } } };`,

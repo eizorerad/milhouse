@@ -96,11 +96,11 @@ export async function runChecks(
 export async function runProjectChecks(
 	dir: string,
 	commands: Config["commands"],
-	passed?: string[],
+	opts: { passed?: string[]; timeoutMs?: number } = {},
 ): Promise<string | null> {
 	const before = await revParse(dir, "HEAD");
 	const { build, lint, test } = commands;
-	const failure = await runChecks(dir, { build, lint, test }, { passed });
+	const failure = await runChecks(dir, { build, lint, test }, opts);
 	await gitOrThrow(dir, "clean", "-fd"); // what the commands generated: the tree was clean before them
 	if (failure) return failure;
 	if ((await revParse(dir, "HEAD")) !== before) {

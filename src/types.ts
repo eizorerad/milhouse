@@ -13,6 +13,8 @@ export type RunStatus = "running" | "completed" | "failed" | "stopped";
 
 export interface StepOptions {
 	retries: number;
+	/** Minutes that one call of this step may take. */
+	timeoutMinutes: number;
 	/** Empty string = the global model (when the step runs on the global harness) or the harness default. */
 	model: string;
 	/** Empty string = the global harness. */
@@ -39,6 +41,8 @@ export interface Config {
 	project: { name: string; language: string; framework: string; description: string };
 	/** Shell commands run inside the worktree. An empty string skips the command. */
 	commands: { setup: string; build: string; lint: string; test: string };
+	/** Minutes that one setup, build, lint or test command may take. */
+	commandTimeoutMinutes: number;
 	/** Extra rules injected into every prompt. */
 	rules: string[];
 	/** Globs agents must not change. Enforced after every exec attempt. */

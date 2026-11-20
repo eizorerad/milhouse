@@ -5,7 +5,7 @@ import type { PhaseDef } from "../runner.ts";
 import { arrayOf, object } from "../schema.ts";
 import type { Config, Issue } from "../types.ts";
 import { log } from "../ui.ts";
-import { MINUTE, generateId, parseJson, stripControl } from "../util.ts";
+import { generateId, parseJson, stripControl } from "../util.ts";
 
 const DEFAULT_SCOPE = "Find the most important bugs and improvements.";
 
@@ -89,7 +89,6 @@ export const scanPhase: PhaseDef<{ scope: string }, RawIssue[]> = {
 		const text = await ctx.ask(scanPrompt(item.scope, ctx.config, ctx.lastError), {
 			schema: SCAN_SCHEMA,
 			maxTurns: 100,
-			timeoutMs: 15 * MINUTE,
 		});
 		return parseItems(text);
 	},

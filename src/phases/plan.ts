@@ -4,7 +4,7 @@ import { context, describeIssue, feedback, prompt, role, section } from "../prom
 import type { PhaseDef } from "../runner.ts";
 import { arrayOf, object } from "../schema.ts";
 import { ACTIONABLE, type Config, type Issue, type Task } from "../types.ts";
-import { MINUTE, generateId, parseJson, stringList, stripControl } from "../util.ts";
+import { generateId, parseJson, stringList, stripControl } from "../util.ts";
 
 /** The prompt asks for 1-5; this only keeps a runaway answer from flooding the later phases. */
 const MAX_TASKS = 10;
@@ -124,7 +124,6 @@ export const planPhase: PhaseDef<Issue, RawTask[]> = {
 		const text = await ctx.ask(planPrompt(issue, ctx.config, ctx.lastError), {
 			schema: PLAN_SCHEMA,
 			maxTurns: 30,
-			timeoutMs: 5 * MINUTE,
 		});
 		return parseTasks(text);
 	},
