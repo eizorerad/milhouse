@@ -71,6 +71,12 @@ describe("forbiddenFiles", () => {
 		expect(forbiddenFiles(files, ["cache//"])).toEqual(["sub/cache/a", "cache/b"]);
 	});
 
+	it("ignores an empty pattern and the slashes around a name", () => {
+		const files = ["cache", "cache/a", "a.ts"];
+		expect(forbiddenFiles(files, ["", "/", "///"])).toEqual([]);
+		expect(forbiddenFiles(files, ["//cache"])).toEqual(["cache", "cache/a"]);
+	});
+
 	it("roots a file name that starts with a slash", () => {
 		const files = ["a.ts", "sub/a.ts"];
 		expect(forbiddenFiles(files, ["/a.ts"])).toEqual(["a.ts"]);

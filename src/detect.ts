@@ -61,11 +61,14 @@ const fromGo = (dir: string): Commands =>
 		? { build: "go build ./...", lint: "go vet ./...", test: "go test ./..." }
 		: {};
 
-/** Whether a test file in `folder` defines a TestCase: only that does unittest find, a pytest-style function it does not. */
+/** A class that unittest runs: a TestCase (also the async one) among its bases, not just the word in a comment. */
+const UNITTEST_CLASS = /^\s*class\s+\w+\s*\([^)]*\b(?:unittest\.)?(?:IsolatedAsyncio)?TestCase\b/m;
+
+/** Whether a test file in `folder` defines such a class: a pytest-style function would be found by nothing. */
 function usesUnittest(folder: string): boolean {
 	try {
 		return readdirSync(folder).some(
-			(name) => /^test.*\.py$/.test(name) && /\bTestCase\b/.test(read(folder, name)),
+			(name) => /^test.*\.py$/.test(name) && UNITTEST_CLASS.test(read(folder, name)),
 		);
 	} catch {
 		return false; // no such folder, or not a folder

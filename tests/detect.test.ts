@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_TEMPLATE, configTemplate } from "../src/config.ts";
 import { detectCommands } from "../src/detect.ts";
@@ -19,6 +19,8 @@ const scripts = (body: Record<string, string>) => JSON.stringify({ scripts: body
 /** A test that unittest finds: only a TestCase is. */
 const CASE =
 	"import unittest\n\nclass A(unittest.TestCase):\n    def test_a(self):\n        pass\n";
+const ASYNC_CASE =
+	"import unittest\n\nclass A(unittest.IsolatedAsyncioTestCase):\n    async def test_a(self):\n        pass\n";
 
 describe("detectCommands", () => {
 	it("finds nothing in an empty project", () => {
@@ -87,11 +89,23 @@ describe("detectCommands", () => {
 		expect(detectCommands(mock)).toEqual({});
 	});
 
-	it("finds a unittest file after a folder or a broken link that is named like one", () => {
+	it("wants a class that unittest runs, not the word TestCase in a comment, and knows the async one", () => {
+		const comment = project({
+			"tests/test_sum.py": "# TestCase is not used here\ndef test_sum():\n    assert False\n",
+		});
+		expect(detectCommands(comment)).toEqual({});
+		const custom = project({ "tests/test_x.py": "class MyTestCase(Base):\n    pass\n" });
+		expect(detectCommands(custom)).toEqual({});
+		const run = { test: "python3 -m unittest discover -s tests" };
+		expect(detectCommands(project({ "tests/test_a.py": ASYNC_CASE }))).toEqual(run);
+		const mixin = project({ "tests/test_b.py": "class A(Mixin, unittest.TestCase):\n    pass\n" });
+		expect(detectCommands(mixin)).toEqual(run);
+	});
+
+	it("finds a unittest file after a folder and a dangling link that are named like one", () => {
 		const dir = project({ "tests/test_real.py": CASE });
-		for (const name of ["test_a.py", "test_b.py", "test_c.py"]) {
-			mkdirSync(join(dir, "tests", name)); // a folder: reading it fails
-		}
+		mkdirSync(join(dir, "tests", "test_a.py")); // a folder: reading it fails
+		symlinkSync("nowhere", join(dir, "tests", "test_b.py")); // a link to nothing
 		expect(detectCommands(dir)).toEqual({ test: "python3 -m unittest discover -s tests" });
 	});
 

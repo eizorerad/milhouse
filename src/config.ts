@@ -310,9 +310,9 @@ export default {
   // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: it cannot be capped.
   budget: 50,
 
-  // The clock of one milhouse command, in minutes, for every agent. It starts with the command (the check of the
-  // starting commit counts): no agent call outlasts it and no new one starts (a check that has begun runs on to
-  // commandTimeoutMinutes). 0 = unlimited. Every command gets the full time.
+  // The clock of one milhouse command, in minutes, for every agent. It starts when the run begins, once this file
+  // is read (the check of the starting commit counts): no agent call outlasts it and no new one starts (a check
+  // that has begun runs on to commandTimeoutMinutes). 0 = unlimited. Every command gets the full time.
   maxMinutes: 0,
 
   project: { name: "", language: "", framework: "", description: "" },

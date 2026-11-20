@@ -213,20 +213,26 @@ describe("runPhase and the time limit", () => {
 		expect((outcome as { error: string }).error).toContain("time limit");
 		expect(fake.journal()).toHaveLength(0);
 	});
-});
 
-describe("runPhase and the time that is left", () => {
-	it("reads it once, so that it cannot reach zero between the check and the timer of the call", async () => {
-		useFakeAgent({ sleep: { Planner: 1_200 } });
+	it("reads the time that is left once for a call, so that it cannot reach zero between check and timer", async () => {
+		useFakeAgent({});
 		const { store, config } = setup();
-		const cost = new CostTracker(emptyCost(), 0, () => {}, 100);
+		const cost = new CostTracker(emptyCost(), 0, () => {}, 60_000);
 		let reads = 0;
-		cost.remainingMs = () => (++reads <= 2 ? 1 : 0); // the clock ticks once more after the check
-		const def = phase((_n, ctx) => ctx.ask("## Role: Planner"));
-		const started = Date.now();
-		const [outcome] = await runPhase(def, store, config, cost);
-		expect(outcome.ok).toBe(false); // cut short at once, not run to its end
-		expect(Date.now() - started).toBeLessThan(900);
+		const real = cost.remainingMs.bind(cost);
+		cost.remainingMs = () => {
+			reads++;
+			return real();
+		};
+		let readsForTheCall = 0;
+		const def = phase(async (_n, ctx) => {
+			const before = reads;
+			const answer = await ctx.ask("## Role: Planner");
+			readsForTheCall = reads - before;
+			return answer;
+		});
+		await runPhase(def, store, config, cost);
+		expect(readsForTheCall).toBe(1);
 	});
 });
 

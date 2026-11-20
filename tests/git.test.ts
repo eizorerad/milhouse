@@ -118,6 +118,16 @@ describe("repository state", () => {
 });
 
 describe("a new worktree", () => {
+	it("leaves no ref behind when the folder above it cannot be made", async () => {
+		const repo = await makeRepo();
+		const root = tempDir();
+		writeFile(root, "file", "x"); // a file where a folder should be
+		const path = join(root, "file", "inside", "run-x");
+		const base = await revParse(repo, "HEAD");
+		await expect(ensureWorktree(repo, path, "refs/milhouse/run-x", base)).rejects.toThrow();
+		expect(await refExists(repo, "refs/milhouse/run-x")).toBe(false);
+	});
+
 	it("gets the folders above it for its owner only: it holds a copy of the project", async () => {
 		const repo = await makeRepo();
 		const root = tempDir();

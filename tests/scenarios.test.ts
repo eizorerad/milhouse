@@ -397,6 +397,18 @@ describe("the starting commit", () => {
 		expect(await checkBase(store, config)).toBeNull();
 	});
 
+	it("does not touch the ref of a run with verified work, whatever its tasks say about their commits", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		const store = RunStore.create(repo, undefined, { branch: "main", sha: base });
+		const work = await commitFile(repo, "work.txt", "done", "T-1 work");
+		await git(repo, "update-ref", store.ref, work);
+		store.saveTasks([makeTask("T-1", { status: "verified" })]); // no sha recorded
+		const config = testConfig({ commands: { test: "true" }, gates: { baseline: true } });
+		expect(await checkBase(store, config)).toBeNull();
+		expect(await revParse(repo, store.ref)).toBe(work);
+	});
+
 	it("leaves a run alone once it has accepted work: its starting commit was usable", async () => {
 		const repo = await makeRepo();
 		const base = await revParse(repo, "HEAD");
@@ -416,6 +428,7 @@ describe("the starting commit", () => {
 		expect(await go(repo, config)).toBe(false);
 		expect(fake.journal()).toHaveLength(0);
 		expect(output.join("\n")).toContain("setup failed");
+		expect(output.join("\n")).not.toContain("gates.baseline"); // the run could not fix a setup
 	});
 
 	it("checks the starting commit only when the config asks for it: one more run of the checks", async () => {
@@ -524,6 +537,14 @@ describe("what agents and checks do to the worktree", () => {
 		const repo = await makeRepo();
 		expect(await go(repo)).toBe(false);
 		expect(calls(fake, "Executor")[1].prompt).toContain(".milhouse/config.ts");
+		expect(allStatus(repo, "failed")).toBe(true);
+	});
+
+	it("never lets a commit make .milhouse a link either: its config would be run from elsewhere", async () => {
+		const fake = useFakeAgent({ exec: { "Add greeting": "milhouse-link" } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(false);
+		expect(calls(fake, "Executor")[1].prompt).toContain("must never be modified: .milhouse");
 		expect(allStatus(repo, "failed")).toBe(true);
 	});
 
