@@ -43,7 +43,14 @@ export interface Config {
 	rules: string[];
 	/** Globs agents must not change. Enforced after every exec attempt. */
 	neverTouch: string[];
-	gates: { evidence: boolean; diffHygiene: boolean; placeholder: boolean; dod: boolean };
+	gates: {
+		evidence: boolean;
+		diffHygiene: boolean;
+		placeholder: boolean;
+		dod: boolean;
+		/** Files that the `placeholder` and `diffHygiene` gates do not look at (patterns as in .gitignore). */
+		ignore: string[];
+	};
 }
 
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";

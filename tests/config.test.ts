@@ -55,11 +55,14 @@ describe("loadConfig", () => {
 	});
 
 	it("rejects values of the wrong type", async () => {
-		const dir = projectWith(`export default { budget: "lots", failFast: "yes", neverTouch: "x" };`);
+		const dir = projectWith(
+			`export default { budget: "lots", failFast: "yes", neverTouch: "x", gates: { ignore: "*.md" } };`,
+		);
 		const error = await loadConfig(dir).catch((e) => e);
 		expect(error.message).toContain("budget must be a number");
 		expect(error.message).toContain("failFast must be a boolean");
 		expect(error.message).toContain("neverTouch must be an array of strings");
+		expect(error.message).toContain("gates.ignore must be an array of strings");
 	});
 
 	it("accepts the two harnesses, globally and per step, with their extra arguments", async () => {

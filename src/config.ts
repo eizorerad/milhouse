@@ -38,7 +38,14 @@ export const DEFAULTS: Config = {
 	commands: { setup: "", build: "", lint: "", test: "" },
 	rules: [],
 	neverTouch: [],
-	gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
+	gates: {
+		evidence: true,
+		diffHygiene: true,
+		placeholder: true,
+		dod: true,
+		// Where trailing spaces mean something, and a TODO in the text is not unfinished code.
+		ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
+	},
 };
 
 type Plain = Record<string, unknown>;
@@ -278,6 +285,13 @@ export default {
 
   // evidence: validate cites real code. placeholder: no new TODO/FIXME/stubs. diffHygiene: no trailing whitespace or conflict markers.
   // dod: commands pass and the reviewer confirms the acceptance criteria.
-  gates: { evidence: true, diffHygiene: true, placeholder: true, dod: true },
+  // ignore: files that placeholder and diffHygiene skip (patterns as in .gitignore; a list here replaces the default).
+  gates: {
+    evidence: true,
+    diffHygiene: true,
+    placeholder: true,
+    dod: true,
+    ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
+  },
 };
 `;

@@ -13,6 +13,7 @@ import {
 	findPlaceholders,
 	findWhitespaceProblems,
 	forbiddenFiles,
+	globMatcher,
 	runProjectChecks,
 } from "../gates.ts";
 import {
@@ -96,9 +97,10 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 		return `Commits touched files that must never be modified: ${forbidden.join(", ")}. Rewrite the history so that no commit after ${tip} touches them (for example git reset --soft ${tip}, restore those files, then commit per task again).`;
 	}
 
+	const ignored = globMatcher(config.gates.ignore);
 	const added =
 		config.gates.placeholder || config.gates.diffHygiene
-			? await addedLines(work.dir, work.accepted)
+			? (await addedLines(work.dir, work.accepted)).filter(({ file }) => !ignored(file))
 			: [];
 	if (config.gates.placeholder) {
 		const found = findPlaceholders(added);

@@ -147,6 +147,13 @@ describe("repair loop", () => {
 		expect(calls(fake, "Truth Verifier")).toHaveLength(1); // only the fixed work was reviewed
 	});
 
+	it("does not check the files that gates.ignore names", async () => {
+		const fake = useFakeAgent({ exec: { "Add greeting": "todo-first" } });
+		const repo = await makeRepo();
+		expect(await go(repo, testConfig({ gates: { ignore: ["*.txt"] } }))).toBe(true);
+		expect(calls(fake, "Executor")).toHaveLength(1); // the TODO was not sent back
+	});
+
 	it("sends back files left uncommitted in the worktree", async () => {
 		const fake = useFakeAgent({ exec: { "Add greeting": "junk-first" } });
 		const repo = await makeRepo();

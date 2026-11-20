@@ -230,7 +230,9 @@ export async function addedLines(cwd: string, from: string, to = "HEAD"): Promis
 			added.push({ file, text: rows[i].slice(1) });
 		}
 	}
-	return added;
+	// --text prints a binary file too, as lines with NUL bytes in them: they are not text to check.
+	const binary = new Set(added.filter(({ text }) => text.includes("\0")).map(({ file }) => file));
+	return added.filter(({ file }) => !binary.has(file));
 }
 
 // The reviewer only ever reads the start of these, so a huge diff is cut off instead of refused.

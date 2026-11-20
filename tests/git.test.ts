@@ -181,6 +181,18 @@ describe("history between two commits", () => {
 		expect(added.some((a) => a.text === "export const two = 2;")).toBe(false);
 	});
 
+	it("leaves out binary files: their bytes are not text to check", async () => {
+		const repo = await makeRepo();
+		const base = await revParse(repo, "HEAD");
+		writeFile(repo, "logo.png", "PNG\u0000 \nmore\n");
+		writeFile(repo, "src/app.ts", "export const app = 1;\nexport const two = 2;\n// note\n");
+		await git(repo, "add", "-A");
+		await git(repo, "commit", "-q", "-m", "add");
+		const added = await addedLines(repo, base);
+		expect(added.some((a) => a.file === "logo.png")).toBe(false);
+		expect(added).toContainEqual({ file: "src/app.ts", text: "// note" });
+	});
+
 	it("still sees added lines when .gitattributes tries to hide the diff", async () => {
 		const repo = await makeRepo();
 		const base = await revParse(repo, "HEAD");
