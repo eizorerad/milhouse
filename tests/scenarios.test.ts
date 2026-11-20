@@ -371,6 +371,14 @@ describe("time limits from the config", () => {
 		expect(output.join("\n")).toContain("timed out");
 	});
 
+	it("stops the run when maxMinutes is used up, and no call may outlast it", async () => {
+		const fake = useFakeAgent({ sleep: { "Lead Investigator": 5_000 } });
+		const repo = await makeRepo();
+		expect(await go(repo, testConfig({ maxMinutes: 0.01 }))).toBe(false); // 600 ms
+		expect(output.join("\n")).toContain("time limit");
+		expect(calls(fake, "Planner")).toHaveLength(0);
+	});
+
 	it("stops a check after commandTimeoutMinutes, and tells the executor", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();

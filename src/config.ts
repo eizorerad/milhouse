@@ -34,6 +34,7 @@ export const DEFAULTS: Config = {
 		verify: { retries: 1, timeoutMinutes: 10, model: "", harness: "", rules: [] },
 	},
 	budget: 50,
+	maxMinutes: 0,
 	project: { name: "", language: "", framework: "", description: "" },
 	commands: { setup: "", build: "", lint: "", test: "" },
 	commandTimeoutMinutes: 10,
@@ -206,6 +207,9 @@ function validate(config: Config): void {
 		if (!Number.isFinite(config.budget) || config.budget < 0) {
 			errors.push("budget must be a finite number >= 0");
 		}
+		if (!Number.isFinite(config.maxMinutes) || config.maxMinutes < 0) {
+			errors.push("maxMinutes must be a finite number >= 0");
+		}
 		if (!validLimit(config.commandTimeoutMinutes)) {
 			errors.push("commandTimeoutMinutes must be a number above 0 and at most 1440");
 		}
@@ -300,6 +304,10 @@ export default {
 
   // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: it cannot be capped.
   budget: 50,
+
+  // The longest that one milhouse command may run, in minutes, for every agent: no call outlasts it and no new
+  // one starts. 0 = unlimited. A resumed run gets the full time again.
+  maxMinutes: 0,
 
   project: { name: "", language: "", framework: "", description: "" },
 

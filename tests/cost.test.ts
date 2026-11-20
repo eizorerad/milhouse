@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { CostTracker, emptyCost, formatCost, formatUsd } from "../src/cost.ts";
+import { sleep } from "../src/util.ts";
 
 describe("CostTracker", () => {
 	it("adds real USD per step and persists every change", () => {
@@ -11,6 +12,27 @@ describe("CostTracker", () => {
 		expect(tracker.current.total).toBeCloseTo(1);
 		expect(tracker.current.byPhase.exec).toBeCloseTo(0.75);
 		expect(saved).toHaveLength(3);
+	});
+
+	it("has no time limit unless one is given", () => {
+		const tracker = new CostTracker(emptyCost(), 0, () => {});
+		expect(tracker.remainingMs()).toBe(Number.POSITIVE_INFINITY);
+		expect(tracker.limitReached()).toBeNull();
+	});
+
+	it("stops new work once the time limit of the command has passed", async () => {
+		const tracker = new CostTracker(emptyCost(), 0, () => {}, 40);
+		expect(tracker.exceeded()).toBe(false);
+		expect(tracker.remainingMs()).toBeGreaterThan(0);
+		await sleep(60);
+		expect(tracker.exceeded()).toBe(true);
+		expect(tracker.limitReached()).toBe("time");
+	});
+
+	it("names the budget when the money is used up", () => {
+		const tracker = new CostTracker(emptyCost(), 1, () => {}, 60_000);
+		tracker.add("scan", 2);
+		expect(tracker.limitReached()).toBe("budget");
 	});
 
 	it("ignores zero, negative and NaN amounts", () => {

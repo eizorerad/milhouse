@@ -184,6 +184,7 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 	}
 	if (!verdicts) throw new Error(`${REVIEW_UNAVAILABLE}: ${failure}`);
 
+	ctx.store.logEvent({ event: "review", issue: group.issue.id, verdicts });
 	const reasons = rejectionReasons(verdicts, group.tasks);
 	if (reasons.length > 0) throw new Error(`The reviewer rejected the work:\n${bullets(reasons)}`);
 }
@@ -298,6 +299,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		const ids = group.tasks.map((t) => t.id);
 		if (outcome.ok) {
 			store.updateTasks(ids, { status: "verified", error: undefined });
+			store.logEvent({ event: "accepted", issue: group.issue.id, sha: outcome.value });
 			await deleteBranch(store.workDir, parkBranch(group.issue.id)); // a stale parked attempt
 			return;
 		}
@@ -315,6 +317,11 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 					`${errorMessage(err)}\nThe attempt is still in ${store.worktree}. Save what you need from it, then run: milhouse --resume (it starts again from the accepted work).`,
 				);
 			}
+			store.logEvent({
+				event: "parked",
+				issue: group.issue.id,
+				branch: parkBranch(group.issue.id),
+			});
 			// Not just a reset: a failed attempt may have installed dependencies that the next issue would
 			// silently build on. A fresh worktree (and its setup) starts every issue from what was accepted.
 			await discardWorktree(store);

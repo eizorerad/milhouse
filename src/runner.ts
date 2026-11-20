@@ -83,7 +83,7 @@ function makeAsk(
 				model: stepModel(config, step),
 				schema: o.schema,
 				maxTurns: o.maxTurns,
-				timeoutMs: config.phases[step].timeoutMinutes * MINUTE,
+				timeoutMs: Math.min(config.phases[step].timeoutMinutes * MINUTE, cost.remainingMs()),
 				tools: o.tools ?? "read",
 				maxBudgetUsd: allowance,
 				extraArgs: config.harnessArgs[harness],
@@ -124,10 +124,14 @@ export async function runPhase<TItem, TValue>(
 		for (let attempt = 0; attempt <= options.retries; attempt++) {
 			// Another worker found that every call would fail: calls in flight finish, no new one starts.
 			if (stopped) return { ok: false, error: stopped, skipped: true };
-			if (cost.exceeded()) {
+			const limit = cost.limitReached();
+			if (limit) {
+				const used = limit === "time" ? "the time limit is used up" : "the budget is used up";
 				const error = lastError
-					? `${lastError}\n(stopped: the budget is used up)`
-					: "budget exhausted";
+					? `${lastError}\n(stopped: ${used})`
+					: limit === "time"
+						? "time limit reached"
+						: "budget exhausted";
 				return { ok: false, error, skipped: attempt === 0 };
 			}
 			try {
@@ -135,6 +139,13 @@ export async function runPhase<TItem, TValue>(
 			} catch (err) {
 				if (err instanceof Skip) return { ok: false, error: err.message, skipped: true };
 				lastError = errorMessage(err);
+				store.logEvent({
+					event: "attempt-failed",
+					phase: def.name,
+					item: label,
+					attempt: attempt + 1,
+					error: lastError.slice(0, 2000),
+				});
 				progress.note(
 					`${label}: attempt ${attempt + 1}/${options.retries + 1} failed: ${firstLine(lastError)}`,
 				);

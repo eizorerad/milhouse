@@ -83,6 +83,17 @@ describe("loadConfig", () => {
 		expect(error.message).toContain("phases.scan.timeoutMinutes must be a number above 0");
 	});
 
+	it("takes a time limit for the whole command, and rejects a negative one", async () => {
+		expect((await loadConfig(projectWith("export default { maxMinutes: 90 };"))).maxMinutes).toBe(
+			90,
+		);
+		expect((await loadConfig(projectWith())).maxMinutes).toBe(0); // no limit
+		const error = await loadConfig(projectWith("export default { maxMinutes: -5 };")).catch(
+			(e) => e,
+		);
+		expect(error.message).toContain("maxMinutes must be a finite number >= 0");
+	});
+
 	it("accepts the two harnesses, globally and per step, with their extra arguments", async () => {
 		const dir = projectWith(
 			`export default { harness: "codex", harnessArgs: { codex: ["-p", "work"] }, phases: { verify: { harness: "claude", model: "haiku" } } };`,

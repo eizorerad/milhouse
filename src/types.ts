@@ -38,6 +38,8 @@ export interface Config {
 	phases: Record<AgentStep, StepOptions>;
 	/** USD limit for one run. 0 = unlimited. */
 	budget: number;
+	/** Minutes that one command may run in all, whatever the agent. 0 = unlimited. */
+	maxMinutes: number;
 	project: { name: string; language: string; framework: string; description: string };
 	/** Shell commands run inside the worktree. An empty string skips the command. */
 	commands: { setup: string; build: string; lint: string; test: string };

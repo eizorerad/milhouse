@@ -16,7 +16,7 @@ import { type Outcome, runPhase } from "./runner.ts";
 import { RunStore } from "./state.ts";
 import { type Config, PHASES, type Phase } from "./types.ts";
 import { log } from "./ui.ts";
-import { errorMessage } from "./util.ts";
+import { MINUTE, errorMessage } from "./util.ts";
 import { cleanupRun } from "./worktree.ts";
 
 export interface PipelineOptions {
@@ -97,6 +97,7 @@ function announce(store: RunStore, config: Config, todo: Phase[], cost: CostTrac
 	if (config.budget > 0) {
 		log.info(`Budget ${formatUsd(config.budget)}, spent so far ${formatUsd(cost.current.total)}`);
 	}
+	if (config.maxMinutes > 0) log.info(`Time limit for this command: ${config.maxMinutes} minutes`);
 	if (agentSteps(config, todo).length > 0) log.info(`Agents: ${describeAgents(config, todo)}`);
 	const unpriced = new Set(
 		agentSteps(config, todo)
@@ -147,7 +148,12 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 				branch: await currentBranch(workDir),
 				sha: await revParse(workDir, "HEAD"),
 			});
-		const cost = new CostTracker(store.loadCost(), config.budget, (c) => store.saveCost(c));
+		const cost = new CostTracker(
+			store.loadCost(),
+			config.budget,
+			(c) => store.saveCost(c),
+			config.maxMinutes * MINUTE,
+		);
 
 		announce(store, config, todo, cost);
 
@@ -207,7 +213,10 @@ async function finish(
 ): Promise<boolean> {
 	const complete = config.pipeline.every((phase) => store.loadMeta().done.includes(phase));
 	const spent = formatCost(cost.current);
-	const budgetHint = `The budget of ${formatUsd(config.budget)} is used up: raise "budget" in .milhouse/config.ts, then run: milhouse --resume`;
+	const budgetHint =
+		cost.limitReached() === "time"
+			? `The time limit of ${config.maxMinutes} minutes is used up: raise "maxMinutes" in .milhouse/config.ts, then run: milhouse --resume (every command gets the full time)`
+			: `The budget of ${formatUsd(config.budget)} is used up: raise "budget" in .milhouse/config.ts, then run: milhouse --resume`;
 	if (failures > 0) {
 		store.finish("failed");
 		log.error(

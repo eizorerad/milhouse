@@ -1,6 +1,7 @@
 /** Run state: JSON files under .milhouse/runs/<id>/. Writes are atomic; corrupt files fail loudly. */
 
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
@@ -130,6 +131,14 @@ export class RunStore {
 
 	finish(status: RunStatus): void {
 		this.patchMeta({ status });
+	}
+
+	// ─── Log ─────────────────────────────────────────────────────────
+
+	/** Adds one line to the run's log (events.jsonl): what happened, for whoever reads the run afterwards. */
+	logEvent(event: Record<string, unknown>): void {
+		mkdirSync(dirname(this.file("events.jsonl")), { recursive: true });
+		appendFileSync(this.file("events.jsonl"), `${JSON.stringify({ at: now(), ...event })}\n`);
 	}
 
 	// ─── Cost ────────────────────────────────────────────────────────

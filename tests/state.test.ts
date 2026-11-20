@@ -58,6 +58,21 @@ describe("RunStore", () => {
 		expect(readFileSync(join(dir, ".milhouse", ".gitignore"), "utf-8")).toContain("work/");
 	});
 
+	it("keeps a log of what happened, one JSON object per line", () => {
+		const dir = tempDir();
+		const store = RunStore.create(dir, undefined, START);
+		store.logEvent({ event: "first", n: 1 });
+		store.logEvent({ event: "second" });
+		const text = readFileSync(join(dir, ".milhouse", "runs", store.runId, "events.jsonl"), "utf-8");
+		const events = text
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(events.map((e) => e.event)).toEqual(["first", "second"]);
+		expect(events[0].n).toBe(1);
+		expect(Number.isNaN(Date.parse(events[0].at))).toBe(false);
+	});
+
 	it("round-trips issues and tasks and patches them immutably", () => {
 		const store = RunStore.create(tempDir(), undefined, START);
 		store.saveIssues([issue("P1"), issue("P2")]);

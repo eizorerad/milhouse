@@ -381,6 +381,28 @@ describe("single phases", () => {
 	});
 });
 
+describe("the log of a run", () => {
+	it("keeps what the reviewer said, also for work that was accepted in the end", async () => {
+		useFakeAgent({ reject: { "Add greeting": 1 } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const text = readFile(repo, `.milhouse/runs/${latest(repo).runId}/events.jsonl`);
+		const events = text
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+
+		const reviews = events.filter((e) => e.event === "review");
+		expect(reviews).toHaveLength(2);
+		expect(reviews[0].verdicts[0].passed).toBe(false);
+		expect(reviews[1].verdicts[0].passed).toBe(true);
+		expect(reviews[1].verdicts[0].reason).not.toBe("");
+		const failed = events.find((e) => e.event === "attempt-failed");
+		expect(failed.error).toContain("The reviewer rejected the work");
+		expect(events.some((e) => e.event === "accepted")).toBe(true);
+	});
+});
+
 describe("a run without project checks", () => {
 	it("is refused before it costs anything", async () => {
 		const fake = useFakeAgent({});
