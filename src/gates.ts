@@ -9,10 +9,23 @@ import { MINUTE, tail } from "./util.ts";
 
 export const COMMAND_TIMEOUT_MS = 10 * MINUTE;
 
-/** Files that match one of the `neverTouch` globs. A trailing "/" means "everything below". */
+/**
+ * A test for files that match one of `patterns`, written like .gitignore lines: a trailing "/" means
+ * "everything below", a pattern with a slash starts at the repository root, one without (`.env*`)
+ * matches at any depth.
+ */
+export function globMatcher(patterns: string[]): (file: string) => boolean {
+	const globs = patterns.map((raw) => {
+		const rooted = raw.startsWith("/");
+		const pattern = (rooted ? raw.slice(1) : raw).replace(/\/$/, "/**");
+		return new Bun.Glob(rooted || pattern.includes("/") ? pattern : `**/${pattern}`);
+	});
+	return (file) => globs.some((glob) => glob.match(file));
+}
+
+/** Files that match one of the `neverTouch` patterns. */
 export function forbiddenFiles(files: string[], patterns: string[]): string[] {
-	const globs = patterns.map((p) => new Bun.Glob(p.endsWith("/") ? `${p}**` : p));
-	return files.filter((file) => globs.some((glob) => glob.match(file)));
+	return files.filter(globMatcher(patterns));
 }
 
 const TRAILING_SPACE = /[ \t]+$/;

@@ -44,6 +44,19 @@ describe("forbiddenFiles", () => {
 		expect(forbiddenFiles(files, ["src/app.ts"])).toEqual(["src/app.ts"]);
 	});
 
+	it("matches a pattern without a slash at any depth, like .gitignore", () => {
+		const files = ["app/.env", "services/api/.env.production", "web/yarn.lock", "src/env.ts"];
+		expect(forbiddenFiles(files, [".env*"])).toEqual(["app/.env", "services/api/.env.production"]);
+		expect(forbiddenFiles(files, ["*.lock"])).toEqual(["web/yarn.lock"]);
+	});
+
+	it("keeps a pattern with a slash relative to the repository root", () => {
+		const files = ["migrations/001.sql", "app/migrations/001.sql", "app/keys/a.pem"];
+		expect(forbiddenFiles(files, ["migrations/**"])).toEqual(["migrations/001.sql"]);
+		expect(forbiddenFiles(files, ["/migrations/"])).toEqual(["migrations/001.sql"]);
+		expect(forbiddenFiles(files, ["app/keys/"])).toEqual(["app/keys/a.pem"]);
+	});
+
 	it("matches nothing without patterns", () => {
 		expect(forbiddenFiles(["a.ts"], [])).toEqual([]);
 	});
