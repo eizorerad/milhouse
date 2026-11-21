@@ -58,6 +58,13 @@ const gitEnv = (): NodeJS.ProcessEnv => ({
 	LC_ALL: "C",
 });
 
+/**
+ * How every git command runs. `exitSignal`: a git that is killed outright leaves `index.lock` behind, and in
+ * the user's checkout (the fast-forward of a merge) that would lock them out of their own repository.
+ */
+const GIT_RUN = (cwd: string) =>
+	({ cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS, exitSignal: "SIGTERM" }) as const;
+
 export interface GitResult {
 	ok: boolean;
 	out: string;
@@ -65,13 +72,13 @@ export interface GitResult {
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<GitResult> {
-	const result = await run("git", args, { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+	const result = await run("git", args, GIT_RUN(cwd));
 	return { ok: result.code === 0, out: result.stdout.trimEnd(), err: result.stderr.trim() };
 }
 
 /** The finished process (stdout raw: trailing whitespace on the last line intact). Throws when git fails. */
 async function gitRun(cwd: string, ...args: string[]): Promise<RunResult> {
-	const result = await run("git", args, { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+	const result = await run("git", args, GIT_RUN(cwd));
 	if (result.code !== 0) {
 		throw new Error(`git ${args.join(" ")} failed: ${tail(result.stderr || result.stdout, 500)}`);
 	}
@@ -264,7 +271,7 @@ export async function ensureWorktree(
 	// First, so that a failure leaves no ref behind. The worktree holds a copy of the project: the owner only.
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	if (!(await refExists(repo, ref))) await gitOrThrow(repo, "update-ref", ref, baseSha);
-	if (existsSync(join(path, ".git"))) return { created: false };
+	if (isWorktree(path)) return { created: false };
 
 	rmSync(path, { recursive: true, force: true }); // a leftover directory that is not a worktree
 	await git(repo, "worktree", "prune");
@@ -272,8 +279,18 @@ export async function ensureWorktree(
 	return { created: true };
 }
 
-/** Back to the commit `to` (a ref) with a detached HEAD and no local changes. */
+/**
+ * Whether `path` is a checkout of its own. A plain directory is not: where the worktrees live inside the
+ * project, git would work on the project itself there.
+ */
+export const isWorktree = (path: string): boolean => existsSync(join(path, ".git"));
+
+/**
+ * Back to the commit `to` (a ref) with a detached HEAD and no local changes. A session that was killed in
+ * the middle of a git command left its lock behind: nobody else works in the run's worktree, so it goes.
+ */
 export async function resetWorktree(path: string, to: string): Promise<void> {
+	await clearIndexLock(path);
 	await gitOrThrow(path, "checkout", "-f", "--detach", to);
 	await gitOrThrow(path, "clean", "-fd");
 }

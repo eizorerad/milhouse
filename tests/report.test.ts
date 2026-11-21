@@ -86,6 +86,29 @@ describe("formatReport", () => {
 		expect(text).toContain("**Scope**: fix auth");
 	});
 
+	it("lists every issue with its verdict and its tasks, with the commit of the accepted ones", () => {
+		const store = sampleStore();
+		store.updateIssue("P2", { verdict_reason: "the code\nalready handles it" });
+		store.updateTasks(["T1"], { sha: "0123456789abcdef0123456789abcdef01234567" });
+		const report = generateReport(store);
+		expect(report.details.map((issue) => issue.tasks.length)).toEqual([2, 0, 2]);
+
+		const text = formatReport(report, "terminal");
+		expect(text).toContain("[LOW] Title of P2 (false: the code already handles it)");
+		expect(text).toContain("[CRITICAL] Title of P3 (confirmed)");
+		expect(text).toMatch(/merged +T1 01234567\n/);
+		expect(text).toMatch(/failed +T3\n/);
+
+		const md = formatReport(report, "md");
+		expect(md).toContain("- [HIGH] Title of P1 (confirmed)\n  - merged: T1 `01234567`");
+	});
+
+	it("prints the whole report as JSON for other programs", () => {
+		const report = generateReport(sampleStore());
+		expect(JSON.parse(formatReport(report, "json"))).toEqual(JSON.parse(JSON.stringify(report)));
+		expect(JSON.parse(formatReport(report, "json")).details[2].title).toBe("Title of P3");
+	});
+
 	it("omits the failure section when nothing failed", () => {
 		const store = sampleStore();
 		store.updateTasks(["T3", "T4"], { status: "merged", error: undefined });

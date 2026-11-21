@@ -1,11 +1,11 @@
 /** validate: check each finding against the code. A verdict other than FALSE needs evidence that exists. */
 
-import { verifyEvidence } from "../gates.ts";
+import { MAX_CITED_LINES, verifyEvidence } from "../gates.ts";
 import { context, describeIssue, feedback, prompt, role, section } from "../prompts.ts";
 import type { Ctx, PhaseDef } from "../runner.ts";
 import { arrayOf, object } from "../schema.ts";
 import type { Evidence, Issue } from "../types.ts";
-import { parseJson } from "../util.ts";
+import { parseJson, stripControl } from "../util.ts";
 
 const VERDICTS = ["CONFIRMED", "FALSE", "PARTIAL", "MISDIAGNOSED"] as const;
 
@@ -80,10 +80,10 @@ export const validatePhase: PhaseDef<Issue, Verdict> = {
 
 		const cited = Array.isArray(verdict.evidence) ? verdict.evidence : [];
 		if (!ctx.config.gates.evidence) return { ...verdict, evidence: cited };
-		const evidence = verifyEvidence(ctx.store.workDir, cited);
+		const evidence = verifyEvidence(ctx.store.worktree, cited);
 		if (evidence.length === 0) {
 			throw new Error(
-				"Validate: none of the cited evidence holds up (file missing, lines out of range or snippet not found). Cite real files, line ranges and verbatim snippets.",
+				`Validate: none of the cited evidence holds up (file missing, lines out of range, a range of more than ${MAX_CITED_LINES} lines or snippet not found). Cite real files, line ranges and verbatim snippets.`,
 			);
 		}
 		return { ...verdict, evidence };
@@ -94,6 +94,7 @@ export const validatePhase: PhaseDef<Issue, Verdict> = {
 		store.updateIssue(issue.id, {
 			status: outcome.value.status,
 			corrected_description: outcome.value.corrected_description || undefined,
+			verdict_reason: stripControl(outcome.value.summary.trim()).slice(0, 300),
 			evidence: outcome.value.evidence,
 		});
 	},

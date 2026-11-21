@@ -10,7 +10,9 @@ import { acquireLock } from "../src/lock.ts";
 import { RunStore } from "../src/state.ts";
 import {
 	ENTRY,
+	TWO_ISSUES,
 	alive,
+	calls,
 	cleanupTempDirs,
 	flag,
 	git,
@@ -67,6 +69,9 @@ describe("arguments", () => {
 		const two = await milhouse(dir, "--scan", "--exec");
 		expect(two.code).toBe(2);
 		expect(two.stderr).toContain("Pick one phase");
+		const both = await milhouse(dir, "--report", "--clean");
+		expect(both.code).toBe(2);
+		expect(both.stderr).toContain("Pick one of: --report, --clean");
 	});
 
 	it("rejects an invalid config with a clear message", async () => {
@@ -165,6 +170,7 @@ describe("--clean", () => {
 		const repo = await makeRepo();
 		expect((await unchecked(repo, "--run")).code).toBe(1);
 		expect((await milhouse(repo, "--clean")).stdout).toContain("Nothing to clean"); // too recent
+		expect((await milhouse(repo, "--clean", "--days", "-1")).code).toBe(2);
 
 		const store = await oldRunWithLeftovers(repo);
 		const result = await milhouse(repo, "--clean");
@@ -200,6 +206,62 @@ describe("--clean", () => {
 		expect(existsSync(store.worktree)).toBe(true);
 		expect(RunStore.list(repo).map((r) => r.id)).toContain(store.runId);
 	});
+
+	/** Ages the latest run by 40 days. */
+	function age(repo: string): RunStore {
+		const store = RunStore.latest(repo) as RunStore;
+		const metaPath = join(repo, ".milhouse", "runs", store.runId, "meta.json");
+		const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+		meta.created_at = new Date(Date.now() - 40 * 86_400_000).toISOString();
+		writeFileSync(metaPath, JSON.stringify(meta));
+		return store;
+	}
+
+	it("keeps a run whose accepted work was never merged, so that --merge still finds it", async () => {
+		useFakeAgent({ ...TWO_ISSUES, exec: { "Low thing": "never-commits" } });
+		const repo = await makeRepo();
+		expect((await unchecked(repo, "--run")).code).toBe(1); // one issue accepted, one failed
+		const store = age(repo);
+
+		const kept = await milhouse(repo, "--clean");
+		expect(kept.code).toBe(1);
+		expect(kept.stdout + kept.stderr).toContain("accepted work that was never merged");
+		expect(kept.stdout + kept.stderr).toContain(`milhouse --merge --run-id ${store.runId}`);
+		expect(await refExists(repo, store.ref)).toBe(true);
+
+		expect((await milhouse(repo, "--merge", "--run-id", store.runId)).code).toBe(0);
+		expect(await git(repo, "log", "--format=%s", "main")).toContain("Critical thing part 1");
+		// Nothing of it is waiting any more. The other issue failed, so the run is not finished: --all.
+		expect((await milhouse(repo, "--clean", "--all")).code).toBe(0);
+		expect(RunStore.list(repo)).toEqual([]);
+		expect(await refExists(repo, store.ref)).toBe(false);
+	});
+
+	it("removes the failed attempts that a run parked, together with the run", async () => {
+		useFakeAgent({ exec: { "Add greeting": "todo-first" }, reject: { "Add greeting": 99 } });
+		const repo = await makeRepo();
+		expect((await unchecked(repo, "--run")).code).toBe(1);
+		expect(await git(repo, "branch", "--list", "mh-failed/*")).not.toBe("");
+		age(repo);
+
+		expect((await milhouse(repo, "--clean", "--days", "0")).code).toBe(0); // 0: whatever its age
+		expect(await git(repo, "branch", "--list", "mh-failed/*")).toBe("");
+		expect(await git(repo, "for-each-ref", "refs/milhouse")).toBe("");
+	});
+
+	it("takes an old run that was stopped or killed only with --all", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		expect((await unchecked(repo, "--scan")).code).toBe(0); // one phase: the run is "stopped"
+		const store = age(repo);
+		expect(store.loadMeta().status).toBe("stopped");
+
+		expect((await milhouse(repo, "--clean")).stdout).toContain("Nothing to clean");
+		const all = await milhouse(repo, "--clean", "--all");
+		expect(all.code).toBe(0);
+		expect(all.stdout).toContain(store.runId);
+		expect(RunStore.list(repo)).toEqual([]);
+	});
 });
 
 describe("a full run through the CLI", () => {
@@ -228,6 +290,67 @@ describe("a full run through the CLI", () => {
 		const md = await milhouse(repo, "--report", "--format", "md");
 		expect(md.stdout).toContain("# Milhouse run report");
 		expect(md.stdout).toContain("## Tasks");
+
+		// What was found and what became of it, not only how many.
+		const [task] = store.loadTasks();
+		expect(text.stdout).toContain("Add greeting (confirmed");
+		expect(text.stdout).toContain(`${task.title} ${task.sha?.slice(0, 8)}`);
+		const json = JSON.parse((await milhouse(repo, "--report", "--format", "json")).stdout);
+		expect(json.details[0].tasks[0]).toEqual({
+			title: task.title,
+			status: "merged",
+			sha: task.sha,
+		});
+		const unknown = await milhouse(repo, "--report", "--format", "xml");
+		expect(unknown.code).toBe(2);
+		expect(unknown.stderr).toContain("--format must be one of: terminal, md, json");
+	});
+
+	it("shows the plan before anything is changed: phase by phase, the report, then --resume", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		expect((await unchecked(repo, "--scan", "improve the greeting")).code).toBe(0);
+		for (const phase of ["--validate", "--plan", "--consolidate"]) {
+			expect((await unchecked(repo, phase)).code).toBe(0);
+		}
+		const plan = (await milhouse(repo, "--report")).stdout;
+		expect(plan).toContain("[MEDIUM] Add greeting (confirmed: ok)");
+		expect(plan).toMatch(/pending +Add greeting part 1\n/);
+		expect(calls(fake, "Executor")).toHaveLength(0);
+
+		expect((await unchecked(repo, "--resume")).code).toBe(0);
+		expect(calls(fake, "Executor")).toHaveLength(1);
+		expect(RunStore.list(repo)).toHaveLength(1); // one run all along
+	});
+
+	it("refuses a scope for a run that continues: the run keeps the one it started with", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		expect((await unchecked(repo, "--scan", "improve the greeting")).code).toBe(0);
+		const before = fake.journal().length;
+		for (const args of [
+			["--resume", "something else"],
+			["--plan", "--scope", "something else"],
+		]) {
+			const result = await unchecked(repo, ...args);
+			expect(result.code).toBe(2);
+			expect(result.stderr).toContain("A run keeps the scope it started with");
+		}
+		expect(fake.journal()).toHaveLength(before);
+		expect((RunStore.latest(repo) as RunStore).loadMeta().scope).toBe("improve the greeting");
+	});
+
+	it("continues the run that --run-id names, also when nothing else is said", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		expect((await unchecked(repo, "--scan", "improve the greeting")).code).toBe(0);
+		const store = RunStore.latest(repo) as RunStore;
+
+		const result = await unchecked(repo, "--run-id", store.runId);
+		expect(result.stdout).not.toContain("Usage:");
+		expect(result.code).toBe(0);
+		expect(calls(fake, "Executor")).toHaveLength(1);
+		expect(RunStore.list(repo)).toHaveLength(1);
 	});
 
 	it("exits non-zero when something failed and says how to continue", async () => {
@@ -380,6 +503,8 @@ describe("interruption", () => {
 			await waitFor(() => !alive(agentPid), 5000);
 			expect(alive(agentPid)).toBe(false);
 			expect(existsSync(join(repo, ".milhouse", "lock"))).toBe(false); // the lock is released too
+			// Not "running" for ever: the run says that it was stopped, and --resume takes it up.
+			expect((RunStore.latest(repo) as RunStore).loadMeta().status).toBe("stopped");
 		});
 	}
 });

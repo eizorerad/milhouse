@@ -47,13 +47,22 @@ export function findWhitespaceProblems(added: AddedLine[]): string[] {
 	});
 }
 
-const FIXME_MARKER = /\b(?:TODO|FIXME)\b/;
-const STUB_MARKER = /not implemented|unimplemented!\(|todo!\(|NotImplementedError/i;
+/**
+ * A note that work is left: TODO or FIXME where a comment begins, or where a line begins when a colon or a
+ * name in brackets follows. The word alone is none (an enum value, a string, `todoList`).
+ */
+const NOTE = /(?:\/\/|\/\*|^\s*\*|#|--|<!--)\s*(?:TODO|FIXME)\b|^\s*(?:TODO|FIXME)\s*[:(]/;
+/** Rust's own words for code that is not written yet. */
+const STUB = /\b(?:todo|unimplemented)!\(/;
 
-/** Added lines that leave work undone: "file: line". */
+/**
+ * Added lines that say themselves that work is left: "file: line". Only what cannot be meant otherwise: a
+ * gate that is wrong costs every retry of an issue. Whether a `throw new Error("not implemented")` is a stub
+ * or an answer to a caller is for the reviewer to say.
+ */
 export function findPlaceholders(added: AddedLine[]): string[] {
 	return added
-		.filter(({ text }) => FIXME_MARKER.test(text) || STUB_MARKER.test(text))
+		.filter(({ text }) => NOTE.test(text) || STUB.test(text))
 		.map(({ file, text }) => `${file}: ${text.trim()}`);
 }
 
@@ -119,6 +128,8 @@ export async function runProjectChecks(
 
 const squash = (text: string): string => text.replace(/\s+/g, " ").trim();
 const LINE_SLACK = 5; // models miscount lines by a few
+/** A citation points at a place in a file: a range that covers the whole file would find any snippet. */
+export const MAX_CITED_LINES = 200;
 const ELLIPSIS = /^(\.{3}|…)$/;
 
 /** The evidence that holds up: file inside the repo, line range in the file, snippet found near it. */
@@ -130,7 +141,10 @@ export function verifyEvidence(repo: string, evidence: Evidence[]): Evidence[] {
 			if (!file.startsWith(root + sep)) return false;
 			const content = readFileSync(file, "utf-8").split("\n");
 			const { line_start: start, line_end: end } = item;
+			// Numbers: a harness that does not enforce the answer's schema may send "3", and "3" + 5 is "35".
+			if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
 			if (!(start >= 1 && end >= start && start <= content.length)) return false;
+			if (end - start >= MAX_CITED_LINES) return false;
 			const window = squash(
 				content.slice(Math.max(0, start - 1 - LINE_SLACK), end + LINE_SLACK).join(" "),
 			);

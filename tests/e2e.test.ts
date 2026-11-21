@@ -82,7 +82,7 @@ describe("happy path", () => {
 		]);
 	});
 
-	it("keeps agents isolated: read-only tools everywhere except the executor, which works in the run's worktree", async () => {
+	it("keeps agents isolated: read-only tools everywhere except the executor, and all of them in the run's worktree", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
 		await go(repo);
@@ -92,7 +92,7 @@ describe("happy path", () => {
 			expect(call.args).toContain("--strict-mcp-config");
 			expect(call.args.includes("--dangerously-skip-permissions")).toBe(writer);
 			expect(call.args.includes("--tools")).toBe(!writer);
-			expect(call.cwd).toBe(writer || call.role === "Truth Verifier" ? store.worktree : repo);
+			expect(call.cwd).toBe(store.worktree); // none of them in the user's checkout
 		}
 	});
 
@@ -411,6 +411,31 @@ describe("the log of a run", () => {
 		expect(failed.error).toContain("The reviewer rejected the work");
 		expect(events.some((e) => e.event === "accepted")).toBe(true);
 	});
+
+	it("keeps what every agent answered, with its step and its cost", async () => {
+		useFakeAgent({ cost: 0.02 });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const events = readFile(repo, `.milhouse/runs/${latest(repo).runId}/events.jsonl`)
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line))
+			.filter((e) => e.event === "agent");
+		expect(events.map((e) => e.step)).toEqual([
+			"scan",
+			"validate",
+			"plan",
+			"consolidate",
+			"exec",
+			"verify",
+		]);
+		for (const event of events) {
+			expect(event.harness).toBe("claude");
+			expect(event.cost_usd).toBe(0.02);
+			expect(typeof event.answer).toBe("string");
+		}
+		expect(events[0].answer).toContain("Add greeting"); // the scanner's findings
+	});
 });
 
 describe("the log of a run that fails", () => {
@@ -593,6 +618,28 @@ describe("merge", () => {
 		expect(allStatus(repo, "verified")).toBe(true);
 	});
 
+	it("lets a run that began on a detached HEAD go on, and merge, on a branch that holds its commit", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const start = await git(repo, "rev-parse", "HEAD");
+		await git(repo, "checkout", "-q", "--detach");
+		const reading = testConfig({ pipeline: ["scan", "validate", "plan", "consolidate"] });
+		expect(await go(repo, reading)).toBe(true); // as in a CI checkout
+		expect(latest(repo).loadMeta().base_branch).toBe("");
+
+		// A branch without the run's commit is not its branch ...
+		await git(repo, "checkout", "-q", "--orphan", "unrelated");
+		await git(repo, "commit", "-q", "--allow-empty", "-m", "unrelated");
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(true); // nothing to merge yet
+		expect(latest(repo).loadMeta().base_branch).toBe("");
+		// ... the one that holds it is.
+		await git(repo, "checkout", "-q", "main");
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		expect(latest(repo).loadMeta().base_branch).toBe("main");
+		expect(allStatus(repo, "merged")).toBe(true);
+		expect(await isAncestorOf(repo, start)).toBe(true);
+	});
+
 	it("keeps the verified work when the merge conflicts", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
@@ -606,6 +653,9 @@ describe("merge", () => {
 		expect(allStatus(repo, "verified")).toBe(true);
 	});
 });
+
+const isAncestorOf = async (repo: string, sha: string): Promise<boolean> =>
+	(await git(repo, "merge-base", sha, "HEAD")) === sha;
 
 describe("preflight", () => {
 	it("explains what is wrong before spending anything", async () => {

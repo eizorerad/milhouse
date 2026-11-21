@@ -34,6 +34,7 @@ export const DEFAULTS: Config = {
 		verify: { retries: 1, timeoutMinutes: 10, model: "", harness: "", rules: [] },
 	},
 	budget: 50,
+	maxTokens: 0,
 	maxMinutes: 0,
 	project: { name: "", language: "", framework: "", description: "" },
 	commands: { setup: "", build: "", lint: "", test: "" },
@@ -48,7 +49,7 @@ export const DEFAULTS: Config = {
 		dod: true,
 		baseline: true,
 		// Where trailing spaces mean something, and a TODO in the text is not unfinished code.
-		ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
+		ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff", "*.snap"],
 	},
 };
 
@@ -207,6 +208,9 @@ function validate(config: Config): void {
 		if (!Number.isFinite(config.budget) || config.budget < 0) {
 			errors.push("budget must be a finite number >= 0");
 		}
+		if (!Number.isFinite(config.maxTokens) || config.maxTokens < 0) {
+			errors.push("maxTokens must be a finite number >= 0");
+		}
 		if (!Number.isFinite(config.maxMinutes) || config.maxMinutes < 0) {
 			errors.push("maxMinutes must be a finite number >= 0");
 		}
@@ -214,8 +218,19 @@ function validate(config: Config): void {
 			["neverTouch", config.neverTouch],
 			["gates.ignore", config.gates.ignore],
 		] as const) {
-			for (const pattern of patterns.filter((p) => p.replace(/^\/+/, "").startsWith("!"))) {
-				errors.push(`${name}: "${pattern}" cannot start with "!": exceptions are not supported`);
+			for (const pattern of patterns) {
+				if (pattern.replace(/^\/+/, "").startsWith("!")) {
+					errors.push(`${name}: "${pattern}" cannot start with "!": exceptions are not supported`);
+				} else if (
+					pattern !== pattern.trim() ||
+					pattern.startsWith("./") ||
+					pattern.replace(/\//g, "") === ""
+				) {
+					// Git would strip the spaces and knows no "./": here the pattern would protect nothing, without a word.
+					errors.push(
+						`${name}: "${pattern}" matches no file: write it as in .gitignore, without spaces around it or "./" in front`,
+					);
+				}
 			}
 		}
 		if (!validLimit(config.commandTimeoutMinutes)) {
@@ -307,8 +322,12 @@ export default {
     verify: { retries: 1, timeoutMinutes: 10 },
   },
 
-  // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: it cannot be capped.
+  // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: maxTokens limits it.
   budget: 50,
+
+  // Limit for one run on the tokens (input and output) of calls that report no dollars (Codex). 0 = unlimited.
+  // A call that is running is not cut short: no new one starts once the limit is reached.
+  maxTokens: 0,
 
   // The clock of one milhouse command, in minutes, for every agent. It starts when the run begins, once this file
   // is read (the check of the starting commit counts): no agent call outlasts it and no new one starts (a check
@@ -330,7 +349,7 @@ export default {
   rules: [],
   neverTouch: [], // e.g. ["migrations/**", ".env*"]
 
-  // evidence: validate cites real code. placeholder: no new TODO/FIXME/stubs. diffHygiene: no trailing whitespace or conflict markers.
+  // evidence: validate cites real code. placeholder: no new TODO/FIXME notes or todo!() stubs. diffHygiene: no trailing whitespace or conflict markers.
   // dod: commands pass and the reviewer confirms the acceptance criteria.
   // baseline: the commands must pass on the starting commit before the run spends anything; otherwise every issue fails for what was broken already.
   // ignore: files that placeholder and diffHygiene skip (patterns as in .gitignore, without "!"; a list here replaces the default).
@@ -340,7 +359,7 @@ export default {
     placeholder: true,
     dod: true,
     baseline: true,
-    ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
+    ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff", "*.snap"],
   },
 };
 `;

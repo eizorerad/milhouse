@@ -22,6 +22,9 @@ import { errorMessage, generateId, now } from "./util.ts";
 
 export const STATE_DIR = ".milhouse";
 
+/** The branch that keeps a failed attempt at an issue for inspection. */
+export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
+
 /** Keep runtime files out of git without touching the user's own .gitignore. */
 export function ensureIgnoreFile(workDir: string): void {
 	const path = join(workDir, STATE_DIR, ".gitignore");
@@ -128,6 +131,11 @@ export class RunStore {
 		writeJson(this.file("meta.json"), { ...this.loadMeta(), ...patch, updated_at: now() });
 	}
 
+	/** A run that began on a detached HEAD belongs to the branch it is continued on. */
+	setBranch(branch: string): void {
+		this.patchMeta({ base_branch: branch });
+	}
+
 	/** After a merge the run continues from the merged state. */
 	setBase(sha: string): void {
 		this.patchMeta({ base_sha: sha });
@@ -222,18 +230,20 @@ export class RunStore {
 	}
 
 	/**
-	 * Remove finished runs older than `days` (stopped runs stay: they can be resumed). `before` runs first for
-	 * each one, to remove what the run left outside its directory; if it throws, the run is kept.
+	 * Remove finished runs older than `days`. Stopped runs stay, because they can be resumed, and so do runs
+	 * that never said how they ended (a crash): `all` takes those too. `before` runs first for each one, to
+	 * remove what the run left outside its directory; if it throws, the run is kept.
 	 */
 	static async clean(
 		workDir: string,
 		days: number,
 		before?: (store: RunStore) => Promise<void>,
+		all = false,
 	): Promise<{ removed: string[]; kept: Array<{ id: string; reason: string }> }> {
 		const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 		const old = RunStore.list(workDir).filter(
 			(run) =>
-				(run.status === "completed" || run.status === "failed") &&
+				(all || run.status === "completed" || run.status === "failed") &&
 				new Date(run.created_at).getTime() < cutoff,
 		);
 		const removed: string[] = [];

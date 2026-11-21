@@ -88,6 +88,19 @@ describe("tokens of harnesses that report no dollars", () => {
 });
 
 describe("formatting", () => {
+	it("stops new work once the token limit is used up, and has none unless one is given", () => {
+		const unlimited = new CostTracker(emptyCost(), 0, () => {});
+		unlimited.add("scan", 0, { input: 9_000_000, output: 1_000_000 });
+		expect(unlimited.limitReached()).toBeNull();
+
+		const tracker = new CostTracker(emptyCost(), 0, () => {}, 0, 1_000);
+		tracker.add("scan", 0, { input: 900, output: 50 });
+		expect(tracker.limitReached()).toBeNull();
+		tracker.add("validate", 0, { input: 40, output: 10 }); // input and output count together
+		expect(tracker.limitReached()).toBe("tokens");
+		expect(tracker.tokensUsedUp()).toBe(true);
+	});
+
 	it("shows tokens where there are no dollars, and both when a run used both", () => {
 		const tokens = { input: 1_234_567, output: 40_000 };
 		expect(formatCost({ total: 0, byPhase: {}, tokens })).toBe(

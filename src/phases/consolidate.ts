@@ -94,11 +94,13 @@ function dependsOn(tasks: Task[], from: string, target: string, seen = new Set<s
  */
 export function applyConsolidation(tasks: Task[], result: Consolidation): Task[] {
 	const known = new Set(tasks.map((t) => t.id));
+	// Only what is still to do: a task that was accepted is a commit already, and removing it would lose the work.
+	const open = new Set(tasks.filter((t) => t.status === "pending").map((t) => t.id));
 	const redirect = new Map<string, string>();
 	for (const { keep, remove } of result.duplicates ?? []) {
 		if (!known.has(keep) || redirect.has(keep)) continue;
 		for (const id of remove) {
-			if (id !== keep && known.has(id) && !redirect.has(id)) redirect.set(id, keep);
+			if (id !== keep && open.has(id) && !redirect.has(id)) redirect.set(id, keep);
 		}
 	}
 
@@ -122,7 +124,8 @@ export function applyConsolidation(tasks: Task[], result: Consolidation): Task[]
 		for (const dep of depends_on.map((id) => resolveId(redirect, id))) {
 			const task = current.find((t) => t.id === taskId);
 			const exists = current.some((t) => t.id === dep);
-			if (!task || !exists || dep === taskId || task.depends_on.includes(dep)) continue;
+			if (!task || !open.has(taskId) || !exists || dep === taskId) continue;
+			if (task.depends_on.includes(dep)) continue;
 			if (dependsOn(current, dep, taskId)) continue; // would close a cycle
 			current = current.map((t) =>
 				t.id === taskId ? { ...t, depends_on: [...t.depends_on, dep] } : t,

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync } from "node:fs";
 import { CostTracker, emptyCost } from "../src/cost.ts";
 import { EngineError } from "../src/engine.ts";
 import { GiveUp, type Outcome, type PhaseDef, Skip, runPhase } from "../src/runner.ts";
@@ -26,7 +27,9 @@ interface Setup {
 }
 
 function setup(configOverrides: Record<string, unknown> = {}, budget = 0): Setup {
+	process.env.MILHOUSE_WORK_DIR = tempDir(); // agents run in the run's worktree: here, an empty folder
 	const store = RunStore.create(tempDir(), undefined, BASE);
+	mkdirSync(store.worktree, { recursive: true });
 	const config = testConfig({ budget, ...configOverrides });
 	return { store, config, cost: new CostTracker(emptyCost(), budget, () => {}) };
 }
@@ -278,6 +281,14 @@ describe("runPhase and the agent", () => {
 		await runPhase(def, store, config, cost);
 		const caps = fake.journal().map((call) => flag(call.args, "--max-budget-usd"));
 		expect(caps).toEqual(["5.0000", "5.0000"]);
+	});
+
+	it("gives a lone item all that is left, not one worker's share of it", async () => {
+		const fake = useFakeAgent({ cost: 0.01 });
+		const { store, config, cost } = setup({ phases: { validate: { workers: 5 } } }, 10);
+		const def = phase((_n, ctx) => ctx.ask("## Role: Planner"), [1]);
+		await runPhase(def, store, config, cost);
+		expect(flag(fake.journal()[0].args, "--max-budget-usd")).toBe("10.0000");
 	});
 
 	it("passes no budget cap when the budget is unlimited", async () => {

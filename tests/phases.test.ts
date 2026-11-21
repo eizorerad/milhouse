@@ -226,6 +226,20 @@ describe("applyConsolidation", () => {
 		expect(result[1].depends_on).toEqual(["A"]);
 	});
 
+	it("never removes or re-orders a task that is no longer pending: it is a commit already", () => {
+		const tasks = [
+			task("A", { status: "verified", sha: "abc" }),
+			task("B", { status: "merged", sha: "def" }),
+			task("C"),
+		];
+		const result = applyConsolidation(tasks, {
+			duplicates: [{ keep: "C", remove: ["A", "B"] }],
+			cross_dependencies: [{ task_id: "A", depends_on: ["C"] }],
+		});
+		expect(result.map((t) => t.id)).toEqual(["A", "B", "C"]);
+		expect(result[0].depends_on).toEqual([]);
+	});
+
 	it("follows chains of duplicates and ignores unknown ids and self-removal", () => {
 		const tasks = [task("A"), task("B"), task("C", { depends_on: ["A"] })];
 		const result = applyConsolidation(tasks, {

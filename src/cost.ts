@@ -9,7 +9,17 @@ export const emptyCost = (): RunCost => ({ total: 0, byPhase: {} });
 
 export const formatUsd = (usd: number): string => `$${usd.toFixed(2)}`;
 
-const formatTokens = (n: number): string =>
+/** Which limit stopped the work. */
+export type Limit = "budget" | "time" | "tokens";
+
+/** How a failure names the limit that caused it. */
+export const LIMIT_USED_UP: Record<Limit, string> = {
+	budget: "the budget is used up",
+	time: "the time limit is used up",
+	tokens: "the token limit is used up",
+};
+
+export const formatTokens = (n: number): string =>
 	n >= 1_000_000
 		? `${(n / 1_000_000).toFixed(1)}M`
 		: n >= 1_000
@@ -37,6 +47,8 @@ export class CostTracker {
 		private readonly persist: (cost: RunCost) => void,
 		/** How long this command may run in all, in milliseconds; 0 = no limit. */
 		private readonly timeLimitMs = 0,
+		/** Tokens (input and output) that calls without a USD cost may use in the run; 0 = no limit. */
+		private readonly tokenLimit = 0,
 	) {}
 
 	get current(): RunCost {
@@ -61,10 +73,17 @@ export class CostTracker {
 		this.persist(this.cost);
 	}
 
-	/** Which limit stops new work: the money or the time. Null while neither is used up. */
-	limitReached(): "budget" | "time" | null {
+	/** Which limit stops new work: the money, the tokens or the time. Null while none is used up. */
+	limitReached(): Limit | null {
 		if (this.budget > 0 && this.cost.total >= this.budget) return "budget";
+		if (this.tokensUsedUp()) return "tokens";
 		return this.remainingMs() <= 0 ? "time" : null;
+	}
+
+	/** The token limit alone: it does not read the clock. */
+	tokensUsedUp(): boolean {
+		const { input = 0, output = 0 } = this.cost.tokens ?? {};
+		return this.tokenLimit > 0 && input + output >= this.tokenLimit;
 	}
 
 	exceeded(): boolean {

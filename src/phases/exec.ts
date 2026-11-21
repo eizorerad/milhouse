@@ -7,7 +7,6 @@
  * builds on broken work and every issue is checked on top of everything accepted before it.
  */
 
-import { existsSync } from "node:fs";
 import { commandTimeoutMs } from "../config.ts";
 import { EngineError } from "../engine.ts";
 import {
@@ -28,21 +27,21 @@ import {
 	diffStat,
 	gitOrThrow,
 	isAncestor,
+	isWorktree,
 	parkWorktree,
 	resetWorktree,
+	resolveRef,
 	revParse,
 	touchedFiles,
 } from "../git.ts";
 import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
-import type { RunStore } from "../state.ts";
+import { type RunStore, STATE_DIR, parkBranch } from "../state.ts";
 import type { Config, Task } from "../types.ts";
 import { errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
 import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
 import { REVIEW_SCHEMA, bullets, execPrompt, reviewPrompt } from "./exec-prompts.ts";
-
-export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
 
 /**
  * Marks a failure of the reviewer itself (not a verdict). It must not send the issue back to the executor:
@@ -50,7 +49,7 @@ export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
  */
 const REVIEW_UNAVAILABLE = "The review could not be completed";
 
-/** The executor could not run at all (logged out, unknown model): nothing it did, nothing it can fix. */
+/** The call of the executor failed (an outage, a timeout, no login): nothing it did, nothing it can fix. */
 const AGENT_UNAVAILABLE = "The agent could not run";
 
 /** Failures that are not the executor's fault must not be fed back to it as feedback. */
@@ -91,9 +90,13 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 		return `Uncommitted changes are left in the worktree. Commit them under the right task or remove them:\n${tail(status, 800)}`;
 	}
 
-	// .milhouse/ is milhouse's own: its config is executed as code, so no commit may change it.
-	const protectedPaths = [...config.neverTouch, "/.milhouse"]; // also a file or a link of that name
-	const forbidden = forbiddenFiles(await touchedFiles(work.dir, work.accepted), protectedPaths);
+	// .milhouse/ is milhouse's own: its config is executed as code, so no commit may change it. Also a file
+	// or a link of that name, and in any spelling: on a Mac `.MILHOUSE/config.ts` is the same file.
+	const ownState = (file: string): boolean => file.split("/")[0].toLowerCase() === STATE_DIR;
+	const touched = await touchedFiles(work.dir, work.accepted);
+	const forbidden = [
+		...new Set([...forbiddenFiles(touched, config.neverTouch), ...touched.filter(ownState)]),
+	];
 	if (forbidden.length > 0) {
 		return `Commits touched files that must never be modified: ${forbidden.join(", ")}. Rewrite the history so that no commit after ${tip} touches them (for example git reset --soft ${tip}, restore those files, then commit per task again).`;
 	}
@@ -162,7 +165,6 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 		try {
 			answer = await ctx.ask(prompt(text, feedback(failure)), {
 				step: "verify",
-				cwd: work.dir,
 				schema: REVIEW_SCHEMA,
 				maxTurns: 25,
 			});
@@ -222,7 +224,14 @@ async function startFromAccepted(
 		previous?.startsWith(REVIEW_UNAVAILABLE) &&
 		(await branchExists(store.workDir, parked)) &&
 		(await isAncestor(store.workDir, accepted, parked));
-	await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+	try {
+		await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+	} catch (err) {
+		// Not another attempt: it would build on whatever is in the worktree now.
+		throw new GiveUp(
+			`setup failed: the worktree could not be returned to the accepted work: ${errorMessage(err)}`,
+		);
+	}
 	if (pickUp) {
 		// The attempt may need what the accepted work lacks (a new dependency): set up at its commit.
 		const failure = await prepareWorktree(store, config, { setupAgain: true });
@@ -242,17 +251,16 @@ async function implement(
 	const problem = blamesAgent(previous) ? previous : undefined;
 	if (done.length === group.tasks.length && problem === undefined) return;
 	try {
-		await ctx.ask(execPrompt(group, done, ctx.config, problem), {
-			cwd: work.dir,
-			tools: "all",
-		});
+		await ctx.ask(execPrompt(group, done, ctx.config, problem), { tools: "all" });
 	} catch (err) {
+		if (!(err instanceof EngineError)) throw err;
 		// The agent was killed or crashed, perhaps in the middle of a commit.
-		if (err instanceof EngineError) await clearIndexLock(work.dir);
-		if (err instanceof EngineError && err.systemic) {
-			throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, { systemic: true });
-		}
-		throw err;
+		await clearIndexLock(work.dir);
+		// An outage or a timeout is nothing the next attempt can fix: it must not be told to.
+		throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, {
+			fatal: err.fatal,
+			systemic: err.systemic,
+		});
 	}
 }
 
@@ -290,7 +298,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		store.updateTasks(
 			group.tasks.map((t) => t.id),
 			{ sha: checked, checks_passed: work.passedChecks.length > 0 },
-		); // before the ref moves: a crash in between is recognised on resume
+		); // before the ref moves: a crash right after the move is recognised on resume (before it, the issue is done again)
 		await acceptCommit(store.workDir, store.ref, checked);
 		return checked;
 	},
@@ -303,13 +311,13 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 			await deleteBranch(store.workDir, parkBranch(group.issue.id)); // a stale parked attempt
 			return;
 		}
-		if (existsSync(store.worktree)) {
+		if (isWorktree(store.worktree)) {
 			try {
 				await parkWorktree(
 					store.workDir,
 					store.worktree,
 					parkBranch(group.issue.id),
-					await revParse(store.workDir, store.ref),
+					(await resolveRef(store.workDir, store.ref)) ?? undefined, // a lost ref is reported by the setup
 				);
 			} catch (err) {
 				// What is in the worktree is the only copy of the attempt: leave it alone, and stop everything.

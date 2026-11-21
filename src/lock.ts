@@ -1,4 +1,4 @@
-/** One milhouse per repository at a time: a lock file that holds the pid of its owner. */
+/** One milhouse per repository at a time: a lock file that holds the pid of its owner and when it started. */
 
 import { linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,6 +13,34 @@ function isAlive(pid: number): boolean {
 	}
 }
 
+/** When the process `pid` started, as `ps` prints it; "" when there is no such process or `ps` cannot say. */
+function startedAt(pid: number): string {
+	try {
+		const ps = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)], {
+			env: { ...process.env, LC_ALL: "C" },
+		});
+		return ps.success ? ps.stdout.toString().trim() : "";
+	} catch {
+		return ""; // no `ps` here
+	}
+}
+
+/** What the lock file holds: the pid of its owner and when that process started. */
+const owner = (): string => `${process.pid} ${startedAt(process.pid)}`.trim();
+
+/**
+ * The pid of the running process that wrote `holder`, or null. The pid alone would not tell: after a crash
+ * or a reboot it may belong to another process, so the start time has to match too. A lock without one
+ * (an earlier version's, or a system whose `ps` cannot say) is judged by its pid.
+ */
+function livingOwner(holder: string): number | null {
+	const [id, ...rest] = holder.trim().split(" ");
+	const pid = Number(id);
+	if (!Number.isInteger(pid) || pid <= 0) return null;
+	const started = rest.join(" ");
+	return (started ? startedAt(pid) === started : isAlive(pid)) ? pid : null;
+}
+
 /** A takeover that has been going on this long was abandoned by a crashed starter. */
 const STALE_TAKEOVER_MS = 10_000;
 
@@ -23,12 +51,12 @@ const STALE_TAKEOVER_MS = 10_000;
  */
 function createLock(path: string): void {
 	const mine = `${path}.${process.pid}.tmp`;
-	writeFileSync(mine, String(process.pid));
+	writeFileSync(mine, owner());
 	try {
 		linkSync(mine, path);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "EEXIST") throw err;
-		writeFileSync(path, String(process.pid), { flag: "wx" }); // a filesystem without hard links
+		writeFileSync(path, owner(), { flag: "wx" }); // a filesystem without hard links
 	} finally {
 		rmSync(mine, { force: true });
 	}
@@ -83,9 +111,11 @@ export function acquireLock(workDir: string): () => void {
 		} catch {
 			continue; // released in the meantime
 		}
-		const pid = Number(holder);
-		if (Number.isInteger(pid) && pid > 0 && isAlive(pid)) {
-			throw new Error(`Another milhouse is running in this repository (pid ${pid}).`);
+		const pid = livingOwner(holder);
+		if (pid !== null) {
+			throw new Error(
+				`Another milhouse is running in this repository (pid ${pid}). If it is not, delete ${path}.`,
+			);
 		}
 
 		clearStaleLock(path, holder);
