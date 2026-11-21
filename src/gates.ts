@@ -77,7 +77,8 @@ export async function runChecks(
 		timeoutMs = COMMAND_TIMEOUT_MS,
 		reap = true,
 		passed,
-	}: { timeoutMs?: number; reap?: boolean; passed?: string[] } = {},
+		env = {},
+	}: { timeoutMs?: number; reap?: boolean; passed?: string[]; env?: NodeJS.ProcessEnv } = {},
 ): Promise<string | null> {
 	for (const [label, command] of Object.entries(commands)) {
 		if (!command.trim()) continue;
@@ -86,7 +87,7 @@ export async function runChecks(
 			shell: true,
 			timeoutMs,
 			reap,
-			env: { ...withoutGitRouting(process.env), CI: "true" },
+			env: { ...withoutGitRouting(process.env), CI: "true", ...env },
 		});
 		// A shell can exit 0 while a child it started keeps running; a timeout is a failure either way.
 		if (result.code === 0 && !result.timedOut) {

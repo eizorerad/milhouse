@@ -11,6 +11,8 @@ import {
 	refExists,
 	revParse,
 } from "../src/git.ts";
+import { RunStore } from "../src/state.ts";
+import { prepareWorktree } from "../src/worktree.ts";
 import {
 	TWO_ISSUES,
 	allStatus,
@@ -457,6 +459,42 @@ describe("worktree preparation, artifacts and a branch that changes under the me
 		expect(readFile(repo, ".milhouse/work/setup-count")).toBe("ran\n");
 	});
 
+	it("tells setup where the project is, for what git does not track", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await commitFile(repo, ".gitignore", "local.env\n", "ignore the local settings");
+		writeFile(repo, "local.env", "KEY=1\n");
+		const config = testConfig({
+			commands: { setup: 'cp "$MILHOUSE_PROJECT/local.env" .', test: "test -f local.env" },
+			gates: { baseline: true },
+		});
+		expect(await go(repo, config)).toBe(true); // the checks found the file, in every checkout they ran in
+		expect(allStatus(repo, "merged")).toBe(true);
+	});
+
+	it("tidies up before a new run: the worktrees of earlier runs go, and the records of long-finished ones", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const finished = latest(repo);
+		const metaPath = join(repo, ".milhouse", "runs", finished.runId, "meta.json");
+		const meta = { ...finished.loadMeta(), created_at: new Date(Date.now() - 40 * 86_400_000) };
+		writeFileSync(metaPath, JSON.stringify(meta));
+
+		const reading = testConfig({ pipeline: ["scan"] });
+		expect(await go(repo, reading)).toBe(true);
+		const stopped = latest(repo);
+		expect(await prepareWorktree(stopped, testConfig({ commands: { setup: "true" } }))).toBeNull();
+		expect(existsSync(stopped.worktree)).toBe(true); // kept for its setup, as after an interrupted exec
+
+		expect(await go(repo, reading)).toBe(true);
+		expect(existsSync(stopped.worktree)).toBe(false);
+		const runs = RunStore.list(repo).map((run) => run.id);
+		expect(runs).toContain(stopped.runId); // it can still be resumed
+		expect(runs).not.toContain(finished.runId);
+		expect(runs).toHaveLength(2);
+	});
+
 	it("does not treat files the checks create as part of the work: a retry is not sent back for them", async () => {
 		const fake = useFakeAgent({ fail: { "Truth Verifier": { message: "overloaded", times: 1 } } });
 		const repo = await makeRepo();
@@ -466,7 +504,7 @@ describe("worktree preparation, artifacts and a branch that changes under the me
 		expect(existsSync(`${repo}/artifact.log`)).toBe(false);
 	});
 
-	it("does not merge into another branch when the user switches while the merge is being checked", async () => {
+	it("merges into the run's branch when the user switches to another one while the merge is being checked", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
 		await go(repo, noMerge());
@@ -475,10 +513,11 @@ describe("worktree preparation, artifacts and a branch that changes under the me
 		const switching = testConfig({
 			commands: { test: "test -f ../go && git -C ../../.. switch -q -c elsewhere; true" },
 		});
-		expect(await go(repo, switching, { only: "merge" })).toBe(false);
-		expect(await git(repo, "rev-parse", "main")).toBe(await git(repo, "rev-parse", "elsewhere"));
-		expect(await git(repo, "log", "--merges", "--oneline", "elsewhere")).toBe("");
-		expect(allStatus(repo, "verified")).toBe(true);
+		expect(await go(repo, switching, { only: "merge" })).toBe(true);
+		expect(await git(repo, "log", "--merges", "--oneline", "main")).not.toBe("");
+		expect(await git(repo, "log", "--merges", "--oneline", "elsewhere")).toBe(""); // the branch in use stays
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=no")).toBe("");
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 
 	it("leaves the user's staged edits alone when the branch moved and the merge cannot be published", async () => {

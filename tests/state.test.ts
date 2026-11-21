@@ -88,7 +88,8 @@ describe("RunStore", () => {
 			base_sha: "abc123",
 		});
 		expect(store.runId).toMatch(/^run-\d{8}-/);
-		expect(readFileSync(join(dir, ".milhouse", ".gitignore"), "utf-8")).toContain("work/");
+		// The whole folder is kept out of git: nothing in it is ever something to commit.
+		expect(readFileSync(join(dir, ".milhouse", ".gitignore"), "utf-8")).toMatch(/^\*$/m);
 	});
 
 	it("keeps a log of what happened, one JSON object per line", () => {

@@ -4,6 +4,7 @@ import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { commandTimeoutMs } from "./config.ts";
 import { runChecks } from "./gates.ts";
 import {
+	branchRef,
 	deleteBranch,
 	deleteRef,
 	ensureWorktree,
@@ -12,8 +13,14 @@ import {
 	resetWorktree,
 	resolveRef,
 } from "./git.ts";
-import { type RunStore, parkBranch } from "./state.ts";
+import { KEEP_DAYS, RunStore, parkBranch } from "./state.ts";
 import type { Config } from "./types.ts";
+
+/** Where the run's work goes: the branch it started on, or what is checked out for a run that began on none. */
+function target(store: RunStore): string {
+	const branch = store.loadMeta().base_branch;
+	return branch ? branchRef(branch) : "HEAD";
+}
 
 /** Written only after setup succeeded, so a setup that was interrupted is run again. */
 const setupMarker = (store: RunStore): string => `${store.worktree}.ready`;
@@ -30,7 +37,7 @@ async function openWorktree(store: RunStore): Promise<{ created: boolean } | str
 		// Nothing but a commit that Milhouse accepted (the starting point, or one of the tasks') was reviewed;
 		// what the user's branch contains already is no news. Anything else: the ref was moved by hand.
 		const accepted = new Set([base, ...store.loadTasks().flatMap((t) => (t.sha ? [t.sha] : []))]);
-		if (!accepted.has(tip) && !(await isAncestor(store.workDir, tip, "HEAD"))) {
+		if (!accepted.has(tip) && !(await isAncestor(store.workDir, tip, target(store)))) {
 			return `setup failed: ${store.ref} points at a commit that Milhouse never accepted, so it was changed outside Milhouse. Inspect it; start a new run to continue.`;
 		}
 	}
@@ -68,11 +75,16 @@ export async function prepareWorktree(
 	if (created || opts.setupAgain) rmSync(marker, { force: true });
 	if (!config.commands.setup || existsSync(marker)) return null;
 
-	// reap=false: a service that setup starts on purpose is allowed to stay.
+	// reap=false: a service that setup starts on purpose is allowed to stay. MILHOUSE_PROJECT: the new checkout
+	// has nothing that git does not track (a .env, downloaded data), and setup is where it is copied or linked.
 	const failure = await runChecks(
 		store.worktree,
 		{ setup: config.commands.setup },
-		{ reap: false, timeoutMs: commandTimeoutMs(config) },
+		{
+			reap: false,
+			timeoutMs: commandTimeoutMs(config),
+			env: { MILHOUSE_PROJECT: store.workDir },
+		},
 	);
 	if (failure) {
 		await removeWorktree(store.workDir, store.worktree);
@@ -94,10 +106,26 @@ export async function releaseWorktree(store: RunStore): Promise<void> {
 	if (!existsSync(setupMarker(store))) await discardWorktree(store);
 }
 
-/** Remove the run's worktree, and its ref once everything in it is part of the user's branch. */
+/** Remove the run's worktree, and its ref once everything in it is part of the run's branch. */
 export async function cleanupRun(store: RunStore): Promise<void> {
 	await discardWorktree(store);
-	if (await isAncestor(store.workDir, store.ref, "HEAD")) await deleteRef(store.workDir, store.ref);
+	if (await isAncestor(store.workDir, store.ref, target(store))) {
+		await deleteRef(store.workDir, store.ref);
+	}
+}
+
+/**
+ * Before a new run, so that nobody has to remember `--clean`: the records of runs that finished long ago go
+ * (never accepted work that is not merged), and so does the worktree of every earlier run, which is a copy of
+ * the project with all that was installed in it. A run that is resumed gets a new one and sets it up again.
+ */
+export async function tidy(workDir: string): Promise<void> {
+	await RunStore.clean(workDir, KEEP_DAYS, removeRun);
+	for (const { id } of RunStore.list(workDir)) {
+		const store = new RunStore(workDir, id);
+		// A worktree that somebody locked to look at it stays.
+		if (existsSync(store.worktree)) await discardWorktree(store).catch(() => {});
+	}
 }
 
 /**
@@ -112,7 +140,7 @@ export async function removeRun(store: RunStore): Promise<void> {
 	const accepted = store
 		.loadTasks()
 		.some((t) => t.status === "verified" || (t.sha !== undefined && t.status !== "merged"));
-	if (tip !== null && accepted && !(await isAncestor(repo, tip, "HEAD"))) {
+	if (tip !== null && accepted && !(await isAncestor(repo, tip, target(store)))) {
 		throw new Error(
 			`it holds accepted work that was never merged. Merge it with: milhouse --merge --run-id ${store.runId} (or give it up with: git update-ref -d ${store.ref})`,
 		);

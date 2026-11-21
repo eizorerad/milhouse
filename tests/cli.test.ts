@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../package.json";
-import { ensureWorktree, isDirty, refExists } from "../src/git.ts";
+import { ensureWorktree, refExists } from "../src/git.ts";
 import { acquireLock } from "../src/lock.ts";
 import { RunStore } from "../src/state.ts";
 import {
@@ -14,6 +14,7 @@ import {
 	alive,
 	calls,
 	cleanupTempDirs,
+	commitFile,
 	flag,
 	git,
 	isAscii,
@@ -128,13 +129,16 @@ describe("--init, --list-runs, --report, --clean", () => {
 		}
 	});
 
-	it("creates the config and keeps the working tree clean, so the next run is not blocked", async () => {
+	it("creates the config in a folder that git does not see: there is nothing to commit", async () => {
 		const repo = await makeRepo();
 		const first = await milhouse(repo, "--init");
 		expect(first.code).toBe(0);
 		expect(existsSync(join(repo, ".milhouse", "config.ts"))).toBe(true);
-		expect(readFileSync(join(repo, ".milhouse", ".gitignore"), "utf-8")).toContain("runs/");
-		expect(await isDirty(repo)).toBe(false);
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+		// Whoever wants to share the settings can still commit them.
+		await git(repo, "add", "-f", ".milhouse/config.ts");
+		expect(await git(repo, "status", "--porcelain")).toBe("A  .milhouse/config.ts");
+		await git(repo, "reset", "-q");
 
 		const second = await milhouse(repo, "--init");
 		expect(second.code).toBe(0);
@@ -261,6 +265,107 @@ describe("--clean", () => {
 		expect(all.code).toBe(0);
 		expect(all.stdout).toContain(store.runId);
 		expect(RunStore.list(repo)).toEqual([]);
+	});
+});
+
+describe("the first run in a project", () => {
+	it("sets the project up by itself: the commands it defines are found, run and trusted for the merge", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await commitFile(repo, "Makefile", "test:\n\ttrue\n", "a project with a test command");
+
+		const result = await milhouse(repo, "improve the greeting"); // no init, no flag
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("Created .milhouse/config.ts");
+		expect(result.stdout).toContain("test: make test");
+		expect(readFileSync(join(repo, ".milhouse", "config.ts"), "utf-8")).toContain(
+			'test: "make test"',
+		);
+		expect(calls(fake, "Executor")).toHaveLength(1);
+		// Checked by the project's own command, so it merged; and nothing is left to commit or to clean up.
+		expect(await git(repo, "log", "--format=%s", "main")).toContain("Add greeting part 1");
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+
+		// What was found and done is on the screen: nobody has to ask for the report.
+		expect(result.stdout).toContain("1 found: 1 confirmed");
+		expect(result.stdout).toContain("2 total: 2 merged");
+
+		const again = await milhouse(repo, "--list-runs"); // the config is written once
+		expect(again.stdout).not.toContain("Created");
+		expect((await milhouse(repo, "something else")).stdout).not.toContain("Created");
+	});
+
+	it("says what is missing when the project defines no command to check the work with", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const result = await milhouse(repo, "improve the greeting");
+		expect(result.code).toBe(1);
+		expect(result.stdout).toContain("No build, lint or test command was found");
+		expect(result.stderr).toContain("--allow-unchecked");
+		expect(fake.journal()).toHaveLength(0);
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+	});
+});
+
+describe("what the user does not have to put right", () => {
+	const withTests = async (makefile = "test:\n\ttrue\n"): Promise<string> => {
+		const repo = await makeRepo();
+		await commitFile(repo, "Makefile", makefile, "a project with a test command");
+		return repo;
+	};
+	const config = (repo: string) => readFileSync(join(repo, ".milhouse", "config.ts"), "utf-8");
+
+	it("names the agent that is installed when Claude Code is not", async () => {
+		useFakeAgent({});
+		process.env.MILHOUSE_CLAUDE = "/nonexistent/claude";
+		const repo = await withTests();
+		const result = await milhouse(repo, "improve the greeting");
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("the config names Codex as the agent");
+		expect(config(repo)).toContain('harness: "codex",');
+		expect(await git(repo, "log", "--format=%s", "main")).toContain("Add greeting part 1");
+	});
+
+	it("looks for the commands again when the config has none: the project may have got its tests since", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await milhouse(repo, "init");
+		expect(config(repo)).toContain('test: ""');
+		await commitFile(repo, "Makefile", "test:\n\ttrue\n", "the first test");
+
+		const result = await milhouse(repo, "improve the greeting");
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("sets no build, lint or test command");
+		expect(result.stdout).toContain("test: make test");
+		expect(await git(repo, "log", "--format=%s", "main")).toContain("Add greeting part 1"); // checked, so merged
+	});
+
+	it("takes the limits of one command from the command line", async () => {
+		useFakeAgent({ cost: 0.01 });
+		const repo = await withTests();
+		const stopped = await milhouse(repo, "improve the greeting", "--budget", "0.025");
+		expect(stopped.code).toBe(1);
+		expect(stopped.stdout).toContain("milhouse --resume --budget <usd>");
+		expect((await milhouse(repo, "--resume", "--budget", "0")).code).toBe(0);
+		expect(await git(repo, "log", "--format=%s", "main")).toContain("Add greeting part 1");
+
+		for (const flag of ["--budget", "--max-tokens", "--max-minutes"]) {
+			const bad = await milhouse(repo, "--resume", flag, "lots");
+			expect(bad.code).toBe(2);
+			expect(bad.stderr).toContain(`${flag} must be a number of 0 or more`);
+		}
+	});
+
+	it("starts on a commit whose checks fail when it is told that this is what the run is for", async () => {
+		const fake = useFakeAgent({});
+		const repo = await withTests("test:\n\tfalse\n");
+		const refused = await milhouse(repo, "make the tests pass");
+		expect(refused.code).toBe(1);
+		expect(refused.stderr).toContain("--no-baseline");
+		expect(fake.journal()).toHaveLength(0);
+
+		await milhouse(repo, "make the tests pass", "--no-baseline");
+		expect(calls(fake, "Executor").length).toBeGreaterThan(0);
 	});
 });
 

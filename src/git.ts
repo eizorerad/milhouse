@@ -124,9 +124,19 @@ export async function resolveRef(cwd: string, ref: string): Promise<string | nul
 export const refExists = async (cwd: string, ref: string): Promise<boolean> =>
 	(await resolveRef(cwd, ref)) !== null;
 
-/** A local branch: a tag of the same name does not count. */
+/** The full name of a local branch: a tag of the same name is something else. */
+export const branchRef = (branch: string): string => `refs/heads/${branch}`;
+
 export const branchExists = (cwd: string, branch: string): Promise<boolean> =>
-	refExists(cwd, `refs/heads/${branch}`);
+	refExists(cwd, branchRef(branch));
+
+/** The checkout that has `branch` checked out (the repository itself or one of its worktrees), or null. */
+export async function checkoutOf(repo: string, branch: string): Promise<string | null> {
+	const entries = (await gitOrThrow(repo, "worktree", "list", "--porcelain")).split("\n\n");
+	const entry = entries.find((e) => e.split("\n").includes(`branch ${branchRef(branch)}`));
+	const path = entry?.split("\n")[0].replace(/^worktree /, "");
+	return path && existsSync(path) ? path : null; // a worktree whose folder is gone holds nothing
+}
 
 export async function isAncestor(
 	cwd: string,
@@ -394,14 +404,24 @@ export async function mergeInto(
 }
 
 /**
- * Move the branch checked out in `repo` forward to `sha` and confirm that it got there. A fast-forward
- * that cannot happen changes nothing, so the user's checkout (staged edits included) is never reset.
+ * Move `branch` forward from `from` to `sha`, a commit that contains `from`, and confirm that it got there.
+ * Where the branch is checked out, a fast-forward takes the files along; one that cannot happen changes
+ * nothing, so the user's checkout (staged edits included) is never reset. A branch that is checked out
+ * nowhere is only a name to move, and moves only if it still is where it was.
  * --no-overwrite-ignore: git would otherwise replace an ignored local file (a .env, say) with a tracked one.
  */
-export async function publish(repo: string, sha: string): Promise<{ ok: boolean; error?: string }> {
-	const merged = await git(repo, "merge", "--ff-only", "--no-squash", "--no-overwrite-ignore", sha);
-	if (!merged.ok) return { ok: false, error: tail(merged.err || merged.out, 500) };
-	const reached = (await git(repo, "rev-parse", "HEAD")).out === sha;
+export async function publish(
+	repo: string,
+	branch: string,
+	from: string,
+	sha: string,
+): Promise<{ ok: boolean; error?: string }> {
+	const checkout = await checkoutOf(repo, branch);
+	const moved = checkout
+		? await git(checkout, "merge", "--ff-only", "--no-squash", "--no-overwrite-ignore", sha)
+		: await git(repo, "update-ref", "-m", "milhouse: merge", branchRef(branch), sha, from);
+	if (!moved.ok) return { ok: false, error: tail(moved.err || moved.out, 500) };
+	const reached = (await resolveRef(repo, branchRef(branch))) === sha;
 	return reached
 		? { ok: true }
 		: { ok: false, error: "the branch did not move to the merged commit" };

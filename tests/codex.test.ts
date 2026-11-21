@@ -73,7 +73,7 @@ describe("the whole pipeline on Codex", () => {
 		const repo = await makeRepo();
 		expect(await go(repo, testConfig({ harness: "codex", maxTokens: 1 }))).toBe(false);
 		expect(output.join("\n")).toContain("Token limit for Codex: 1");
-		expect(output.join("\n")).toContain('raise "maxTokens"');
+		expect(output.join("\n")).toContain("milhouse --resume --max-tokens <n>");
 		expect(calls(fake, "Lead Investigator")).toHaveLength(1); // the call that used the tokens up
 		expect(calls(fake, "Issue Validator")).toHaveLength(0);
 		expect(latest(repo).loadMeta().status).toBe("stopped");

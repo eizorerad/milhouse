@@ -56,7 +56,12 @@ export class Skip extends Error {}
 /** How much of an agent's answer the run's log keeps. */
 const ANSWER_LOG_CHARS = 4000;
 
-const retryDelayMs = (): number => Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 2000);
+/**
+ * The pause before an agent call that failed is tried again: 15 seconds, then a minute, then four. An outage
+ * or a rate limit outlasts a few seconds, and nobody is there to resume the run by hand.
+ */
+export const retryPauseMs = (attempt: number): number =>
+	Math.min(Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 15_000) * 4 ** attempt, 10 * MINUTE);
 const firstLine = (text: string): string => text.split("\n")[0].slice(0, 160);
 
 /** What a phase hands its items to call the agent with. Parallel workers share what is left of the budget. */
@@ -173,7 +178,7 @@ export async function runPhase<TItem, TValue>(
 				if (err instanceof GiveUp || (err instanceof EngineError && err.fatal)) break;
 				if (err instanceof EngineError && attempt < options.retries) {
 					// Jitter: parallel workers that failed together must not retry together.
-					await sleep(retryDelayMs() * (attempt + 1) * (0.5 + Math.random()));
+					await sleep(retryPauseMs(attempt) * (0.5 + Math.random()));
 				}
 			}
 		}

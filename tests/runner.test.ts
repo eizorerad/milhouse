@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { CostTracker, emptyCost } from "../src/cost.ts";
 import { EngineError } from "../src/engine.ts";
-import { GiveUp, type Outcome, type PhaseDef, Skip, runPhase } from "../src/runner.ts";
+import {
+	GiveUp,
+	type Outcome,
+	type PhaseDef,
+	Skip,
+	retryPauseMs,
+	runPhase,
+} from "../src/runner.ts";
 import { RunStore } from "../src/state.ts";
 import { sleep } from "../src/util.ts";
 import {
@@ -12,6 +19,7 @@ import {
 	resetFakeAgentEnv,
 	tempDir,
 	testConfig,
+	unsetEnv,
 	useFakeAgent,
 } from "./helpers.ts";
 
@@ -73,6 +81,14 @@ describe("runPhase after a failure that every call would share", () => {
 		expect(attemptsOfFirst).toBe(1);
 		expect(outcomes[1]).toMatchObject({ ok: false, systemic: true });
 		expect(outcomes[0]).toMatchObject({ ok: false, skipped: true }); // left for --resume
+	});
+});
+
+describe("the pause before a failed call is tried again", () => {
+	it("grows from seconds to minutes, so that an outage can pass, and has an end", () => {
+		unsetEnv("MILHOUSE_RETRY_DELAY_MS");
+		expect([0, 1, 2].map(retryPauseMs)).toEqual([15_000, 60_000, 240_000]);
+		expect(retryPauseMs(9)).toBe(600_000);
 	});
 });
 

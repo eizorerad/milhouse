@@ -22,15 +22,25 @@ import { errorMessage, generateId, now } from "./util.ts";
 
 export const STATE_DIR = ".milhouse";
 
+/** How long the records of a finished run are kept. */
+export const KEEP_DAYS = 30;
+
 /** The branch that keeps a failed attempt at an issue for inspection. */
 export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
 
-/** Keep runtime files out of git without touching the user's own .gitignore. */
+/**
+ * Keep the whole folder out of git without touching the user's own .gitignore: nothing in it shows up in
+ * `git status`, so there is nothing to commit before or after a run. An ignore file that is there already
+ * (an earlier version's, or the user's own) stays as it is.
+ */
 export function ensureIgnoreFile(workDir: string): void {
 	const path = join(workDir, STATE_DIR, ".gitignore");
 	if (existsSync(path)) return;
 	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, "runs/\nwork/\nlock\n");
+	writeFileSync(
+		path,
+		"# Milhouse keeps its runs and your settings here. Git does not see this folder.\n# To share the settings with your team: git add -f .milhouse/config.ts\n*\n",
+	);
 }
 
 function readJson<T>(path: string, fallback: T): T {

@@ -281,19 +281,25 @@ export async function loadConfig(workDir: string, overrides: Plain = {}): Promis
 	return config;
 }
 
-/** The config file `milhouse init` writes: every option with its default, and the commands found in the project. */
-export function configTemplate(found: Partial<Config["commands"]> = {}): string {
+/**
+ * The config file of a project: every option with its default, the commands found in the project and the
+ * agent to use (the one that is installed).
+ */
+export function configTemplate(
+	found: Partial<Config["commands"]> = {},
+	harness: HarnessName = DEFAULTS.harness,
+): string {
 	const commands = (["setup", "build", "lint", "test"] as const)
 		.map((slot) => `${slot}: ${JSON.stringify(found[slot] ?? "")}`)
 		.join(", ");
 	const note = Object.values(found).some(Boolean)
-		? "// Found in this project by `milhouse init`. Check them: build, lint and test run on every issue.\n  "
+		? "// Found in this project. Check them: build, lint and test run on every issue.\n  "
 		: "";
 	return `// Milhouse config. Every key is optional; the values below are the defaults.
 export default {
   // The agent that runs every step: "claude" (Claude Code) or "codex" (Codex CLI).
   // Any step can use the other one, e.g. phases: { verify: { harness: "codex" } } for an independent reviewer.
-  harness: "claude",
+  harness: ${JSON.stringify(harness)},
 
   // Model of that harness. "" = its default (claude: sonnet, codex: what your Codex config says).
   // Override per step with phases.<step>.model.
@@ -310,6 +316,7 @@ export default {
 
   // Retries per item, and per step also: harness, model (a full id such as "claude-opus-5-5" pins a version,
   // an alias such as "opus" follows the newest) and rules (extra instructions for that step only).
+  // A call that failed (an outage, a timeout) is tried again after a pause: about 15 seconds, then a minute, then four.
   // An exec retry is a repair round that feeds the failure back to the agent.
   // verify is the reviewer that checks every issue inside exec.
   // timeoutMinutes: the longest that one call of the step may take.
@@ -323,6 +330,7 @@ export default {
   },
 
   // Spending limit for one run, in USD. 0 = unlimited. Codex reports tokens, not dollars: maxTokens limits it.
+  // For one command: --budget, --max-tokens, --max-minutes.
   budget: 50,
 
   // Limit for one run on the tokens (input and output) of calls that report no dollars (Codex). 0 = unlimited.
@@ -334,9 +342,13 @@ export default {
   // that has begun runs on to commandTimeoutMinutes). 0 = unlimited. Every command gets the full time.
   maxMinutes: 0,
 
+  // Optional: what the agents are told about the project before they read it.
   project: { name: "", language: "", framework: "", description: "" },
 
   // At least one build/lint/test must pass for automatic merge. Setup alone does not count.
+  // With none of the three set, Milhouse looks in the project for them at every run.
+  // setup runs once in the run's own checkout, where nothing is installed yet. $MILHOUSE_PROJECT is this project's
+  // folder there, for what git does not track, e.g. setup: 'cp "$MILHOUSE_PROJECT/.env" . && npm ci'.
   ${note}commands: { ${commands} },
   // The longest that one setup, build, lint or test command may run, in minutes.
   commandTimeoutMinutes: 10,
@@ -351,7 +363,7 @@ export default {
 
   // evidence: validate cites real code. placeholder: no new TODO/FIXME notes or todo!() stubs. diffHygiene: no trailing whitespace or conflict markers.
   // dod: commands pass and the reviewer confirms the acceptance criteria.
-  // baseline: the commands must pass on the starting commit before the run spends anything; otherwise every issue fails for what was broken already.
+  // baseline: the commands must pass on the starting commit before the run spends anything; otherwise every issue fails for what was broken already (--no-baseline for one run).
   // ignore: files that placeholder and diffHygiene skip (patterns as in .gitignore, without "!"; a list here replaces the default).
   gates: {
     evidence: true,

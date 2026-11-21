@@ -39,5 +39,5 @@ export async function checkBase(store: RunStore, config: Config): Promise<string
 	if (failure.startsWith("setup failed")) {
 		return `${failure}\nFix the setup (commands.setup) and start a new run.`;
 	}
-	return `The checks fail on the starting commit, before any change, so a run could not tell its own mistakes from what was broken already:\n${failure}\nFix that and start a new run. If the failure is what this run should fix, set gates.baseline to false; if the command only ran out of time, raise commandTimeoutMinutes.`;
+	return `The checks fail on the starting commit, before any change, so a run could not tell its own mistakes from what was broken already:\n${failure}\nFix that and start a new run. If the failure is what this run should fix, start it with --no-baseline; if the checks need a file that git does not track, copy it in commands.setup (cp "$MILHOUSE_PROJECT/.env" .); if the command only ran out of time, raise commandTimeoutMinutes.`;
 }
