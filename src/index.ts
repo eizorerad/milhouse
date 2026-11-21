@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import pkg from "../package.json";
 import { ConfigError, configTemplate, loadConfig, stepHarness } from "./config.ts";
 import { detectCommands } from "./detect.ts";
-import { repoRoot } from "./git.ts";
+import { isRepo, repoRoot } from "./git.ts";
 import { acquireLock } from "./lock.ts";
 import { runPipeline } from "./pipeline.ts";
 import { REPORT_FORMATS, type ReportFormat, formatReport, generateReport } from "./report.ts";
@@ -145,22 +145,25 @@ function withModel(config: Config, model: string): Config {
 	return { ...config, model, phases };
 }
 
-function initProject(workDir: string): void {
+/**
+ * Write `.milhouse/config.ts` with the commands the project defines, unless there is one. The first run of
+ * a project does this by itself; `milhouse init` only does it without starting anything.
+ * Returns whether the file is new.
+ */
+function createConfig(workDir: string): boolean {
 	const configPath = join(workDir, STATE_DIR, "config.ts");
 	mkdirSync(join(workDir, STATE_DIR), { recursive: true });
 	ensureIgnoreFile(workDir);
-	if (existsSync(configPath)) {
-		log.warn(`${configPath} already exists`);
-		return;
-	}
+	if (existsSync(configPath)) return false;
 	const found = detectCommands(workDir);
 	writeFileSync(configPath, configTemplate(found));
 	const lines = Object.entries(found).map(([slot, command]) => `  ${slot}: ${command}`);
 	log.success(
 		lines.length === 0
-			? `Created ${STATE_DIR}/config.ts. Set commands.test/lint/build so exec can check its work.`
-			: `Created ${STATE_DIR}/config.ts with the commands this project defines. Build, lint and test run on every issue (setup when the worktree is made), so check them:\n${lines.join("\n")}`,
+			? `Created ${STATE_DIR}/config.ts. No build, lint or test command was found in this project: set commands.test (or build, lint) there, so that the work can be checked.`
+			: `Created ${STATE_DIR}/config.ts with the commands this project defines. Setup runs when the worktree is made, build, lint and test on every issue; change them there if they are not right:\n${lines.join("\n")}`,
 	);
+	return true;
 }
 
 function selectRun(workDir: string, runId?: string): RunStore {
@@ -234,7 +237,7 @@ async function main(argv: string[]): Promise<number> {
 	}
 
 	if (init) {
-		initProject(workDir);
+		if (!createConfig(workDir)) log.warn(`${join(workDir, STATE_DIR, "config.ts")} already exists`);
 		return 0;
 	}
 
@@ -259,6 +262,7 @@ async function main(argv: string[]): Promise<number> {
 
 	const workers = positiveInt(values.workers, "--workers");
 	const harness = parseHarness(values.harness);
+	if (await isRepo(workDir)) createConfig(workDir); // the first run sets the project up by itself
 	const loaded = await loadConfig(workDir, {
 		...workerOverrides(workers),
 		...(values["allow-unchecked"] ? { allowUnchecked: true } : {}),

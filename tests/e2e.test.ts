@@ -670,8 +670,8 @@ describe("preflight", () => {
 
 		const dirty = await makeRepo();
 		writeFile(dirty, "src/app.ts", "changed");
-		await expect(go(dirty)).rejects.toThrow(/uncommitted changes/);
-		expect(await go(dirty, testConfig({ pipeline: ["scan"] }))).toBe(true); // reading does not need a clean tree
+		expect(await go(dirty, testConfig({ pipeline: ["scan"] }))).toBe(true); // no run needs a clean tree:
+		expect(readFile(dirty, "src/app.ts")).toBe("changed"); // it has a checkout of its own
 
 		const detached = await makeRepo();
 		await git(detached, "checkout", "-q", "--detach");

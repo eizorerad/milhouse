@@ -11,9 +11,10 @@ git clone --depth 1 https://github.com/eizorerad/milhouse.git && cd milhouse
 bun install && bun link        # puts `milhouse` on your PATH
 
 cd your-project                # a git repo, on the branch you want changed
-milhouse init                  # writes .milhouse/config.ts with the commands your project defines: check them
-milhouse "fix authentication bugs"   # starts a run; commit or stash your work first
+milhouse "fix authentication bugs"
 ```
+
+That is all there is to set up. The first run writes `.milhouse/config.ts` with the build, lint and test commands your project defines and goes on with them; the folder is kept out of git, so there is nothing to commit. Work that you have not committed is no obstacle: the run works on your last commit in a checkout of its own and leaves your files alone.
 
 **Choose a harness:** Set `harness: "codex"` or `harness: "claude"` at the top level of your project's `.milhouse/config.ts`. New projects default to Claude. For one run, use `milhouse --harness codex "your task"`.
 
@@ -32,7 +33,7 @@ scan → validate → plan → consolidate → exec → merge
 | exec | Issues run **one at a time** in a git worktree, each on top of the ones accepted before it. The reviewer sees which build, lint and test commands passed, or that none ran. |
 | merge | Work that passed project checks is fast-forwarded into the original branch. Unchecked work waits for an explicit `--merge`. |
 
-**One commit for the whole run.** Every step works in the run's own worktree, never in your checkout: on the commit your branch was at when the run began, and on top of it the work the run accepted since. So scan, validate and plan judge the same code that exec changes, and you can go on working while a run is under way (commit or stash before it merges: `merge` wants a clean tree). What you commit in the meantime meets the run's work in `merge`, in a merge commit that has to pass the checks too.
+**One commit for the whole run.** Every step works in the run's own worktree, never in your checkout: on the commit your branch was at when the run began, and on top of it the work the run accepted since. So scan, validate and plan judge the same code that exec changes, and you can go on working while a run is under way (at the end `merge` moves your branch forward around your uncommitted edits; only if one of them is to a file that the run changed too does it stop, and say so). What you commit in the meantime meets the run's work in `merge`, in a merge commit that has to pass the checks too.
 
 **exec, per issue:** the agent commits one commit per task (`[<task id>] <title>`) → Milhouse runs the gates → a reviewer agent checks the acceptance criteria against the diff → the issue is accepted. Any failure goes back to the agent as feedback for a repair round (`phases.exec.retries`). An issue that still fails is parked on `mh-failed/<issue-id>`, its worktree is thrown away (a failed attempt may have installed dependencies the next issue would silently build on) and the next issue carries on from a fresh one, so no issue builds on broken work and every issue is tested on top of all the accepted ones. An issue that depends on a failed one waits.
 
@@ -51,7 +52,7 @@ scan → validate → plan → consolidate → exec → merge
 
 **Automatic merge** requires at least one build, lint or test command to have run on the accepted commit, with all checks passing. Setup alone does not count. If your branch advanced, the new merge commit must pass project checks too. A conflict or failing check leaves your branch untouched.
 
-**No checks, no run.** Without a build, lint or test command only an agent reviews the work and nothing merges by itself, so exec refuses to start (also when it resumes a run of 0.5.1); `allowUnchecked: true` in the config, or `--allow-unchecked` for one run, lets it go on. `gates.dod: false` switches the checks and the review off together and is not refused. `milhouse init` writes the commands your project defines (`package.json` scripts, Cargo, Go, Python tests, Makefile targets) into the config. They run on every issue, so check them before the first run. `milhouse --report` says how many accepted tasks passed a project check.
+**No checks, no run.** Without a build, lint or test command only an agent reviews the work and nothing merges by itself, so exec refuses to start (also when it resumes a run of 0.5.1); `allowUnchecked: true` in the config, or `--allow-unchecked` for one run, lets it go on. `gates.dod: false` switches the checks and the review off together and is not refused. The first run (or `milhouse init`, which starts nothing) writes the commands your project defines (`package.json` scripts, Cargo, Go, Python tests, Makefile targets) into the config and prints them. They run on every issue: change them in `.milhouse/config.ts` if they are not the right ones. `milhouse --report` says how many accepted tasks passed a project check.
 
 If no project check ran, the work waits in `refs/milhouse/<run-id>`. Adding a test command before `--resume` does not count as running it. After inspecting the changes, use `milhouse --merge --run-id <run-id>` to accept them yourself. A manual fast-forward does not rerun checks; if a merge commit is needed, its configured checks still apply when `gates.dod` is on.
 
@@ -60,7 +61,7 @@ If no project check ran, the work waits in `refs/milhouse/<run-id>`. Adding a te
 - **Claude:** read-only steps and the reviewer get only `Read`, `Grep` and `Glob`. Your MCP servers (mail, payments, …) are never loaded, and the repository's own `.claude/settings.json` (hooks, env, API URL) is ignored; your user-level Claude settings apply.
 - **Codex:** read-only steps run in Codex's read-only sandbox (nothing can be written), which is not a tool allowlist and does not cover MCP tools. Your Codex configuration applies as it is, MCP servers and plugins included (see Harnesses).
 - **exec runs the agent with permissions bypassed** (`--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex): the agent can run any command as you, inside the run's worktree (by default in `~/.cache/milhouse`, or in `$XDG_CACHE_HOME/milhouse` when that is an absolute path: outside your project, so that a command in it cannot find what is installed in your project's own directories. If you set `MILHOUSE_WORK_DIR`, choose a folder outside your project too, and keep it the same for the life of a run). Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
-- Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Files that appear in your checkout during a run (an editor's, the OS's) never block its merge; a new run that includes exec does not start with uncommitted changes or untracked files, because it works on the last commit and would not see them (a run that only reads starts, and says so). The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
+- Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Uncommitted changes and untracked files never stop a run or its merge: the run works on the last commit and says that they are not part of it, and the fast-forward goes around them. Only a file of yours that the merged work would have to replace stops the merge; then commit or stash it and run `milhouse --merge`. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
 - Your git hooks run for the agents' commits (agents are told to use `--no-verify` if a commit-message rule rejects `[<task id>] <title>`); Milhouse's own commits skip them. `GIT_DIR` and friends inherited from a caller never reach agents or checks, and without a git identity commits use `milhouse <milhouse@localhost>`.
 - Claude's cost is its own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`. Codex reports tokens, not dollars: they are counted and shown, but `budget` cannot limit them. `maxTokens` does: once a run has used that many (input and output together), no new call starts; a call that is running is not cut short. A Claude call that runs out of time is counted with what it reports for the turns it finished; if it reports nothing, with an estimate of at most $1. `maxMinutes` is a clock for one command, Codex included. It starts when the run begins, once the configuration is read (the check of the starting commit counts): no agent call outlasts it and no new one starts, while a check that has begun runs on to `commandTimeoutMinutes`.
 - Ctrl-C, SIGTERM and a closed terminal stop the agents too, and the run is recorded as stopped: `--resume` continues it. A git command of Milhouse's own that is running at that moment is asked to stop, not killed, so it removes its lock: your repository is not left with an `index.lock`. A lock that a killed agent left in the run's worktree is removed when the run goes on. After `kill -9` an agent may keep running: check `ps` before resuming.
@@ -85,7 +86,7 @@ A step uses the model of its own harness: the global `model` does not apply to a
 
 ## Configuration
 
-`milhouse init` (or `milhouse --init`) writes `.milhouse/config.ts` with every option and its default; only `commands` holds what it found in your project. It works with uncommitted changes, leaves an existing config alone, and does not start any agents. The options that matter:
+The first run in a project writes `.milhouse/config.ts` with every option and its default; only `commands` holds what it found in your project. `milhouse init` (or `milhouse --init`) writes the same file without starting any agents, and leaves an existing config alone. The options that matter:
 
 ```ts
 export default {
@@ -160,13 +161,13 @@ To look at the plan before anything is changed, stop before exec and read the re
 ## Run state
 
 ```
-.milhouse/config.ts          your config (commit it)
+.milhouse/config.ts          your config (to share it: git add -f .milhouse/config.ts)
 .milhouse/runs/<run-id>/     meta.json  issues.json  tasks.json  cost.json  events.jsonl
 ~/.cache/milhouse/<project>/<run-id>/  the run's worktree (MILHOUSE_WORK_DIR moves it; a run of 0.5.1 keeps .milhouse/work/<run-id>/ while that exists)
 refs/milhouse/<run-id>       accepted work; mh-failed/<issue-id> holds failed attempts
 ```
 
-`events.jsonl` has one JSON object per line: every failed attempt with its reason, every verdict of the reviewer with its reason (approvals too), whether each issue was accepted or failed, why a run stopped at its starting commit, and every agent call with its step, its cost and the start of its answer (the executor's own account of what it did, for example). Everything under `.milhouse/` except `config.ts` is ignored by git (`.milhouse/.gitignore`).
+`events.jsonl` has one JSON object per line: every failed attempt with its reason, every verdict of the reviewer with its reason (approvals too), whether each issue was accepted or failed, why a run stopped at its starting commit, and every agent call with its step, its cost and the start of its answer (the executor's own account of what it did, for example). The whole `.milhouse/` folder is ignored by git through its own `.milhouse/.gitignore`; your `.gitignore` is not touched. A config that you add with `git add -f` is tracked from then on like any other file. A project set up by an earlier version keeps the ignore file it has, where `config.ts` was left visible to be committed.
 
 `--clean` removes a finished run (completed or failed) that is older than `--days`, with its worktree, its ref and the `mh-failed/` branches of its issues. A run whose accepted work was never merged is kept, records included, so that `--merge --run-id <run-id>` still works; the message says how to give the work up instead. Stopped runs can be resumed and stay, as do runs that were killed before they could say how they ended: `--clean --all` takes those too. `--days 0` means whatever their age.
 

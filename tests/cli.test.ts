@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../package.json";
-import { ensureWorktree, isDirty, refExists } from "../src/git.ts";
+import { ensureWorktree, refExists } from "../src/git.ts";
 import { acquireLock } from "../src/lock.ts";
 import { RunStore } from "../src/state.ts";
 import {
@@ -14,6 +14,7 @@ import {
 	alive,
 	calls,
 	cleanupTempDirs,
+	commitFile,
 	flag,
 	git,
 	isAscii,
@@ -128,13 +129,16 @@ describe("--init, --list-runs, --report, --clean", () => {
 		}
 	});
 
-	it("creates the config and keeps the working tree clean, so the next run is not blocked", async () => {
+	it("creates the config in a folder that git does not see: there is nothing to commit", async () => {
 		const repo = await makeRepo();
 		const first = await milhouse(repo, "--init");
 		expect(first.code).toBe(0);
 		expect(existsSync(join(repo, ".milhouse", "config.ts"))).toBe(true);
-		expect(readFileSync(join(repo, ".milhouse", ".gitignore"), "utf-8")).toContain("runs/");
-		expect(await isDirty(repo)).toBe(false);
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+		// Whoever wants to share the settings can still commit them.
+		await git(repo, "add", "-f", ".milhouse/config.ts");
+		expect(await git(repo, "status", "--porcelain")).toBe("A  .milhouse/config.ts");
+		await git(repo, "reset", "-q");
 
 		const second = await milhouse(repo, "--init");
 		expect(second.code).toBe(0);
@@ -261,6 +265,41 @@ describe("--clean", () => {
 		expect(all.code).toBe(0);
 		expect(all.stdout).toContain(store.runId);
 		expect(RunStore.list(repo)).toEqual([]);
+	});
+});
+
+describe("the first run in a project", () => {
+	it("sets the project up by itself: the commands it defines are found, run and trusted for the merge", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		await commitFile(repo, "Makefile", "test:\n\ttrue\n", "a project with a test command");
+
+		const result = await milhouse(repo, "improve the greeting"); // no init, no flag
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("Created .milhouse/config.ts");
+		expect(result.stdout).toContain("test: make test");
+		expect(readFileSync(join(repo, ".milhouse", "config.ts"), "utf-8")).toContain(
+			'test: "make test"',
+		);
+		expect(calls(fake, "Executor")).toHaveLength(1);
+		// Checked by the project's own command, so it merged; and nothing is left to commit or to clean up.
+		expect(await git(repo, "log", "--format=%s", "main")).toContain("Add greeting part 1");
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+
+		const again = await milhouse(repo, "--list-runs"); // the config is written once
+		expect(again.stdout).not.toContain("Created");
+		expect((await milhouse(repo, "something else")).stdout).not.toContain("Created");
+	});
+
+	it("says what is missing when the project defines no command to check the work with", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		const result = await milhouse(repo, "improve the greeting");
+		expect(result.code).toBe(1);
+		expect(result.stdout).toContain("No build, lint or test command was found");
+		expect(result.stderr).toContain("--allow-unchecked");
+		expect(fake.journal()).toHaveLength(0);
+		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
 	});
 });
 

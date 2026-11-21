@@ -243,15 +243,56 @@ describe("what the pipeline tells you", () => {
 });
 
 describe("what exec may build on", () => {
-	it("refuses to start a run with untracked files: exec works from the last commit and would not see them", async () => {
+	it("runs and merges beside work that is not committed: it is not part of the run, and nothing happens to it", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
-		writeFile(repo, "wip.ts", "export const wip = 1;\n");
-		await expect(go(repo)).rejects.toThrow(/untracked/);
-		expect(fake.journal()).toHaveLength(0);
-		// Only reading: it starts, and says that it reads the last commit.
-		expect(await go(repo, testConfig({ pipeline: ["scan"] }))).toBe(true);
+		writeFile(repo, "src/app.ts", "export const app = 'my change';\n"); // an edit that is not committed
+		writeFile(repo, "src/staged.ts", "export const staged = 1;\n");
+		await git(repo, "add", "src/staged.ts"); // one that is staged
+		writeFile(repo, "wip.ts", "export const wip = 1;\n"); // and a new file
+
+		expect(await go(repo)).toBe(true);
 		expect(output.join("\n")).toContain("not part of this run");
+		// The agents saw the last commit, in the run's own checkout ...
+		const store = latest(repo);
+		expect(fake.journal().every((call) => call.cwd === store.worktree)).toBe(true);
+		// ... the work is on the branch, and what was not committed is exactly as it was.
+		const [task] = store.loadTasks();
+		expect(allStatus(repo, "merged")).toBe(true);
+		expect(readFile(repo, `${task.id}.txt`)).toBe(`${task.title}\n`);
+		expect(readFile(repo, "src/app.ts")).toContain("my change");
+		expect(
+			await git(
+				repo,
+				"status",
+				"--porcelain",
+				"--untracked-files=all",
+				"--",
+				".",
+				":(exclude).milhouse",
+			),
+		).toBe("M src/app.ts\nA  src/staged.ts\n?? wip.ts"); // (the helper trims the space before the first M)
+	});
+
+	it("does not merge over a file of the user's that the work changes too, and merges once it is out of the way", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo, noMerge())).toBe(true);
+		const store = latest(repo);
+		const [task] = store.loadTasks();
+		await commitFile(repo, "notes.txt", "v1\n", "a file of the user's");
+		// The branch moved on, so the merge is a new commit; the user is editing a file that the run adds.
+		writeFile(repo, `${task.id}.txt`, "my own draft\n");
+		await git(repo, "add", `${task.id}.txt`);
+
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(false);
+		expect(output.join("\n")).toContain("commit or stash it");
+		expect(readFile(repo, `${task.id}.txt`)).toBe("my own draft\n"); // nothing of the user's was touched
+		expect(allStatus(repo, "verified")).toBe(true);
+
+		await git(repo, "stash", "-q");
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(true);
+		expect(readFile(repo, `${task.id}.txt`)).toBe(`${task.title}\n`);
 	});
 
 	it("works on the commit it started from, whatever the checkout has become since", async () => {

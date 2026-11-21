@@ -66,12 +66,8 @@ export async function preflight(workDir: string, phases: Phase[]): Promise<void>
 	if (!(await hasCommits(workDir)))
 		throw new Error("The repository has no commits yet. Make an initial commit first.");
 	await detectIdentity(workDir); // commits need an author, also in a container that has none
-	if (phases.includes("exec") || phases.includes("merge")) {
-		if (!(await currentBranch(workDir)))
-			throw new Error("HEAD is detached. Check out a branch first.");
-		if (await isDirty(workDir)) {
-			throw new Error("The working tree has uncommitted changes. Commit or stash them first.");
-		}
+	if ((phases.includes("exec") || phases.includes("merge")) && !(await currentBranch(workDir))) {
+		throw new Error("HEAD is detached. Check out a branch first.");
 	}
 }
 
@@ -90,19 +86,6 @@ async function existingRun(workDir: string, opts: PipelineOptions): Promise<RunS
 		throw new Error(`This run started on "${baseBranch}". Check it out first, then continue.`);
 	}
 	return store;
-}
-
-/** A run works on the last commit, in a checkout of its own: what is not committed when it starts is not part of it. */
-async function uncommittedAtStart(workDir: string, todo: Phase[]): Promise<void> {
-	if (!(await isDirty(workDir, { untracked: true }))) return;
-	if (todo.includes("exec")) {
-		throw new Error(
-			"The working tree has untracked files, which the run would not see (it works on the last commit). Commit them, add them to .gitignore, or stash them: git stash -u",
-		);
-	}
-	log.warn(
-		"Uncommitted changes and untracked files are not part of this run: it works on the last commit.",
-	);
 }
 
 /** What this command is about to do and spend, and what to watch out for. */
@@ -145,7 +128,7 @@ function refuseUnchecked(config: Config, todo: Phase[]): void {
 	if (!todo.includes("exec") || !config.gates.dod || config.allowUnchecked) return;
 	if (projectChecksEnabled(config)) return;
 	throw new Error(
-		"No build, lint or test command is configured, so an agent alone would review the work and nothing would merge by itself. Set commands.test (or build, lint) in .milhouse/config.ts (`milhouse init` suggests them), or run with --allow-unchecked.",
+		"No build, lint or test command is configured, so an agent alone would review the work and nothing would merge by itself. Set commands.test (or build, lint) in .milhouse/config.ts, or run with --allow-unchecked.",
 	);
 }
 
@@ -174,7 +157,12 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		const todo =
 			opts.only || !opts.resume ? wanted : wanted.filter((phase) => !done.includes(phase));
 		refuseUnchecked(config, todo);
-		if (!existing) await uncommittedAtStart(workDir, todo);
+		// The run has a checkout of its own: what is not committed stays where it is, untouched and unseen.
+		if (!existing && (await isDirty(workDir, { untracked: true }))) {
+			log.warn(
+				"Uncommitted changes and untracked files are not part of this run: it works on the last commit and leaves them alone.",
+			);
+		}
 		requireAgents(config, todo); // before a new run leaves anything behind
 		const store =
 			existing ??

@@ -11,7 +11,6 @@ import {
 	acceptCommit,
 	currentBranch,
 	isAncestor,
-	isDirty,
 	isWorktree,
 	mergeInto,
 	publish,
@@ -66,7 +65,7 @@ interface Ready {
 	tip: string;
 }
 
-/** The accepted work agrees with the run's records, the branch is the right one and its tree clean: or what is wrong. */
+/** The accepted work agrees with the run's records and the branch is the right one: or what is wrong. */
 async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | { error: string }> {
 	const repo = store.workDir;
 	const { base_branch: baseBranch } = store.loadMeta();
@@ -83,12 +82,6 @@ async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | 
 	if ((await currentBranch(repo)) !== baseBranch) {
 		return {
 			error: `Check out "${baseBranch}" (the run started there), then run: milhouse --merge`,
-		};
-	}
-	if (await isDirty(repo)) {
-		return {
-			error:
-				"The working tree has uncommitted changes. Commit or stash them, then run: milhouse --merge",
 		};
 	}
 
@@ -141,9 +134,7 @@ async function publishWork(
 	if ("error" in result) return result;
 	// The checks can take minutes: publish only if the branch is exactly where it was when they began.
 	const unchanged =
-		(await currentBranch(repo)) === baseBranch &&
-		(await revParse(repo, "HEAD")) === head &&
-		!(await isDirty(repo));
+		(await currentBranch(repo)) === baseBranch && (await revParse(repo, "HEAD")) === head;
 	if (!unchanged) {
 		return {
 			error: `"${baseBranch}" changed while the merge was being checked. Nothing was merged and nothing of yours was touched; run: milhouse --merge`,
@@ -152,7 +143,7 @@ async function publishWork(
 	const published = await publish(repo, result.sha);
 	if (!published.ok) {
 		return {
-			error: `git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched; fix the cause, then run: milhouse --merge`,
+			error: `git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched. If a file you changed stands in the way, commit or stash it; then run: milhouse --merge`,
 		};
 	}
 	return result;
