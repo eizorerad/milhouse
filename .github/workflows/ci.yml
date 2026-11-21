@@ -20,3 +20,4 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run check
+      - run: bun run build && ./dist/milhouse --version # what a release ships has to build and start
