@@ -22,7 +22,10 @@ releases=${MILHOUSE_RELEASES:-https://github.com/eizorerad/milhouse/releases}
 dir=${MILHOUSE_INSTALL_DIR:-$HOME/.local/bin}
 mkdir -p "$dir"
 # Under another name first: a download that breaks off must not leave half a milhouse behind.
-curl -fsSL "$releases/latest/download/milhouse-$os-$arch" -o "$dir/milhouse.new"
+curl -fsSL "$releases/latest/download/milhouse-$os-$arch" -o "$dir/milhouse.new" || {
+	echo "milhouse: the latest release has no binary for $os-$arch to fetch. Install from source: see the README." >&2
+	exit 1
+}
 chmod +x "$dir/milhouse.new"
 version=$("$dir/milhouse.new" --version)
 mv "$dir/milhouse.new" "$dir/milhouse"

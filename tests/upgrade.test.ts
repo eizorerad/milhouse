@@ -136,7 +136,9 @@ describe("the installer", () => {
 	it("installs nothing when there is no release to fetch", async () => {
 		release();
 		const dir = join(tempDir(), "bin");
-		expect((await install(dir)).code).not.toBe(0);
+		const result = await install(dir);
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain("the latest release has no binary");
 		expect(existsSync(join(dir, "milhouse"))).toBe(false);
 	});
 });
