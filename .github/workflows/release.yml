@@ -1,0 +1,43 @@
+name: Release binaries
+
+# A published release gets the milhouse binary for every system the README names: install.sh and
+# `milhouse upgrade` fetch them from there. A pull request that changes this file builds them without publishing.
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths: [.github/workflows/release.yml]
+
+jobs:
+  binaries:
+    name: binaries-${{ matrix.system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: # each system builds its own: a macOS binary is signed where it is built
+          - { os: ubuntu-latest, system: linux }
+          - { os: macos-latest, system: darwin }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # to attach the files to the release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Build
+        run: |
+          for arch in x64 arm64; do
+            name=milhouse-${{ matrix.system }}-$arch
+            bun build src/index.ts --compile --target=bun-${{ matrix.system }}-$arch --outfile dist/$name
+          done
+      - name: Sign
+        if: matrix.system == 'darwin' # Apple Silicon starts no binary without a signature
+        run: codesign --force --sign - dist/milhouse-darwin-*
+      - name: Start the one for this machine
+        run: ./dist/milhouse-${{ matrix.system }}-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/') --version
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        run: gh release upload "$TAG" dist/milhouse-* --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}

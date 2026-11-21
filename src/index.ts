@@ -29,6 +29,7 @@ import {
 	type Phase,
 } from "./types.ts";
 import { log, printBanner, setVerbose } from "./ui.ts";
+import { upgrade } from "./upgrade.ts";
 import { errorMessage } from "./util.ts";
 import { removeRun } from "./worktree.ts";
 
@@ -47,6 +48,7 @@ Usage:
                                   Delete finished runs older than N days (--all: stopped and
                                   interrupted ones too); unmerged accepted work is kept
   milhouse init                   Create .milhouse/config.ts without running agents (also: --init)
+  milhouse upgrade                Update Milhouse itself to the latest version (also: --upgrade)
 
 Options:
   --scope <text>   What to look for (same as the positional text)
@@ -72,6 +74,7 @@ const OPTIONS = {
 	run: flag,
 	resume: flag,
 	init: flag,
+	upgrade: flag,
 	report: flag,
 	"list-runs": flag,
 	clean: flag,
@@ -275,16 +278,23 @@ async function main(argv: string[]): Promise<number> {
 		throw new UsageError(`Pick one of: ${asked.map((name) => `--${name}`).join(", ")}`);
 	}
 	const management = asked.length > 0;
-	// Reserve the single word "init" only in place of an implicit run. For example, --scan init still has a scope.
+	// Reserve the single words "init" and "upgrade" only in place of an implicit run. For example, --scan init
+	// still has a scope.
 	const implicit = !runMode && !management && values.scope === undefined;
-	const init = values.init || (implicit && positionals.length === 1 && positionals[0] === "init");
+	const word = implicit && positionals.length === 1 ? positionals[0] : undefined;
+	const init = values.init || word === "init";
+	const upgrading = values.upgrade || word === "upgrade";
 
 	if (values.version) {
 		console.log(pkg.version);
 		return 0;
 	}
-	if (values.help || !(runMode || scope || init || management)) {
+	if (values.help || !(runMode || scope || init || upgrading || management)) {
 		console.log(HELP);
+		return 0;
+	}
+	if (upgrading) {
+		await upgrade();
 		return 0;
 	}
 

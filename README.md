@@ -14,6 +14,8 @@ cd your-project                # a git repo, on the branch you want changed
 milhouse "fix authentication bugs"
 ```
 
+Without Bun, from release 0.5.4 on: `curl -fsSL https://raw.githubusercontent.com/eizorerad/milhouse/main/install.sh | sh` puts the binary of the latest release into `~/.local/bin` (`MILHOUSE_INSTALL_DIR` names another folder). Either way, `milhouse upgrade` brings the installation to the latest version: a binary is replaced by the one of the latest release, a git checkout is pulled.
+
 That is all there is to set up. The first run writes `.milhouse/config.ts` with the setup, build, lint and test commands your project defines and goes on with them; the folder is kept out of git, so there is nothing to commit. Work that you have not committed is no obstacle, and neither is switching to another branch while a run is under way: the run works on your last commit in a checkout of its own, leaves your files alone and merges into the branch it started on. Every command ends with the report of its run: the issues, their tasks and commits, the cost.
 
 **Choose a harness:** Set `harness: "codex"` or `harness: "claude"` at the top level of your project's `.milhouse/config.ts`. A new config names Claude Code, or Codex when only that is installed. For one run, use `milhouse --harness codex "your task"`.
@@ -148,6 +150,7 @@ milhouse --list-runs            list runs
 milhouse --clean [--days 30] [--all]
                                 delete finished runs (--all: stopped and interrupted ones too)
 milhouse init                   create .milhouse/config.ts (also: --init)
+milhouse upgrade                update Milhouse itself: the binary of a release, or the git checkout it runs from
   --scope <text>  --workers <n>  --harness <claude|codex>  --model <name>  --run-id <id>
   --budget <usd>  --max-tokens <n>  --max-minutes <n>     limits for this command (0 = none)
   --allow-unchecked  --no-baseline  -v  -V  -h
@@ -179,7 +182,7 @@ A new run tidies up before it starts: finished runs older than 30 days go as wit
 - A failed agent call waits longer before it is tried again (about 15 seconds, a minute, four) instead of a few seconds.
 - A new run removes finished runs older than 30 days and the worktrees of earlier runs.
 - Every command ends with the report of its run.
-- New: `--budget`, `--max-tokens`, `--max-minutes`, `--no-baseline`; `$MILHOUSE_PROJECT` for `commands.setup`. Old configs load unchanged; one without a build, lint or test command gets what the project defines, at every run.
+- New: `milhouse upgrade`; releases carry binaries that `install.sh` installs without Bun; `--budget`, `--max-tokens`, `--max-minutes`, `--no-baseline`; `$MILHOUSE_PROJECT` for `commands.setup`. Old configs load unchanged; one without a build, lint or test command gets what the project defines, at every run.
 
 ## Upgrading from 0.5.2
 
@@ -211,7 +214,7 @@ bun install
 bun run check        # typecheck + lint + tests
 ```
 
-The tests drive the whole pipeline against real git repositories with a fake agent that speaks both CLIs (`tests/fixtures/fake-agent.ts`). `MILHOUSE_CLAUDE` and `MILHOUSE_CODEX` point Milhouse at other binaries.
+The tests drive the whole pipeline against real git repositories with a fake agent that speaks both CLIs (`tests/fixtures/fake-agent.ts`). `MILHOUSE_CLAUDE` and `MILHOUSE_CODEX` point Milhouse at other binaries. `bun run build` makes the binary for this machine; publishing a release makes `.github/workflows/release.yml` build and attach the ones for Linux and macOS, x64 and arm64.
 
 ## License
 
