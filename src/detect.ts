@@ -1,4 +1,4 @@
-/** Build, lint and test commands that the project itself defines: a suggestion for `milhouse init`. Nothing here runs them. */
+/** Setup, build, lint and test commands that the project itself defines: what its config starts with. Nothing here runs them. */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -30,6 +30,9 @@ function nodeTool(dir: string): { run: string; install: string } {
 	return { run: "npm run", install: has(dir, "package-lock.json") ? "npm ci" : "npm install" };
 }
 
+/** A linter that rewrites the files is no check: a check has to leave the checkout as it found it. */
+const REWRITES = /--(?:fix|write)\b/;
+
 function fromPackageJson(dir: string): Commands {
 	let scripts: Record<string, unknown>;
 	try {
@@ -47,7 +50,7 @@ function fromPackageJson(dir: string): Commands {
 	};
 	const found = {
 		build: script("typecheck") ?? script("build"),
-		lint: script("lint"),
+		lint: REWRITES.test(String(scripts.lint)) ? undefined : script("lint"),
 		test: script("test"),
 	};
 	return Object.values(found).some(Boolean) ? { setup: tool.install, ...found } : {};
@@ -75,12 +78,43 @@ function usesUnittest(folder: string): boolean {
 	}
 }
 
-function fromPython(dir: string): Commands {
-	if (has(dir, "pytest.ini") || read(dir, "pyproject.toml").includes("pytest")) {
-		return { test: "python3 -m pytest" };
+/**
+ * How a Python project installs what it needs, and the interpreter that then has it. The environment is the
+ * checkout's own (`.venv`): one that the project's folder shares would run the project's files, not the run's.
+ */
+function pythonTool(dir: string): { setup?: string; python: string } {
+	if (has(dir, "uv.lock")) return { setup: "uv sync --frozen", python: "uv run --frozen python" };
+	if (has(dir, "poetry.lock")) {
+		return {
+			setup: "POETRY_VIRTUALENVS_IN_PROJECT=true poetry install --no-interaction",
+			python: "poetry run python",
+		};
 	}
-	return usesUnittest(join(dir, "tests")) ? { test: "python3 -m unittest discover -s tests" } : {};
+	if (has(dir, "requirements.txt")) {
+		return {
+			// Before Python 3.13 a new environment does not ignore itself, and git would clean it away as stray files.
+			setup:
+				"python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements.txt",
+			python: ".venv/bin/python",
+		};
+	}
+	return { python: "python3" };
 }
+
+function fromPython(dir: string): Commands {
+	const { setup, python } = pythonTool(dir);
+	const pytest = ["pyproject.toml", "requirements.txt"].some((f) =>
+		read(dir, f).includes("pytest"),
+	);
+	if (pytest || has(dir, "pytest.ini")) return { setup, test: `${python} -m pytest` };
+	return usesUnittest(join(dir, "tests"))
+		? { setup, test: `${python} -m unittest discover -s tests` }
+		: {};
+}
+
+/** A new checkout has no submodules: the run's own has to fetch them before anything is installed. */
+const fromSubmodules = (dir: string): Commands =>
+	has(dir, ".gitmodules") ? { setup: "git submodule update --init --recursive" } : {};
 
 function fromMakefile(dir: string): Commands {
 	const makefile = read(dir, "Makefile");
@@ -92,7 +126,7 @@ function fromMakefile(dir: string): Commands {
 /** The commands of every language in the project, joined where several define the same one; a Makefile fills only what is left. */
 export function detectCommands(dir: string): Commands {
 	const found: Commands = {};
-	for (const source of [fromPackageJson, fromCargo, fromGo, fromPython]) {
+	for (const source of [fromSubmodules, fromPackageJson, fromCargo, fromGo, fromPython]) {
 		const commands = source(dir);
 		for (const slot of SLOTS) {
 			const command = commands[slot];

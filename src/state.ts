@@ -22,6 +22,9 @@ import { errorMessage, generateId, now } from "./util.ts";
 
 export const STATE_DIR = ".milhouse";
 
+/** How long the records of a finished run are kept. */
+export const KEEP_DAYS = 30;
+
 /** The branch that keeps a failed attempt at an issue for inspection. */
 export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
 

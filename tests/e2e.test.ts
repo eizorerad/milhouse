@@ -606,16 +606,47 @@ describe("merge", () => {
 		expect(readFile(repo, "other.txt")).toBe("broken\n");
 	});
 
-	it("refuses to merge into another branch than the run started on", async () => {
+	it("merges into the branch the run started on, whatever is checked out by then", async () => {
 		useFakeAgent({});
 		const repo = await makeRepo();
 		await go(repo, noMerge());
 		await git(repo, "checkout", "-q", "-b", "elsewhere");
-		await expect(go(repo, testConfig(), { only: "merge" })).rejects.toThrow(/started on "main"/);
-		await expect(go(repo, testConfig(), { resume: true })).rejects.toThrow(/started on "main"/);
-		await git(repo, "checkout", "-q", "main");
-		expect(await mainSubjects(repo)).toEqual(["initial"]);
+		writeFile(repo, "src/app.ts", "work in progress\n");
+
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
+		expect((await mainSubjects(repo)).join()).toContain("[T-");
+		expect(await git(repo, "log", "--format=%s", "elsewhere")).toBe("initial"); // the branch in use stays
+		expect(readFile(repo, "src/app.ts")).toBe("work in progress\n");
+		expect(await refExists(repo, latest(repo).ref)).toBe(false); // merged: nothing of the run is left
+	});
+
+	it("says that the run's branch is gone instead of merging into another one", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await go(repo, noMerge());
+		await git(repo, "checkout", "-q", "-b", "elsewhere");
+		await git(repo, "branch", "-q", "-D", "main");
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(false);
+		expect(output.join("\n")).toContain('The branch "main" that this run started on is gone');
+		expect(await git(repo, "log", "--format=%s", "elsewhere")).toBe("initial");
 		expect(allStatus(repo, "verified")).toBe(true);
+	});
+
+	it("does its work on a detached HEAD and keeps it for a branch", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await git(repo, "checkout", "-q", "--detach");
+		expect(await go(repo)).toBe(true); // as in a CI checkout: nothing failed, the merge waits
+		expect(allStatus(repo, "verified")).toBe(true);
+		expect(output.join("\n")).toContain(
+			"Automatic merge deferred. This run started on a detached HEAD",
+		);
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(false); // asked for, and no branch to take it
+
+		await git(repo, "checkout", "-q", "main");
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 
 	it("lets a run that began on a detached HEAD go on, and merge, on a branch that holds its commit", async () => {
@@ -673,12 +704,9 @@ describe("preflight", () => {
 		expect(await go(dirty, testConfig({ pipeline: ["scan"] }))).toBe(true); // no run needs a clean tree:
 		expect(readFile(dirty, "src/app.ts")).toBe("changed"); // it has a checkout of its own
 
-		const detached = await makeRepo();
-		await git(detached, "checkout", "-q", "--detach");
-		await expect(go(detached)).rejects.toThrow(/detached/);
-
 		process.env.MILHOUSE_CLAUDE = "/nonexistent/claude";
 		await expect(go(await makeRepo())).rejects.toThrow(/not found on PATH/);
+		await expect(go(await makeRepo())).rejects.toThrow(/Codex is installed: add --harness codex/);
 		// merging needs no agent, so a missing binary is not what stops it
 		await expect(go(await makeRepo(), testConfig(), { only: "merge" })).rejects.toThrow(
 			/no run to continue/,

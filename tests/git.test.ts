@@ -6,6 +6,7 @@ import {
 	acceptCommit,
 	addedLines,
 	branchExists,
+	checkoutOf,
 	clearIndexLock,
 	commitSubjects,
 	currentBranch,
@@ -518,9 +519,13 @@ describe("mergeInto and publish", () => {
 		return { repo, work };
 	}
 
+	/** Publish `sha` to main, from where main is now. */
+	const toMain = async (repo: string, sha: string) =>
+		publish(repo, "main", await revParse(repo, "main"), sha);
+
 	it("fast-forwards the branch to a commit that descends from it", async () => {
 		const { repo, work } = await repoWithWork();
-		expect(await publish(repo, work)).toEqual({ ok: true });
+		expect(await toMain(repo, work)).toEqual({ ok: true });
 		expect(await revParse(repo, "HEAD")).toBe(work);
 		expect(readFile(repo, "feature.txt")).toBe("f");
 		expect(await git(repo, "log", "--oneline", "--merges")).toBe("");
@@ -529,17 +534,49 @@ describe("mergeInto and publish", () => {
 	it("refuses a commit the branch cannot fast-forward to, and leaves the branch alone", async () => {
 		const { repo, work } = await repoWithWork();
 		const moved = await commitFile(repo, "other.txt", "o", "someone else committed");
-		const refused = await publish(repo, work);
+		const refused = await toMain(repo, work);
 		expect(refused.ok).toBe(false);
 		expect(refused.error).toBeTruthy(); // git's own reason, not a guess
 		expect(await revParse(repo, "HEAD")).toBe(moved);
 		expect(await isDirty(repo)).toBe(false);
 	});
 
+	it("moves a branch that is not checked out without touching a file of the checkout", async () => {
+		const { repo, work } = await repoWithWork();
+		await git(repo, "checkout", "-q", "-b", "elsewhere");
+		writeFile(repo, "src/app.ts", "work in progress\n");
+		expect(await toMain(repo, work)).toEqual({ ok: true });
+		expect(await revParse(repo, "main")).toBe(work);
+		expect(await currentBranch(repo)).toBe("elsewhere");
+		expect(existsSync(join(repo, "feature.txt"))).toBe(false);
+		expect(readFile(repo, "src/app.ts")).toBe("work in progress\n");
+	});
+
+	it("moves a branch that is not checked out only from where it was", async () => {
+		const { repo, work } = await repoWithWork();
+		const seen = await revParse(repo, "main");
+		const moved = await commitFile(repo, "other.txt", "o", "someone else committed");
+		await git(repo, "checkout", "-q", "-b", "elsewhere");
+		expect((await publish(repo, "main", seen, work)).ok).toBe(false);
+		expect(await revParse(repo, "main")).toBe(moved);
+	});
+
+	it("fast-forwards a branch in the worktree that has it checked out", async () => {
+		const { repo, work } = await repoWithWork();
+		await git(repo, "checkout", "-q", "-b", "elsewhere");
+		const linked = join(tempDir(), "linked");
+		await git(repo, "worktree", "add", "-q", linked, "main");
+		expect(await checkoutOf(repo, "main")).toBe(linked);
+		expect(await checkoutOf(repo, "feature")).toBeNull();
+		expect(await toMain(repo, work)).toEqual({ ok: true });
+		expect(readFile(linked, "feature.txt")).toBe("f"); // its files went along
+		expect(await git(linked, "status", "--porcelain")).toBe("");
+	});
+
 	it("does not let a squash-by-default configuration pretend that the branch moved", async () => {
 		const { repo, work } = await repoWithWork();
 		await git(repo, "config", "branch.main.mergeOptions", "--squash");
-		expect((await publish(repo, work)).ok).toBe(true); // explicit --no-squash wins
+		expect((await toMain(repo, work)).ok).toBe(true); // explicit --no-squash wins
 		expect(await revParse(repo, "HEAD")).toBe(work);
 	});
 
@@ -553,7 +590,7 @@ describe("mergeInto and publish", () => {
 		expect(merged).toEqual({ ok: true });
 		expect(await git(side, "log", "-1", "--format=%s")).toBe("merge feature");
 		expect(await revParse(repo, "HEAD")).toBe(head); // the branch has not moved yet
-		expect((await publish(repo, await revParse(side, "HEAD"))).ok).toBe(true);
+		expect((await toMain(repo, await revParse(side, "HEAD"))).ok).toBe(true);
 		expect(readFile(repo, "other.txt")).toBe("o");
 		expect(readFile(repo, "feature.txt")).toBe("f");
 	});
@@ -585,7 +622,7 @@ describe("mergeInto and publish", () => {
 		await git(repo, "checkout", "-q", "main");
 		writeFile(repo, "local.env", "my local settings\n"); // ignored on main: git would overwrite it silently
 
-		const result = await publish(repo, work);
+		const result = await toMain(repo, work);
 		expect(result.ok).toBe(false);
 		expect(result.error).toContain("local.env");
 		expect(readFile(repo, "local.env")).toBe("my local settings\n");

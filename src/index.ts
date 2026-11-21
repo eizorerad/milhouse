@@ -5,13 +5,21 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import pkg from "../package.json";
-import { ConfigError, configTemplate, loadConfig, stepHarness } from "./config.ts";
+import {
+	ConfigError,
+	DEFAULTS,
+	configTemplate,
+	loadConfig,
+	projectChecksEnabled,
+	stepHarness,
+} from "./config.ts";
 import { detectCommands } from "./detect.ts";
+import { HARNESSES } from "./engine.ts";
 import { isRepo, repoRoot } from "./git.ts";
 import { acquireLock } from "./lock.ts";
 import { runPipeline } from "./pipeline.ts";
 import { REPORT_FORMATS, type ReportFormat, formatReport, generateReport } from "./report.ts";
-import { RunStore, STATE_DIR, ensureIgnoreFile } from "./state.ts";
+import { KEEP_DAYS, RunStore, STATE_DIR, ensureIgnoreFile } from "./state.ts";
 import {
 	type AgentStep,
 	type Config,
@@ -45,6 +53,10 @@ Options:
   --workers <n>    Parallel agents for validate and plan
   --harness <name> Agent for every step: claude or codex
   --allow-unchecked  Run exec without a build, lint or test command (an agent alone reviews the work)
+  --no-baseline    Do not check the starting commit first (when its failure is what the run should fix)
+  --budget <usd>   Spending limit of the run, for this command (0 = none)
+  --max-tokens <n> The same for the tokens of an agent that reports no dollars (Codex)
+  --max-minutes <n>  The longest this command may take
   --model <name>   Model for every step that runs on the global harness
   --run-id <id>    Pick the run for --resume, --report and single phases
   -v, --verbose    Debug output
@@ -71,6 +83,10 @@ const OPTIONS = {
 	exec: flag,
 	merge: flag,
 	"allow-unchecked": flag,
+	"no-baseline": flag,
+	budget: { type: "string" },
+	"max-tokens": { type: "string" },
+	"max-minutes": { type: "string" },
 	days: { type: "string" },
 	scope: { type: "string" },
 	workers: { type: "string" },
@@ -92,6 +108,16 @@ function positiveInt(value: string | undefined, name: string, min = 1): number |
 		throw new UsageError(
 			min > 0 ? `${name} must be a positive integer` : `${name} must be an integer of 0 or more`,
 		);
+	}
+	return n;
+}
+
+/** A limit given on the command line: a number of 0 or more, where 0 is no limit. */
+function limit(value: string | undefined, name: string): number | undefined {
+	if (value === undefined) return undefined;
+	const n = Number(value);
+	if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
+		throw new UsageError(`${name} must be a number of 0 or more`);
 	}
 	return n;
 }
@@ -145,10 +171,15 @@ function withModel(config: Config, model: string): Config {
 	return { ...config, model, phases };
 }
 
+const commandLines = (commands: Partial<Config["commands"]>): string =>
+	Object.entries(commands)
+		.map(([slot, command]) => `  ${slot}: ${command}`)
+		.join("\n");
+
 /**
- * Write `.milhouse/config.ts` with the commands the project defines, unless there is one. The first run of
- * a project does this by itself; `milhouse init` only does it without starting anything.
- * Returns whether the file is new.
+ * Write `.milhouse/config.ts` with the commands the project defines and the agent that is installed, unless
+ * there is one. The first run of a project does this by itself; `milhouse init` only does it without
+ * starting anything. Returns whether the file is new.
  */
 function createConfig(workDir: string): boolean {
 	const configPath = join(workDir, STATE_DIR, "config.ts");
@@ -156,14 +187,35 @@ function createConfig(workDir: string): boolean {
 	ensureIgnoreFile(workDir);
 	if (existsSync(configPath)) return false;
 	const found = detectCommands(workDir);
-	writeFileSync(configPath, configTemplate(found));
-	const lines = Object.entries(found).map(([slot, command]) => `  ${slot}: ${command}`);
+	const installed = HARNESS_NAMES.find((name) => Bun.which(HARNESSES[name].binary()));
+	const harness = installed ?? DEFAULTS.harness;
+	writeFileSync(configPath, configTemplate(found, harness));
 	log.success(
-		lines.length === 0
+		Object.keys(found).length === 0
 			? `Created ${STATE_DIR}/config.ts. No build, lint or test command was found in this project: set commands.test (or build, lint) there, so that the work can be checked.`
-			: `Created ${STATE_DIR}/config.ts with the commands this project defines. Setup runs when the worktree is made, build, lint and test on every issue; change them there if they are not right:\n${lines.join("\n")}`,
+			: `Created ${STATE_DIR}/config.ts with the commands this project defines. Setup runs when the worktree is made, build, lint and test on every issue; change them there if they are not right:\n${commandLines(found)}`,
 	);
+	if (harness !== DEFAULTS.harness) {
+		log.info(
+			`${HARNESSES[DEFAULTS.harness].label} is not installed here, so the config names ${HARNESSES[harness].label} as the agent.`,
+		);
+	}
 	return true;
+}
+
+/**
+ * A config without a build, lint or test command stops exec. The project may have got one since the file
+ * was written, so look again before refusing, and use what is there now.
+ */
+function withFoundChecks(config: Config, workDir: string): Config {
+	if (projectChecksEnabled(config) || !config.gates.dod || config.allowUnchecked) return config;
+	const found = detectCommands(workDir);
+	if (![found.build, found.lint, found.test].some(Boolean)) return config;
+	log.info(
+		`${STATE_DIR}/config.ts sets no build, lint or test command. Using what this project defines now; set them there to keep or change them:\n${commandLines(found)}`,
+	);
+	const setup = config.commands.setup || found.setup || ""; // a setup of the user's own stays
+	return { ...config, commands: { ...config.commands, ...found, setup } };
 }
 
 function selectRun(workDir: string, runId?: string): RunStore {
@@ -190,7 +242,7 @@ async function cleanRuns(workDir: string, days: string | undefined, all: boolean
 	// removeRun first: the records go only once nothing of the run is left. A run with unmerged work is kept.
 	const { removed, kept } = await RunStore.clean(
 		workDir,
-		positiveInt(days, "--days", 0) ?? 30,
+		positiveInt(days, "--days", 0) ?? KEEP_DAYS,
 		removeRun,
 		all,
 	).finally(release);
@@ -266,8 +318,13 @@ async function main(argv: string[]): Promise<number> {
 	const loaded = await loadConfig(workDir, {
 		...workerOverrides(workers),
 		...(values["allow-unchecked"] ? { allowUnchecked: true } : {}),
+		...(values["no-baseline"] ? { gates: { baseline: false } } : {}),
+		budget: limit(values.budget, "--budget"),
+		maxTokens: limit(values["max-tokens"], "--max-tokens"),
+		maxMinutes: limit(values["max-minutes"], "--max-minutes"),
 	});
-	const chosen = harness ? withHarness(loaded, harness) : loaded;
+	const checked = withFoundChecks(loaded, workDir);
+	const chosen = harness ? withHarness(checked, harness) : checked;
 	const config = values.model ? withModel(chosen, values.model) : chosen;
 	printBanner(pkg.version);
 	const ok = await runPipeline(config, {

@@ -9,13 +9,14 @@ import { commandTimeoutMs, projectChecksEnabled } from "../config.ts";
 import { runProjectChecks } from "../gates.ts";
 import {
 	acceptCommit,
-	currentBranch,
+	branchRef,
 	isAncestor,
 	isWorktree,
 	mergeInto,
 	publish,
 	refExists,
 	resetWorktree,
+	resolveRef,
 	revParse,
 } from "../git.ts";
 import type { Outcome } from "../runner.ts";
@@ -65,8 +66,15 @@ interface Ready {
 	tip: string;
 }
 
-/** The accepted work agrees with the run's records and the branch is the right one: or what is wrong. */
-async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | { error: string }> {
+/**
+ * The accepted work agrees with the run's records and its branch is there: or what is wrong. The branch need
+ * not be the one that is checked out: the run never worked in the user's checkout, and neither does its merge.
+ */
+async function readyToMerge(
+	store: RunStore,
+	verified: Task[],
+	explicit: boolean,
+): Promise<Ready | { error: string; skipped?: boolean }> {
 	const repo = store.workDir;
 	const { base_branch: baseBranch } = store.loadMeta();
 
@@ -74,18 +82,18 @@ async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | 
 		return { error: `The accepted work of this run (${store.ref}) is missing.` };
 	}
 	if (!baseBranch) {
+		// Nothing went wrong: the work waits, as unchecked work does, until a branch is there to take it.
+		const error =
+			"This run started on a detached HEAD, so it has no branch to merge into. Check out a branch that contains its starting commit, then run: milhouse --merge";
+		if (!explicit) log.warn(`Automatic merge deferred. ${error}`);
+		return { error, skipped: !explicit };
+	}
+	const head = await resolveRef(repo, branchRef(baseBranch));
+	if (head === null) {
 		return {
-			error:
-				"This run started on a detached HEAD. Check out a branch that contains its starting commit, then run: milhouse --merge",
+			error: `The branch "${baseBranch}" that this run started on is gone. The verified work stays in ${store.ref}: merge it by hand.`,
 		};
 	}
-	if ((await currentBranch(repo)) !== baseBranch) {
-		return {
-			error: `Check out "${baseBranch}" (the run started there), then run: milhouse --merge`,
-		};
-	}
-
-	const head = await revParse(repo, "HEAD");
 	const tip = await revParse(repo, store.ref);
 	// The records and the ref must agree: a ref that was lost and recreated would otherwise let work be
 	// marked as merged that never was.
@@ -133,14 +141,12 @@ async function publishWork(
 	const result = fastForward ? { sha: tip } : await mergeCandidate(store, config, head, tip);
 	if ("error" in result) return result;
 	// The checks can take minutes: publish only if the branch is exactly where it was when they began.
-	const unchanged =
-		(await currentBranch(repo)) === baseBranch && (await revParse(repo, "HEAD")) === head;
-	if (!unchanged) {
+	if ((await resolveRef(repo, branchRef(baseBranch))) !== head) {
 		return {
 			error: `"${baseBranch}" changed while the merge was being checked. Nothing was merged and nothing of yours was touched; run: milhouse --merge`,
 		};
 	}
-	const published = await publish(repo, result.sha);
+	const published = await publish(repo, baseBranch, head, result.sha);
 	if (!published.ok) {
 		return {
 			error: `git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched. If a file you changed stands in the way, commit or stash it; then run: milhouse --merge`,
@@ -149,26 +155,26 @@ async function publishWork(
 	return result;
 }
 
+/** `explicit`: the user asked for this merge (--merge), so it may land unchecked work. */
 export async function mergePhase(
 	store: RunStore,
 	config: Config,
-	allowUnchecked: boolean,
+	explicit: boolean,
 ): Promise<Outcome<string>[]> {
 	const verified = store.loadTasks().filter((t) => t.status === "verified");
 	if (verified.length === 0) {
 		log.info("merge: no verified work to merge");
 		return [];
 	}
-	const fail = (error: string): Outcome<string>[] => [{ ok: false, error }];
 	const repo = store.workDir;
 
-	const ready = await readyToMerge(store, verified);
-	if ("error" in ready) return fail(ready.error);
+	const ready = await readyToMerge(store, verified, explicit);
+	if ("error" in ready) return [{ ok: false, ...ready }];
 	const { head, tip } = ready;
 	let landed = head; // already contains the work when the tip is an ancestor of the branch
 	let how = "";
 	if (!(await isAncestor(repo, tip, head))) {
-		const published = await publishWork(store, config, verified, ready, allowUnchecked);
+		const published = await publishWork(store, config, verified, ready, explicit);
 		if ("error" in published) return [{ ok: false, ...published }];
 		landed = published.sha;
 		how = landed === tip ? "" : " with a merge commit";

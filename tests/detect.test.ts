@@ -71,6 +71,42 @@ describe("detectCommands", () => {
 		expect(detectCommands(unittest)).toEqual({ test: "python3 -m unittest discover -s tests" });
 	});
 
+	it("installs what a Python project needs into the run's own checkout, and tests with that", () => {
+		const pyproject = '[dependency-groups]\ndev = ["pytest"]\n';
+		expect(detectCommands(project({ "pyproject.toml": pyproject, "uv.lock": "" }))).toEqual({
+			setup: "uv sync --frozen",
+			test: "uv run --frozen python -m pytest",
+		});
+		expect(detectCommands(project({ "pyproject.toml": pyproject, "poetry.lock": "" }))).toEqual({
+			setup: "POETRY_VIRTUALENVS_IN_PROJECT=true poetry install --no-interaction",
+			test: "poetry run python -m pytest",
+		});
+		const pip = detectCommands(project({ "requirements.txt": "requests\npytest\n" }));
+		expect(pip.setup).toContain(".venv/bin/pip install -r requirements.txt");
+		expect(pip.setup).toContain(".venv/.gitignore"); // or git would clean the environment away
+		expect(pip.test).toBe(".venv/bin/python -m pytest");
+		const unittest = project({ "requirements.txt": "requests\n", "tests/test_app.py": CASE });
+		expect(detectCommands(unittest).test).toBe(".venv/bin/python -m unittest discover -s tests");
+		// Nothing to test with: no environment is made for it either.
+		expect(detectCommands(project({ "requirements.txt": "requests\n" }))).toEqual({});
+	});
+
+	it("does not take a linter that rewrites the files for a check", () => {
+		for (const lint of ["eslint . --fix", "biome check --write ."]) {
+			const found = detectCommands(project({ "package.json": scripts({ lint, test: "vitest" }) }));
+			expect(found).toEqual({ setup: "npm install", test: "npm run test" });
+		}
+		const reading = project({ "package.json": scripts({ lint: "eslint ." }) });
+		expect(detectCommands(reading).lint).toBe("npm run lint");
+	});
+
+	it("fetches the submodules first: a new checkout has none", () => {
+		const dir = project({ ".gitmodules": "", "package.json": scripts({ test: "vitest" }) });
+		expect(detectCommands(dir).setup).toBe(
+			"git submodule update --init --recursive && npm install",
+		);
+	});
+
 	it("does not guess unittest from a file name: a pytest-style test would be found by nothing", () => {
 		const dir = project({ "tests/test_sum.py": "def test_sum():\n    assert 1 + 1 == 3\n" });
 		expect(detectCommands(dir)).toEqual({});
@@ -155,6 +191,11 @@ describe("configTemplate", () => {
 		expect(text).toContain("Found in this project");
 		expect(configTemplate({})).not.toContain("Found in this project");
 		expect(configTemplate({ test: "" })).not.toContain("Found in this project"); // nothing was found
+	});
+
+	it("names the agent it is given, and Claude Code otherwise", () => {
+		expect(configTemplate({}, "codex")).toContain('harness: "codex",');
+		expect(CONFIG_TEMPLATE).toContain('harness: "claude",');
 	});
 
 	it("writes the commands that were found, as the config's own values", () => {

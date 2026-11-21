@@ -20,12 +20,13 @@ import { mergePhase } from "./phases/merge.ts";
 import { planPhase } from "./phases/plan.ts";
 import { scanPhase } from "./phases/scan.ts";
 import { validatePhase } from "./phases/validate.ts";
+import { formatReport, generateReport } from "./report.ts";
 import { type Outcome, runPhase } from "./runner.ts";
 import { RunStore } from "./state.ts";
-import { type Config, PHASES, type Phase } from "./types.ts";
+import { type Config, HARNESS_NAMES, PHASES, type Phase } from "./types.ts";
 import { log } from "./ui.ts";
 import { MINUTE, errorMessage } from "./util.ts";
-import { cleanupRun, readWorktree, releaseWorktree } from "./worktree.ts";
+import { cleanupRun, readWorktree, releaseWorktree, tidy } from "./worktree.ts";
 
 export interface PipelineOptions {
 	/** Repository to work in. Defaults to the current directory. */
@@ -53,22 +54,23 @@ export function requireAgents(config: Config, phases: Phase[]): void {
 	for (const name of new Set(agentSteps(config, phases).map((step) => stepHarness(config, step)))) {
 		const harness = HARNESSES[name];
 		if (!Bun.which(harness.binary())) {
+			const other = HARNESS_NAMES.find((n) => n !== name && Bun.which(HARNESSES[n].binary()));
+			const instead = other
+				? ` ${HARNESSES[other].label} is installed: add --harness ${other} to use it instead.`
+				: "";
 			throw new Error(
-				`"${harness.binary()}" was not found on PATH. Install ${harness.label} first: ${harness.installHint}`,
+				`"${harness.binary()}" was not found on PATH. Install ${harness.label} first: ${harness.installHint}${instead}`,
 			);
 		}
 	}
 }
 
-export async function preflight(workDir: string, phases: Phase[]): Promise<void> {
+export async function preflight(workDir: string): Promise<void> {
 	if (!(await isRepo(workDir)))
 		throw new Error("This is not a git repository. Run milhouse inside one.");
 	if (!(await hasCommits(workDir)))
 		throw new Error("The repository has no commits yet. Make an initial commit first.");
 	await detectIdentity(workDir); // commits need an author, also in a container that has none
-	if ((phases.includes("exec") || phases.includes("merge")) && !(await currentBranch(workDir))) {
-		throw new Error("HEAD is detached. Check out a branch first.");
-	}
 }
 
 /** The run this command continues, or undefined when it starts a new one. */
@@ -77,14 +79,11 @@ async function existingRun(workDir: string, opts: PipelineOptions): Promise<RunS
 	if (!continuing) return undefined;
 	const store = opts.runId ? RunStore.byId(workDir, opts.runId) : RunStore.latest(workDir);
 	if (!store) throw new Error("There is no run to continue. Start one with: milhouse --run");
-	// Merge writes to the branch the run started on. A run that began on a detached HEAD (a CI checkout)
-	// takes the branch it is continued on, if that branch holds its starting commit.
+	// Merge writes to the branch the run started on, whatever is checked out by then. A run that began on a
+	// detached HEAD (a CI checkout) takes the branch it is continued on, if that branch holds its starting commit.
 	const { base_branch: baseBranch, base_sha: base } = store.loadMeta();
 	const branch = await currentBranch(workDir);
 	if (!baseBranch && branch && (await isAncestor(workDir, base, "HEAD"))) store.setBranch(branch);
-	if (baseBranch && branch !== baseBranch) {
-		throw new Error(`This run started on "${baseBranch}". Check it out first, then continue.`);
-	}
 	return store;
 }
 
@@ -136,7 +135,7 @@ function refuseUnchecked(config: Config, todo: Phase[]): void {
 export async function runPipeline(config: Config, opts: PipelineOptions = {}): Promise<boolean> {
 	const workDir = opts.workDir ?? process.cwd();
 	const wanted = opts.only ? [opts.only] : config.pipeline;
-	await preflight(workDir, wanted);
+	await preflight(workDir);
 
 	const release = acquireLock(workDir);
 	// A run that ends without saying how must not stay "running": that is the status a later command reads.
@@ -164,6 +163,8 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 			);
 		}
 		requireAgents(config, todo); // before a new run leaves anything behind
+		// Housekeeping must not stop a run: what it could not remove stays for `--clean`, which says why.
+		if (!existing) await tidy(workDir).catch((err) => log.debug(`tidy: ${errorMessage(err)}`));
 		const store =
 			existing ??
 			RunStore.create(workDir, opts.scope, {
@@ -259,29 +260,27 @@ async function finish(
 	const limit = cost.limitReached(); // once: the clock goes on while this function runs
 	const limitHint =
 		limit === "time"
-			? `The time limit of ${config.maxMinutes} minutes is used up: raise "maxMinutes" in .milhouse/config.ts, then run: milhouse --resume (every command gets the full time)`
+			? `The time limit of ${config.maxMinutes} minutes is used up. Go on with: milhouse --resume (every command gets the full time; --max-minutes <n> sets another)`
 			: limit === "tokens"
-				? `The token limit of ${formatTokens(config.maxTokens)} is used up: raise "maxTokens" in .milhouse/config.ts, then run: milhouse --resume`
-				: `The budget of ${formatUsd(config.budget)} is used up: raise "budget" in .milhouse/config.ts, then run: milhouse --resume`;
+				? `The token limit of ${formatTokens(config.maxTokens)} is used up. Go on with a higher one: milhouse --resume --max-tokens <n> (or set "maxTokens" in .milhouse/config.ts)`
+				: `The budget of ${formatUsd(config.budget)} is used up. Go on with a higher one: milhouse --resume --budget <usd> (or set "budget" in .milhouse/config.ts)`;
+	store.finish(failures > 0 ? "failed" : complete ? "completed" : "stopped");
+	// What the run found and did, right here: nobody should have to ask for it.
+	console.log(`\n${formatReport(generateReport(store), "terminal")}\n`);
 	if (failures > 0) {
-		store.finish("failed");
-		log.error(
-			`${failures} item(s) failed (${spent}). Details: milhouse --report. Retry with: milhouse --resume`,
-		);
+		log.error(`${failures} item(s) failed (${spent}). Retry with: milhouse --resume`);
 		if (limit) log.warn(limitHint);
 		return false;
 	}
 	if (complete) {
-		store.finish("completed");
-		log.success(`Pipeline complete: ${spent}. Summary: milhouse --report`);
+		log.success(`Pipeline complete: ${spent}`);
 		return true;
 	}
-	store.finish("stopped");
 	if (limit) {
 		log.warn(`${limitHint} (${spent})`);
 		return false;
 	}
-	log.success(`Done: ${spent}. Summary: milhouse --report`);
+	log.success(`Done: ${spent}`);
 	return true;
 }
 
