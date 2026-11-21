@@ -29,6 +29,7 @@ import {
 	revParse,
 	touchedFiles,
 } from "../src/git.ts";
+import { run } from "../src/proc.ts";
 import {
 	cleanupTempDirs,
 	commitFile,
@@ -559,6 +560,23 @@ describe("mergeInto and publish", () => {
 		await git(repo, "checkout", "-q", "-b", "elsewhere");
 		expect((await publish(repo, "main", seen, work)).ok).toBe(false);
 		expect(await revParse(repo, "main")).toBe(moved);
+	});
+
+	it("leaves a branch that is being rebased where it is: the end of the rebase would undo the move", async () => {
+		const { repo, work } = await repoWithWork();
+		const tip = await commitFile(repo, "other.txt", "o", "a second commit");
+		// A rebase that stops half-way: HEAD is detached, and no checkout has the branch any more.
+		expect(
+			(await run("git", ["rebase", "--exec", "false", "HEAD~1"], { cwd: repo })).code,
+		).not.toBe(0);
+		expect(await checkoutOf(repo, "main")).toBeNull();
+
+		const refused = await publish(repo, "main", tip, work);
+		expect(refused.ok).toBe(false);
+		expect(refused.error).toContain("used by worktree");
+		expect(await revParse(repo, "main")).toBe(tip);
+		await git(repo, "rebase", "--abort");
+		expect(await currentBranch(repo)).toBe("main");
 	});
 
 	it("fast-forwards a branch in the worktree that has it checked out", async () => {

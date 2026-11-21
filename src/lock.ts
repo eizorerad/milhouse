@@ -25,8 +25,16 @@ function startedAt(pid: number): string {
 	}
 }
 
-/** What the lock file holds: the pid of its owner and when that process started. */
-const owner = (): string => `${process.pid} ${startedAt(process.pid)}`.trim();
+let mine: string | undefined;
+
+/**
+ * What the lock file holds: the pid of its owner and when that process started. `ps` is asked once: the
+ * answer does not change, and every try to get the lock needs it.
+ */
+const owner = (): string => {
+	mine ??= `${process.pid} ${startedAt(process.pid)}`.trim();
+	return mine;
+};
 
 /**
  * The pid of the running process that wrote `holder`, or null. The pid alone would not tell: after a crash

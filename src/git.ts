@@ -378,6 +378,23 @@ export async function removeWorktree(repo: string, path: string): Promise<void> 
 
 // ─── Merging the result ──────────────────────────────────────────────
 
+/**
+ * Move a branch that is checked out nowhere. It may still be in use: one that is being rebased or bisected
+ * is checked out nowhere either, and the end of that rebase would put it back, without the merged work.
+ * Git knows, and refuses to set such a branch; so it is asked first to set the branch to where it is, which
+ * changes nothing. The move itself names the commit it starts from: a branch that moved meanwhile stays.
+ */
+async function moveUnused(
+	repo: string,
+	branch: string,
+	from: string,
+	to: string,
+): Promise<GitResult> {
+	const unused = await git(repo, "branch", "--no-track", "-f", branch, branchRef(branch));
+	if (!unused.ok) return unused;
+	return git(repo, "update-ref", "-m", "milhouse: merge", branchRef(branch), to, from);
+}
+
 /** Merge `sha` into the commit checked out in `cwd` with a merge commit. A failed merge is aborted. */
 export async function mergeInto(
 	cwd: string,
@@ -407,7 +424,7 @@ export async function mergeInto(
  * Move `branch` forward from `from` to `sha`, a commit that contains `from`, and confirm that it got there.
  * Where the branch is checked out, a fast-forward takes the files along; one that cannot happen changes
  * nothing, so the user's checkout (staged edits included) is never reset. A branch that is checked out
- * nowhere is only a name to move, and moves only if it still is where it was.
+ * nowhere is only a name to move, and moves only if it still is where it was and nothing else is using it.
  * --no-overwrite-ignore: git would otherwise replace an ignored local file (a .env, say) with a tracked one.
  */
 export async function publish(
@@ -419,7 +436,7 @@ export async function publish(
 	const checkout = await checkoutOf(repo, branch);
 	const moved = checkout
 		? await git(checkout, "merge", "--ff-only", "--no-squash", "--no-overwrite-ignore", sha)
-		: await git(repo, "update-ref", "-m", "milhouse: merge", branchRef(branch), sha, from);
+		: await moveUnused(repo, branch, from, sha);
 	if (!moved.ok) return { ok: false, error: tail(moved.err || moved.out, 500) };
 	const reached = (await resolveRef(repo, branchRef(branch))) === sha;
 	return reached

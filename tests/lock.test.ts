@@ -92,5 +92,5 @@ describe("acquireLock takeover", () => {
 		writeFileSync(join(dir, ".milhouse", "lock"), "2147483646");
 		mkdirSync(join(dir, ".milhouse", "lock.takeover")); // fresh: somebody is working on it
 		expect(() => acquireLock(dir)).toThrow(/Could not acquire/);
-	});
+	}, 30_000); // 50 tries with a pause each: seconds on a busy runner, and it is not the speed that is tested
 });
