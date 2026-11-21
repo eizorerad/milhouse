@@ -14,6 +14,11 @@ export interface RunOptions {
 	reap?: boolean;
 	/** Bytes of each output stream to keep (the end of it). */
 	maxOutput?: number;
+	/**
+	 * The signal the process gets when milhouse itself exits or is interrupted. By default it is killed at
+	 * once. Git is asked to stop instead (SIGTERM): it then removes its lock files, also in the user's checkout.
+	 */
+	exitSignal?: NodeJS.Signals;
 }
 
 export interface RunResult {
@@ -25,6 +30,8 @@ export interface RunResult {
 	truncated: boolean;
 }
 
+/** What a process that ran out of time gets to stop by itself (and to stop what it started: a container, a server) before it is killed. */
+const TERM_GRACE_MS = 3000;
 const KILL_GRACE_MS = 3000;
 /** After the process exited: how long to wait for the rest of its output. A background child that keeps the pipes open must not keep us. */
 const DRAIN_MS = 1000;
@@ -60,25 +67,25 @@ class Tail {
  * Children are detached (their own process group, so a timeout can kill their whole tree), which means
  * Ctrl-C in the terminal does not reach them. Stop them ourselves when milhouse exits or is interrupted.
  */
-const running = new Set<number>();
+const running = new Map<number, NodeJS.Signals>();
 let cleanupInstalled = false;
 
 function installCleanup(): void {
 	if (cleanupInstalled) return;
 	cleanupInstalled = true;
 	process.on("exit", () => {
-		for (const pid of running) killTree(pid);
+		for (const [pid, signal] of running) killTree(pid, signal);
 	});
 	process.once("SIGINT", () => process.exit(130));
 	process.once("SIGTERM", () => process.exit(143));
 	process.once("SIGHUP", () => process.exit(129)); // the terminal was closed
 }
 
-function killTree(pid: number | undefined): void {
+function killTree(pid: number | undefined, signal: NodeJS.Signals = "SIGKILL"): void {
 	if (pid === undefined) return;
 	try {
 		// A detached child leads its own process group: this also stops its grandchildren.
-		process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL");
+		process.kill(process.platform === "win32" ? pid : -pid, signal);
 	} catch {
 		// Already gone.
 	}
@@ -94,21 +101,24 @@ export function run(file: string, args: string[], opts: RunOptions): Promise<Run
 			stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 		});
 		installCleanup();
-		if (child.pid !== undefined) running.add(child.pid);
+		if (child.pid !== undefined) running.set(child.pid, opts.exitSignal ?? "SIGKILL");
 		const limit = opts.maxOutput ?? MAX_OUTPUT_BYTES;
 		const stdout = new Tail(limit);
 		const stderr = new Tail(limit);
 		let timedOut = false;
 		let settled = false;
 		let drain: ReturnType<typeof setTimeout> | undefined;
+		let escalate: ReturnType<typeof setTimeout> | undefined;
 
 		const finish = (code: number | null, extraErr = "") => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
 			clearTimeout(drain);
+			clearTimeout(escalate);
 			if (child.pid !== undefined) running.delete(child.pid);
-			if (opts.reap) killTree(child.pid);
+			// After a timeout nothing of the tree may stay, whether it stopped when asked or not.
+			if (opts.reap || timedOut) killTree(child.pid);
 			// Let go of the pipes: a background child that still holds them must not keep us alive.
 			child.stdout?.destroy();
 			child.stderr?.destroy();
@@ -124,9 +134,12 @@ export function run(file: string, args: string[], opts: RunOptions): Promise<Run
 		const timer = opts.timeoutMs
 			? setTimeout(() => {
 					timedOut = true;
-					killTree(child.pid);
-					// If a stray process keeps the pipes open, do not wait for it forever.
-					setTimeout(() => finish(null), KILL_GRACE_MS).unref();
+					killTree(child.pid, "SIGTERM"); // ask first: a test runner removes what it started
+					escalate = setTimeout(() => {
+						killTree(child.pid);
+						// If a stray process keeps the pipes open, do not wait for it forever.
+						setTimeout(() => finish(null), KILL_GRACE_MS).unref();
+					}, TERM_GRACE_MS);
 				}, opts.timeoutMs)
 			: undefined;
 

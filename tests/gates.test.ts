@@ -288,6 +288,24 @@ describe("verifyEvidence", () => {
 		).toHaveLength(1);
 	});
 
+	it("drops a citation of far more lines than a place in a file has: it would find any snippet", () => {
+		const repo = repoWithFile();
+		const far = { snippet: "return user.name;" };
+		expect(verifyEvidence(repo, [cite({ ...far, line_start: 1, line_end: 999_999 })])).toEqual([]);
+		expect(verifyEvidence(repo, [cite({ ...far, line_start: 1, line_end: 200 })])).toHaveLength(1);
+	});
+
+	it("drops line numbers that are not whole numbers", () => {
+		const repo = repoWithFile();
+		for (const lines of [
+			{ line_start: "1", line_end: "1" }, // "1" + 5 would be "15"
+			{ line_start: 3.5, line_end: 4 },
+			{ line_start: 3, line_end: Number.POSITIVE_INFINITY },
+		]) {
+			expect(verifyEvidence(repo, [cite(lines)])).toEqual([]);
+		}
+	});
+
 	it("drops evidence that was made up", () => {
 		const repo = repoWithFile();
 		const evidence = [

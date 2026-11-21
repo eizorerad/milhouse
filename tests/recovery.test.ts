@@ -1,8 +1,16 @@
 /** Failure, crash and resume scenarios: the pipeline must never lose or fake work. */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync } from "node:fs";
-import { branchExists, ensureWorktree, refExists, revParse } from "../src/git.ts";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+	branchExists,
+	currentBranch,
+	deleteRef,
+	ensureWorktree,
+	refExists,
+	revParse,
+} from "../src/git.ts";
 import {
 	TWO_ISSUES,
 	allStatus,
@@ -114,6 +122,53 @@ describe("resuming", () => {
 		expect((await mainSubjects(repo)).some((s) => s.includes("T-ghost"))).toBe(false);
 	});
 
+	it("discards it also when the session was killed in the middle of a git command, which left its lock", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		await go(repo, testConfig({ pipeline: ["scan", "validate", "plan", "consolidate"] }));
+		const store = latest(repo);
+
+		await ensureWorktree(repo, store.worktree, store.ref, store.loadMeta().base_sha);
+		await commitFile(store.worktree, "ghost.txt", "ghost", "[T-ghost] left by an interrupted run");
+		writeFile(store.worktree, "dirty.txt", "dirty");
+		const gitDir = await git(store.worktree, "rev-parse", "--absolute-git-dir");
+		writeFileSync(join(gitDir, "index.lock"), "");
+
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
+		expect(existsSync(`${repo}/ghost.txt`)).toBe(false);
+		expect(existsSync(`${repo}/dirty.txt`)).toBe(false);
+		expect((await mainSubjects(repo)).some((s) => s.includes("T-ghost"))).toBe(false);
+	});
+
+	it("does not tell the executor to fix an outage: the next attempt gets the tasks, not the error", async () => {
+		const fake = useFakeAgent({
+			fail: { Executor: { message: "API Error: 529 Overloaded", times: 1 } },
+		});
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const prompts = calls(fake, "Executor").map((call) => call.prompt);
+		expect(prompts).toHaveLength(2);
+		expect(prompts[1]).not.toContain("The previous attempt failed");
+		expect(prompts[1]).not.toContain("529");
+		expect(prompts[1]).toContain("Tasks to do, in this order");
+	});
+
+	it("says that the accepted work is missing when its ref was lost, although a worktree is still there", async () => {
+		useFakeAgent({ ...TWO_ISSUES, exec: { "Low thing": "never-commits" } });
+		const repo = await makeRepo();
+		expect(await go(repo, noMerge())).toBe(false); // one issue accepted, one failed
+		const store = latest(repo);
+		await ensureWorktree(repo, store.worktree, store.ref, store.loadMeta().base_sha);
+		await deleteRef(repo, store.ref);
+
+		expect(await go(repo, noMerge(), { resume: true })).toBe(false); // an answer, not a git error thrown
+		expect(store.loadTasks().find((t) => t.status === "failed")?.error).toContain(
+			"is missing although tasks were verified",
+		);
+		expect(store.loadMeta().status).toBe("failed");
+	});
+
 	it("does not redo an issue that was accepted but never recorded (a crash in between)", async () => {
 		const fake = useFakeAgent({});
 		const repo = await makeRepo();
@@ -195,6 +250,26 @@ describe("budget", () => {
 		expect(calls(fake, "Executor")).toHaveLength(1);
 		expect(calls(fake, "Truth Verifier")).toHaveLength(1);
 		expect(allStatus(repo, "merged")).toBe(true);
+	});
+
+	it("merges what was accepted when a resume finds the budget spent before it starts", async () => {
+		const fake = useFakeAgent({
+			...TWO_ISSUES,
+			cost: 0.01,
+			exec: { "Low thing": "never-commits" },
+		});
+		const repo = await makeRepo();
+		expect(await go(repo, noMerge())).toBe(false); // "Critical thing" is accepted, "Low thing" failed
+		const executorCalls = calls(fake, "Executor").length;
+
+		expect(await go(repo, testConfig({ budget: 0.01 }), { resume: true })).toBe(false);
+		expect(calls(fake, "Executor")).toHaveLength(executorCalls); // no money, no new call
+		expect((await mainSubjects(repo)).some((s) => s.includes("Critical thing part 1"))).toBe(true);
+		const byStatus = latest(repo)
+			.loadTasks()
+			.map((t) => t.status)
+			.sort();
+		expect(byStatus).toEqual(["failed", "failed", "merged", "merged"]);
 	});
 
 	it("still merges, and calls the run complete, when the budget ran out during the last step", async () => {
@@ -284,6 +359,26 @@ describe("merge: tested before it touches your branch", () => {
 		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
 		expect(await git(repo, "log", "--merges", "--oneline")).toBe(""); // built on the merged state
 		expect((await mainSubjects(repo)).length).toBe(5);
+	});
+});
+
+describe("a folder where the worktree should be", () => {
+	it("is not taken for the worktree: the merge leaves the user's branch and edits alone", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo(); // the tests keep their worktrees inside the repository
+		writeFile(repo, ".milhouse/config.ts", "export default {};\n");
+		await git(repo, "add", "-f", ".milhouse/config.ts");
+		await git(repo, "commit", "-q", "-m", "config");
+		expect(await go(repo, noMerge())).toBe(true);
+		const store = latest(repo);
+		expect(existsSync(store.worktree)).toBe(false);
+		mkdirSync(store.worktree, { recursive: true }); // a plain folder: git would work on the project here
+		writeFile(repo, ".milhouse/config.ts", "export default { budget: 1 };\n"); // not committed
+
+		expect(await go(repo, testConfig(), { only: "merge" })).toBe(true);
+		expect(await currentBranch(repo)).toBe("main");
+		expect(readFile(repo, ".milhouse/config.ts")).toContain("budget: 1");
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 });
 

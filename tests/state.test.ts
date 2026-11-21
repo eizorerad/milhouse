@@ -205,6 +205,24 @@ describe("RunStore", () => {
 				.sort(),
 		).toEqual([stopped.runId, fresh.runId].sort());
 	});
+
+	it("cleans old runs of any status when asked for all: a stopped one, one that never said how it ended", async () => {
+		const dir = tempDir();
+		const stopped = RunStore.create(dir, "stopped", START);
+		const crashed = RunStore.create(dir, "crashed", START); // still "running": the process was killed
+		const fresh = RunStore.create(dir, "fresh", START);
+		stopped.finish("stopped");
+		for (const store of [stopped, crashed]) {
+			const metaPath = join(dir, ".milhouse", "runs", store.runId, "meta.json");
+			const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+			meta.created_at = new Date(Date.now() - 40 * 86_400_000).toISOString();
+			writeFileSync(metaPath, JSON.stringify(meta));
+		}
+		expect((await RunStore.clean(dir, 30)).removed).toEqual([]);
+		const { removed } = await RunStore.clean(dir, 30, undefined, true);
+		expect(removed.sort()).toEqual([stopped.runId, crashed.runId].sort());
+		expect(RunStore.list(dir).map((r) => r.id)).toEqual([fresh.runId]);
+	});
 });
 
 describe("run ids", () => {

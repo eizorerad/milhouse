@@ -1,7 +1,7 @@
 /** Runs one phase: load the items, process them (in parallel where configured) with retries, record each result. */
 
 import { stepHarness, stepModel } from "./config.ts";
-import type { CostTracker } from "./cost.ts";
+import { type CostTracker, LIMIT_USED_UP } from "./cost.ts";
 import { EngineError, HARNESSES, runAgent } from "./engine.ts";
 import { section } from "./prompts.ts";
 import type { RunStore } from "./state.ts";
@@ -54,6 +54,9 @@ export class GiveUp extends Error {}
 /** Throw to leave an item untouched for now: nothing is recorded, --resume picks it up again. */
 export class Skip extends Error {}
 
+/** How much of an agent's answer the run's log keeps. */
+const ANSWER_LOG_CHARS = 4000;
+
 const retryDelayMs = (): number => Number(process.env.MILHOUSE_RETRY_DELAY_MS ?? 2000);
 const firstLine = (text: string): string => text.split("\n")[0].slice(0, 160);
 
@@ -63,20 +66,25 @@ function makeAsk(
 	store: RunStore,
 	config: Config,
 	cost: CostTracker,
-	workers: number,
+	/** How many calls of the phase can be running at once from now on. */
+	parallel: () => number,
 ): Ctx["ask"] {
 	return async (prompt, o = {}) => {
 		const step = o.step ?? phase;
 		const harness = stepHarness(config, step);
 		// Only a harness that reports dollars can be given an allowance.
-		const allowance = HARNESSES[harness].reportsCost ? cost.reserve(workers) : undefined;
+		const allowance = HARNESSES[harness].reportsCost ? cost.reserve(parallel()) : undefined;
 		try {
 			if (allowance !== undefined && allowance <= 0) {
-				throw new EngineError("the budget is used up", { fatal: true });
+				throw new EngineError(LIMIT_USED_UP.budget, { fatal: true });
+			}
+			// Tokens cannot be capped per call: all that can be done is not to start another one.
+			if (cost.tokensUsedUp()) {
+				throw new EngineError(LIMIT_USED_UP.tokens, { fatal: true });
 			}
 			// Read once: a call that starts with no time left would get no timer at all, or a negative one.
 			const remaining = cost.remainingMs();
-			if (remaining <= 0) throw new EngineError("the time limit is used up", { fatal: true });
+			if (remaining <= 0) throw new EngineError(LIMIT_USED_UP.time, { fatal: true });
 			// The step's own rules come last, after the role, the task and the global rules.
 			const stepRules = config.phases[step].rules.map((rule) => `- ${rule}`).join("\n");
 			const extra = section("Extra rules for this step", stepRules);
@@ -93,6 +101,16 @@ function makeAsk(
 			});
 			cost.add(step, result.costUsd, result.tokens);
 			log.debug(`${step}: ${harness} call cost $${result.costUsd.toFixed(4)}`);
+			// What the agent said last: of the executor's work nothing else tells why it did what it did.
+			store.logEvent({
+				event: "agent",
+				step,
+				harness,
+				...(HARNESSES[harness].reportsCost
+					? { cost_usd: result.costUsd }
+					: { tokens: result.tokens }),
+				answer: result.text.slice(0, ANSWER_LOG_CHARS),
+			});
 			return result.text;
 		} catch (err) {
 			if (err instanceof EngineError) cost.add(step, err.costUsd);
@@ -118,7 +136,9 @@ export async function runPhase<TItem, TValue>(
 	const workers = options.workers ?? 1;
 	const progress = new Progress(def.name, items.length);
 
-	const ask = makeAsk(def.name, store, config, cost, workers);
+	// The last items of a phase must not be left with a worker's share of the budget while nobody else spends.
+	let unfinished = items.length;
+	const ask = makeAsk(def.name, store, config, cost, () => Math.min(workers, unfinished));
 
 	let stopped: string | undefined; // set by a failure that every other item would hit as well
 
@@ -129,7 +149,7 @@ export async function runPhase<TItem, TValue>(
 			if (stopped) return { ok: false, error: stopped, skipped: true };
 			const limit = cost.limitReached();
 			if (limit) {
-				const used = limit === "time" ? "the time limit is used up" : "the budget is used up";
+				const used = LIMIT_USED_UP[limit];
 				const error = lastError ? `${lastError}\n(stopped: ${used})` : used;
 				return { ok: false, error, skipped: attempt === 0 };
 			}
@@ -167,6 +187,7 @@ export async function runPhase<TItem, TValue>(
 		progress.begin(label);
 		const outcome = await attempts(item, label);
 		if (!outcome.ok && outcome.systemic) stopped ??= outcome.error;
+		unfinished--;
 		if (outcome.ok || !outcome.skipped) await def.record(item, outcome, store);
 		progress.end(
 			label,

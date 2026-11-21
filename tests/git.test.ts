@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -35,6 +36,7 @@ import {
 	readFile,
 	tempDir,
 	unsetEnv,
+	waitFor,
 	writeFile,
 } from "./helpers.ts";
 
@@ -454,6 +456,45 @@ describe("the run worktree", () => {
 		await git(path, "add", "-A"); // works again
 		await clearIndexLock(path); // and clearing nothing is fine
 	});
+
+	it("resets a worktree in which a killed git left its lock", async () => {
+		const repo = await makeRepo();
+		const path = join(repo, ".milhouse", "work", "r1");
+		const base = await revParse(repo, "HEAD");
+		await ensureWorktree(repo, path, REF, base);
+		await commitFile(path, "ghost.txt", "ghost", "left by a killed session");
+		writeFileSync(join(await git(path, "rev-parse", "--absolute-git-dir"), "index.lock"), "");
+
+		await resetWorktree(path, REF);
+		expect(await revParse(path, "HEAD")).toBe(base);
+		expect(existsSync(join(path, "ghost.txt"))).toBe(false);
+	});
+
+	it("lets a git command remove its lock when milhouse is interrupted in the middle of it", async () => {
+		const repo = await makeRepo();
+		// A checkout that takes long: every file passes through a filter that sleeps.
+		writeFile(repo, ".gitattributes", "*.txt filter=slow\n");
+		await git(repo, "config", "filter.slow.smudge", "sleep 20; cat");
+		await git(repo, "checkout", "-q", "-b", "other");
+		await commitFile(repo, "big.txt", "content\n", "a file that is slow to check out");
+		await git(repo, "checkout", "-q", "main");
+
+		const script = join(tempDir(), "interrupted.ts");
+		writeFileSync(
+			script,
+			`import { git } from ${JSON.stringify(join(import.meta.dir, "../src/git.ts"))};
+void git(${JSON.stringify(repo)}, "checkout", "-q", "other");
+setTimeout(() => {}, 60_000); // until it is interrupted`,
+		);
+		const lock = join(repo, ".git", "index.lock");
+		const child = spawn("bun", [script], { stdio: "ignore" });
+		const exited = new Promise((resolve) => child.on("exit", resolve));
+		await waitFor(() => existsSync(lock)); // git is in the middle of the checkout
+		child.kill("SIGINT");
+		expect(await exited).toBe(130);
+		await waitFor(() => !existsSync(lock), 5_000);
+		expect(existsSync(lock)).toBe(false); // the user's next git command is not locked out
+	}, 30_000);
 
 	it("refuses to delete a worktree that git has locked", async () => {
 		const repo = await makeRepo();

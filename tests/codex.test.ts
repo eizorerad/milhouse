@@ -64,7 +64,22 @@ describe("the whole pipeline on Codex", () => {
 		const repo = await makeRepo();
 		expect(await go(repo, testConfig({ harness: "codex", budget: 0.001 }))).toBe(true);
 		expect(output.join("\n")).toContain("The budget cannot limit Codex");
+		expect(output.join("\n")).toContain("Set maxTokens");
 		expect(calls(fake, "Executor")).toHaveLength(1);
+	});
+
+	it("starts no new call once maxTokens is used up, and carries on when the limit is raised", async () => {
+		const fake = useFakeAgent({});
+		const repo = await makeRepo();
+		expect(await go(repo, testConfig({ harness: "codex", maxTokens: 1 }))).toBe(false);
+		expect(output.join("\n")).toContain("Token limit for Codex: 1");
+		expect(output.join("\n")).toContain('raise "maxTokens"');
+		expect(calls(fake, "Lead Investigator")).toHaveLength(1); // the call that used the tokens up
+		expect(calls(fake, "Issue Validator")).toHaveLength(0);
+		expect(latest(repo).loadMeta().status).toBe("stopped");
+
+		expect(await go(repo, testConfig({ harness: "codex" }), { resume: true })).toBe(true);
+		expect(allStatus(repo, "merged")).toBe(true);
 	});
 });
 

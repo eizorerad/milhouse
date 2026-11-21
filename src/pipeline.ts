@@ -2,7 +2,7 @@
 
 import { checkBase } from "./baseline.ts";
 import { agentSteps, describeAgents, projectChecksEnabled, stepHarness } from "./config.ts";
-import { CostTracker, formatCost, formatUsd } from "./cost.ts";
+import { CostTracker, formatCost, formatTokens, formatUsd } from "./cost.ts";
 import { HARNESSES } from "./engine.ts";
 import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
 import { acquireLock } from "./lock.ts";
@@ -104,9 +104,18 @@ function announce(store: RunStore, config: Config, todo: Phase[], cost: CostTrac
 			.map((step) => stepHarness(config, step))
 			.filter((name) => !HARNESSES[name].reportsCost),
 	);
-	if (config.budget > 0 && unpriced.size > 0) {
+	if (unpriced.size > 0) {
 		const names = [...unpriced].map((name) => HARNESSES[name].label).join(" and ");
-		log.warn(`The budget cannot limit ${names}: it reports tokens, not dollars.`);
+		const { input = 0, output = 0 } = cost.current.tokens ?? {};
+		if (config.maxTokens > 0) {
+			log.info(
+				`Token limit for ${names}: ${formatTokens(config.maxTokens)}, used so far ${formatTokens(input + output)}`,
+			);
+		} else if (config.budget > 0) {
+			log.warn(
+				`The budget cannot limit ${names}: it reports tokens, not dollars. Set maxTokens to limit it.`,
+			);
+		}
 	}
 	if (todo.includes("exec") && !projectChecksEnabled(config)) {
 		log.warn(
@@ -133,6 +142,17 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 	await preflight(workDir, wanted);
 
 	const release = acquireLock(workDir);
+	// A run that ends without saying how must not stay "running": that is the status a later command reads.
+	let opened: RunStore | undefined;
+	const settle = (status: "stopped" | "failed") => {
+		try {
+			if (opened?.loadMeta().status === "running") opened.finish(status);
+		} catch {
+			// The state cannot be read or written: there is nothing to put right here.
+		}
+	};
+	const interrupted = () => settle("stopped"); // Ctrl-C, SIGTERM, a closed terminal: the run can be resumed
+	process.once("exit", interrupted);
 	try {
 		const existing = await existingRun(workDir, opts);
 		const done = existing?.loadMeta().done ?? [];
@@ -148,11 +168,13 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 				branch: await currentBranch(workDir),
 				sha: await revParse(workDir, "HEAD"),
 			});
+		opened = store;
 		const cost = new CostTracker(
 			store.loadCost(),
 			config.budget,
 			(c) => store.saveCost(c),
 			config.maxMinutes * MINUTE,
+			config.maxTokens,
 		);
 
 		announce(store, config, todo, cost);
@@ -171,7 +193,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 
 		let failures = 0;
 		for (const phase of todo) {
-			if (phase !== "merge" && cost.exceeded()) break; // merging costs nothing
+			if (phase !== "merge" && cost.exceeded()) continue; // merging costs nothing: it still runs
 			store.startPhase(phase);
 			log.phase(phase);
 			const outcomes =
@@ -194,7 +216,11 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		const ok = await finish(store, config, cost, failures);
 		hintMerge(store);
 		return ok;
+	} catch (err) {
+		settle("failed"); // something broke that no retry handles
+		throw err;
 	} finally {
+		process.off("exit", interrupted);
 		release();
 	}
 }
@@ -222,7 +248,9 @@ async function finish(
 	const limitHint =
 		limit === "time"
 			? `The time limit of ${config.maxMinutes} minutes is used up: raise "maxMinutes" in .milhouse/config.ts, then run: milhouse --resume (every command gets the full time)`
-			: `The budget of ${formatUsd(config.budget)} is used up: raise "budget" in .milhouse/config.ts, then run: milhouse --resume`;
+			: limit === "tokens"
+				? `The token limit of ${formatTokens(config.maxTokens)} is used up: raise "maxTokens" in .milhouse/config.ts, then run: milhouse --resume`
+				: `The budget of ${formatUsd(config.budget)} is used up: raise "budget" in .milhouse/config.ts, then run: milhouse --resume`;
 	if (failures > 0) {
 		store.finish("failed");
 		log.error(

@@ -5,7 +5,6 @@
  * unchecked work, but a conflict or a failed check still leaves the branch untouched.
  */
 
-import { existsSync } from "node:fs";
 import { commandTimeoutMs, projectChecksEnabled } from "../config.ts";
 import { runProjectChecks } from "../gates.ts";
 import {
@@ -13,6 +12,7 @@ import {
 	currentBranch,
 	isAncestor,
 	isDirty,
+	isWorktree,
 	mergeInto,
 	publish,
 	refExists,
@@ -180,7 +180,7 @@ export async function mergePhase(
 	// Checkpoint first, then record: a crash in between must not lose the new starting point.
 	await acceptCommit(repo, store.ref, landed);
 	store.setBase(landed);
-	if (existsSync(store.worktree)) await resetWorktree(store.worktree, store.ref);
+	if (isWorktree(store.worktree)) await resetWorktree(store.worktree, store.ref);
 	store.updateTasks(
 		verified.map((t) => t.id),
 		{ status: "merged" },

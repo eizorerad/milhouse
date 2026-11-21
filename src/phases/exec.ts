@@ -7,7 +7,6 @@
  * builds on broken work and every issue is checked on top of everything accepted before it.
  */
 
-import { existsSync } from "node:fs";
 import { commandTimeoutMs } from "../config.ts";
 import { EngineError } from "../engine.ts";
 import {
@@ -28,21 +27,21 @@ import {
 	diffStat,
 	gitOrThrow,
 	isAncestor,
+	isWorktree,
 	parkWorktree,
 	resetWorktree,
+	resolveRef,
 	revParse,
 	touchedFiles,
 } from "../git.ts";
 import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
-import type { RunStore } from "../state.ts";
+import { type RunStore, parkBranch } from "../state.ts";
 import type { Config, Task } from "../types.ts";
 import { errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
 import { type IssueGroup, committedTaskIds, loadGroups, unmetDependencies } from "./exec-order.ts";
 import { REVIEW_SCHEMA, bullets, execPrompt, reviewPrompt } from "./exec-prompts.ts";
-
-export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
 
 /**
  * Marks a failure of the reviewer itself (not a verdict). It must not send the issue back to the executor:
@@ -50,7 +49,7 @@ export const parkBranch = (issueId: string): string => `mh-failed/${issueId}`;
  */
 const REVIEW_UNAVAILABLE = "The review could not be completed";
 
-/** The executor could not run at all (logged out, unknown model): nothing it did, nothing it can fix. */
+/** The call of the executor failed (an outage, a timeout, no login): nothing it did, nothing it can fix. */
 const AGENT_UNAVAILABLE = "The agent could not run";
 
 /** Failures that are not the executor's fault must not be fed back to it as feedback. */
@@ -222,7 +221,14 @@ async function startFromAccepted(
 		previous?.startsWith(REVIEW_UNAVAILABLE) &&
 		(await branchExists(store.workDir, parked)) &&
 		(await isAncestor(store.workDir, accepted, parked));
-	await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+	try {
+		await resetWorktree(store.worktree, pickUp ? parked : store.ref);
+	} catch (err) {
+		// Not another attempt: it would build on whatever is in the worktree now.
+		throw new GiveUp(
+			`setup failed: the worktree could not be returned to the accepted work: ${errorMessage(err)}`,
+		);
+	}
 	if (pickUp) {
 		// The attempt may need what the accepted work lacks (a new dependency): set up at its commit.
 		const failure = await prepareWorktree(store, config, { setupAgain: true });
@@ -247,12 +253,14 @@ async function implement(
 			tools: "all",
 		});
 	} catch (err) {
+		if (!(err instanceof EngineError)) throw err;
 		// The agent was killed or crashed, perhaps in the middle of a commit.
-		if (err instanceof EngineError) await clearIndexLock(work.dir);
-		if (err instanceof EngineError && err.systemic) {
-			throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, { systemic: true });
-		}
-		throw err;
+		await clearIndexLock(work.dir);
+		// An outage or a timeout is nothing the next attempt can fix: it must not be told to.
+		throw new EngineError(`${AGENT_UNAVAILABLE}: ${err.message}`, {
+			fatal: err.fatal,
+			systemic: err.systemic,
+		});
 	}
 }
 
@@ -303,13 +311,13 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 			await deleteBranch(store.workDir, parkBranch(group.issue.id)); // a stale parked attempt
 			return;
 		}
-		if (existsSync(store.worktree)) {
+		if (isWorktree(store.worktree)) {
 			try {
 				await parkWorktree(
 					store.workDir,
 					store.worktree,
 					parkBranch(group.issue.id),
-					await revParse(store.workDir, store.ref),
+					(await resolveRef(store.workDir, store.ref)) ?? undefined, // a lost ref is reported by the setup
 				);
 			} catch (err) {
 				// What is in the worktree is the only copy of the attempt: leave it alone, and stop everything.

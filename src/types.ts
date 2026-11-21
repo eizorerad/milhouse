@@ -38,6 +38,8 @@ export interface Config {
 	phases: Record<AgentStep, StepOptions>;
 	/** USD limit for one run. 0 = unlimited. */
 	budget: number;
+	/** Tokens (input and output) for the calls of a run that report no USD cost (Codex). 0 = unlimited. */
+	maxTokens: number;
 	/** Minutes that one command may run in all, whatever the agent. 0 = unlimited. */
 	maxMinutes: number;
 	project: { name: string; language: string; framework: string; description: string };
@@ -84,6 +86,8 @@ export interface Issue {
 	status: IssueStatus;
 	evidence: Evidence[];
 	corrected_description?: string;
+	/** The validator's one-sentence reason for the status. For the report: no prompt contains it. */
+	verdict_reason?: string;
 	scope_impact?: string;
 	strategy?: string;
 	/** Set once the issue has been planned, even if consolidate later removed all its tasks. */

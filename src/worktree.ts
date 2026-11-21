@@ -3,8 +3,15 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { commandTimeoutMs } from "./config.ts";
 import { runChecks } from "./gates.ts";
-import { deleteRef, ensureWorktree, isAncestor, removeWorktree, resolveRef } from "./git.ts";
-import type { RunStore } from "./state.ts";
+import {
+	deleteBranch,
+	deleteRef,
+	ensureWorktree,
+	isAncestor,
+	removeWorktree,
+	resolveRef,
+} from "./git.ts";
+import { type RunStore, parkBranch } from "./state.ts";
 import type { Config } from "./types.ts";
 
 /** Written only after setup succeeded, so a setup that was interrupted is run again. */
@@ -66,4 +73,25 @@ export async function discardWorktree(store: RunStore): Promise<void> {
 export async function cleanupRun(store: RunStore): Promise<void> {
 	await discardWorktree(store);
 	if (await isAncestor(store.workDir, store.ref, "HEAD")) await deleteRef(store.workDir, store.ref);
+}
+
+/**
+ * Everything a run left outside its own directory, for `--clean`: the worktree, the ref and the parked
+ * attempts. Throws when the ref holds accepted work that is not in the user's branch: the run's records are
+ * what `--merge` needs, so the run has to stay.
+ */
+export async function removeRun(store: RunStore): Promise<void> {
+	await discardWorktree(store);
+	const repo = store.workDir;
+	const tip = await resolveRef(repo, store.ref);
+	const accepted = store
+		.loadTasks()
+		.some((t) => t.status === "verified" || (t.sha !== undefined && t.status !== "merged"));
+	if (tip !== null && accepted && !(await isAncestor(repo, tip, "HEAD"))) {
+		throw new Error(
+			`it holds accepted work that was never merged. Merge it with: milhouse --merge --run-id ${store.runId} (or give it up with: git update-ref -d ${store.ref})`,
+		);
+	}
+	await deleteRef(repo, store.ref);
+	for (const issue of store.loadIssues()) await deleteBranch(repo, parkBranch(issue.id));
 }

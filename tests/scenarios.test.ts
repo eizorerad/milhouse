@@ -530,6 +530,7 @@ describe("what agents and checks do to the worktree", () => {
 		const store = latest(repo);
 		expect(existsSync(store.worktree)).toBe(true); // not removed, not reset: it is the only copy
 		expect(readdirSync(store.worktree).some((name) => name.startsWith("T-"))).toBe(true);
+		expect(store.loadMeta().status).toBe("failed"); // not "running": nothing runs any more
 	});
 
 	it("never lets a commit change .milhouse/, whose config is executed as code", async () => {

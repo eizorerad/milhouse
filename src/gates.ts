@@ -119,6 +119,8 @@ export async function runProjectChecks(
 
 const squash = (text: string): string => text.replace(/\s+/g, " ").trim();
 const LINE_SLACK = 5; // models miscount lines by a few
+/** A citation points at a place in a file: a range that covers the whole file would find any snippet. */
+export const MAX_CITED_LINES = 200;
 const ELLIPSIS = /^(\.{3}|…)$/;
 
 /** The evidence that holds up: file inside the repo, line range in the file, snippet found near it. */
@@ -130,7 +132,10 @@ export function verifyEvidence(repo: string, evidence: Evidence[]): Evidence[] {
 			if (!file.startsWith(root + sep)) return false;
 			const content = readFileSync(file, "utf-8").split("\n");
 			const { line_start: start, line_end: end } = item;
+			// Numbers: a harness that does not enforce the answer's schema may send "3", and "3" + 5 is "35".
+			if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
 			if (!(start >= 1 && end >= start && start <= content.length)) return false;
+			if (end - start >= MAX_CITED_LINES) return false;
 			const window = squash(
 				content.slice(Math.max(0, start - 1 - LINE_SLACK), end + LINE_SLACK).join(" "),
 			);

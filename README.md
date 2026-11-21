@@ -36,7 +36,7 @@ scan → validate → plan → consolidate → exec → merge
 
 | Gate (`gates.*`) | Blocks |
 |---|---|
-| `evidence` (validate) | issues whose cited file does not exist, or whose snippet is not found at the cited lines (give or take five) |
+| `evidence` (validate) | issues whose cited file does not exist, or whose snippet is not found at the cited lines (give or take five; a citation of more than 200 lines, or with line numbers that are not whole numbers, does not count) |
 | `placeholder` | new `TODO` / `FIXME` / "not implemented" stubs |
 | `diffHygiene` | trailing whitespace and conflict markers in added lines |
 | `baseline` | a run whose `commands.build` / `lint` / `test` already fail on the starting commit: it stops before scan spends anything, because it could not tell its own mistakes from what was broken before. If the failure is what the run should fix, set `gates.baseline: false`. The checks run in the worktree that exec uses next, so what they leave there (ignored by git) stays |
@@ -60,8 +60,9 @@ If no project check ran, the work waits in `refs/milhouse/<run-id>`. Adding a te
 - **exec runs the agent with permissions bypassed** (`--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex): the agent can run any command as you, inside the run's worktree (by default in `~/.cache/milhouse`, or in `$XDG_CACHE_HOME/milhouse` when that is an absolute path: outside your project, so that a command in it cannot find what is installed in your project's own directories. If you set `MILHOUSE_WORK_DIR`, choose a folder outside your project too, and keep it the same for the life of a run). Use Milhouse on repositories you trust, and in a container or VM for anything else. `neverTouch` is checked after every attempt: it detects violations, it cannot prevent them. `.milhouse/config.ts` is code and is executed too.
 - Your branch changes only in `merge`, and only with accepted work, by fast-forward: git never replaces a file of yours (untracked or ignored, a `.env` for example) - the merge stops instead and says why. Files that appear in your checkout during a run (an editor's, the OS's) never block its merge; before a run that includes exec, untracked files do stop it, because exec starts from the last commit and would not see them. The accepted tip lives in `refs/milhouse/<run-id>`, not in a branch, so an agent that runs `git switch` or `git branch -f` cannot move it.
 - Your git hooks run for the agents' commits (agents are told to use `--no-verify` if a commit-message rule rejects `[<task id>] <title>`); Milhouse's own commits skip them. `GIT_DIR` and friends inherited from a caller never reach agents or checks, and without a git identity commits use `milhouse <milhouse@localhost>`.
-- Claude's cost is its own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`. Codex reports tokens, not dollars: they are counted and shown, but `budget` cannot limit them. `maxMinutes` is a clock for one command, Codex included. It starts when the run begins, once the configuration is read (the check of the starting commit counts): no agent call outlasts it and no new one starts, while a check that has begun runs on to `commandTimeoutMinutes`.
-- Ctrl-C, SIGTERM and a closed terminal stop the agents too. After `kill -9` an agent may keep running: check `ps` before resuming.
+- Claude's cost is its own `total_cost_usd`. Each call is capped at what is left of `budget` (split between parallel agents) and no new work starts once it is spent. Raise the budget and `--resume`. Codex reports tokens, not dollars: they are counted and shown, but `budget` cannot limit them. `maxTokens` does: once a run has used that many (input and output together), no new call starts; a call that is running is not cut short. `maxMinutes` is a clock for one command, Codex included. It starts when the run begins, once the configuration is read (the check of the starting commit counts): no agent call outlasts it and no new one starts, while a check that has begun runs on to `commandTimeoutMinutes`.
+- Ctrl-C, SIGTERM and a closed terminal stop the agents too, and the run is recorded as stopped: `--resume` continues it. A git command of Milhouse's own that is running at that moment is asked to stop, not killed, so it removes its lock: your repository is not left with an `index.lock`. A lock that a killed agent left in the run's worktree is removed when the run goes on. After `kill -9` an agent may keep running: check `ps` before resuming.
+- An agent or a command that runs out of time is asked to stop (SIGTERM) and killed three seconds later, with everything it started: a test that started a container or a server has that long to remove it.
 - One Milhouse per checkout at a time (`.milhouse/lock`). A command that never stops printing cannot exhaust memory (only the last 32 MB are kept), and what an agent or a check leaves running in the background is stopped when it finishes (unless it detached itself from the process group).
 
 ## Harnesses
@@ -74,7 +75,7 @@ The `--harness` flag overrides even the per-step settings for that run.
 |---|---|---|
 | model | a full id pins a version, an alias follows the newest; default `sonnet` | the model of your Codex config, unless you name one |
 | read-only steps | `Read`/`Grep`/`Glob` only, no MCP servers, no repository settings | read-only sandbox; your Codex config, MCP servers and plugins apply |
-| cost | USD per call, `budget` caps it | tokens only |
+| cost | USD per call, `budget` caps it | tokens only, `maxTokens` limits a run |
 | answer format | enforced by `--json-schema` | asked for in the prompt, checked and retried |
 | extra flags (`harnessArgs`) | `claude: [...]` | `codex: ["-p", "profile"]`, `["--ignore-user-config"]`, ... |
 
@@ -89,6 +90,7 @@ export default {
   harness: "claude",                     // or "codex"; per step: phases.<step>.harness
   model: "",                             // "" = claude: sonnet, codex: your Codex config; per step: phases.<step>.model
   budget: 50,                            // USD per run, 0 = unlimited
+  maxTokens: 0,                          // tokens per run for calls that report no dollars (Codex), 0 = unlimited
   maxMinutes: 0,                         // the clock of one command, for every agent: no call outlasts it, no new one starts; 0 = unlimited
   commandTimeoutMinutes: 10,             // the longest one setup, build, lint or test command may run
   commands: { setup: "bun install", build: "", lint: "bunx biome check .", test: "bun test" },
@@ -99,7 +101,7 @@ export default {
 };
 ```
 
-`phases.<step>.timeoutMinutes` sets how long one agent call of a step may take (scan 15, exec 30, verify 10, the rest 5). `neverTouch` and `gates.ignore` patterns are written like `.gitignore` lines, without exceptions (`!` is an error): a name such as `.env*` or `secrets` matches a file or directory at any depth with everything below it (`cache/`: directories only), a pattern with a slash inside or in front (`migrations/**`, `/LICENSE`) starts at the repository root. Unknown keys and wrong types are errors, so a typo cannot silently disable a rule. `commands.setup` runs whenever the worktree is created (also after a failed issue); what it installs must be ignored by git (`node_modules`, `.venv`). The worktree holds the committed files only: submodules and ignored files such as `.env` are not in it, so let `setup` fetch what the checks need (for example `git submodule update --init --recursive`). The other commands run on every issue and must leave the files alone. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
+`phases.<step>.timeoutMinutes` sets how long one agent call of a step may take (scan 15, exec 30, verify 10, the rest 5). `neverTouch` and `gates.ignore` patterns are written like `.gitignore` lines, without exceptions (`!` is an error): a name such as `.env*` or `secrets` matches a file or directory at any depth with everything below it (`cache/`: directories only), a pattern with a slash inside or in front (`migrations/**`, `/LICENSE`) starts at the repository root. Unknown keys and wrong types are errors, and so is a pattern that would match no file (spaces around it, `./` in front, nothing but slashes), so a typo cannot silently disable a rule. `commands.setup` runs whenever the worktree is created (also after a failed issue); what it installs must be ignored by git (`node_modules`, `.venv`). The worktree holds the committed files only: submodules and ignored files such as `.env` are not in it, so let `setup` fetch what the checks need (for example `git submodule update --init --recursive`). The other commands run on every issue and must leave the files alone. Without `merge` the accepted work stays in `refs/milhouse/<run-id>`: inspect it with `git log HEAD..refs/milhouse/<run-id>`, merge it with `milhouse --merge`.
 
 ### One agent per step
 
@@ -137,9 +139,11 @@ milhouse --run                  same, without a scope
 milhouse --resume               continue the latest run (--run-id <id> for another)
 milhouse --scan | --validate | --plan | --consolidate | --exec | --merge
                                 run one phase (all but --scan continue the latest run)
-milhouse --report [--format md] run summary: issues, tasks, failures, cost
+milhouse --report [--format md|json]
+                                the run: every issue with its verdict, its tasks and their commits, failures, cost
 milhouse --list-runs            list runs
-milhouse --clean [--days 30]    delete finished runs
+milhouse --clean [--days 30] [--all]
+                                delete finished runs (--all: stopped and interrupted ones too)
 milhouse init                   create .milhouse/config.ts (also: --init)
   --scope <text>  --workers <n>  --harness <claude|codex>  --model <name>  --run-id <id>
   --allow-unchecked  -v  -V  -h
@@ -147,7 +151,9 @@ milhouse init                   create .milhouse/config.ts (also: --init)
 
 Unknown flags are an error; with no arguments you get the help. It works from any subdirectory. The exit code is 0 only if everything that was asked for succeeded.
 
-`--resume` skips finished phases and retries failed items, feeding the old failure back to the agent. A phase counts as finished only when everything before it did. A run continues only on the branch it started on. An issue that was interrupted mid-way starts again from the accepted state. If only the review failed (an outage, the budget), the finished work is kept on its parked branch and only the review is repeated, as long as no other issue was accepted in between.
+To look at the plan before anything is changed, stop before exec and read the report: `milhouse --scan "fix auth bugs"`, then `--validate`, `--plan`, `--consolidate` and `milhouse --report`; `milhouse --resume` goes on from there. A run keeps the scope it started with, so a command that continues one takes no text.
+
+`--resume` skips finished phases and retries failed items, feeding the old failure back to the agent (not an outage or a timeout of the agent's call: there is nothing in it to fix). `--run-id <id>` alone resumes that run. When the budget is already spent, a resume starts no agent but still merges what was accepted. A phase counts as finished only when everything before it did. A run continues only on the branch it started on. An issue that was interrupted mid-way starts again from the accepted state. If only the review failed (an outage, the budget), the finished work is kept on its parked branch and only the review is repeated, as long as no other issue was accepted in between.
 
 ## Run state
 
@@ -158,7 +164,9 @@ Unknown flags are an error; with no arguments you get the help. It works from an
 refs/milhouse/<run-id>       accepted work; mh-failed/<issue-id> holds failed attempts
 ```
 
-`events.jsonl` has one JSON object per line: every failed attempt with its reason, every verdict of the reviewer with its reason (approvals too), whether each issue was accepted or failed, and why a run stopped at its starting commit. Everything under `.milhouse/` except `config.ts` is ignored by git (`.milhouse/.gitignore`). `--clean` keeps accepted work that was never merged.
+`events.jsonl` has one JSON object per line: every failed attempt with its reason, every verdict of the reviewer with its reason (approvals too), whether each issue was accepted or failed, why a run stopped at its starting commit, and every agent call with its step, its cost and the start of its answer (the executor's own account of what it did, for example). Everything under `.milhouse/` except `config.ts` is ignored by git (`.milhouse/.gitignore`).
+
+`--clean` removes a finished run (completed or failed) that is older than `--days`, with its worktree, its ref and the `mh-failed/` branches of its issues. A run whose accepted work was never merged is kept, records included, so that `--merge --run-id <run-id>` still works; the message says how to give the work up instead. Stopped runs can be resumed and stay, as do runs that were killed before they could say how they ended: `--clean --all` takes those too. `--days 0` means whatever their age.
 
 ## Upgrading from 0.5.1
 

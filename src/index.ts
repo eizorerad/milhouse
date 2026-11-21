@@ -10,7 +10,7 @@ import { detectCommands } from "./detect.ts";
 import { repoRoot } from "./git.ts";
 import { acquireLock } from "./lock.ts";
 import { runPipeline } from "./pipeline.ts";
-import { formatReport, generateReport } from "./report.ts";
+import { REPORT_FORMATS, type ReportFormat, formatReport, generateReport } from "./report.ts";
 import { RunStore, STATE_DIR, ensureIgnoreFile } from "./state.ts";
 import {
 	type AgentStep,
@@ -22,7 +22,7 @@ import {
 } from "./types.ts";
 import { log, printBanner, setVerbose } from "./ui.ts";
 import { errorMessage } from "./util.ts";
-import { cleanupRun } from "./worktree.ts";
+import { removeRun } from "./worktree.ts";
 
 const HELP = `milhouse v${pkg.version} - correctness-first AI coding orchestrator (drives Claude Code or Codex)
 
@@ -32,9 +32,12 @@ Usage:
   milhouse --resume               Continue the latest run (--run-id <id> for another one)
   milhouse --scan|--validate|--plan|--consolidate|--exec|--merge
                                   Run one phase (all but --scan continue the latest run)
-  milhouse --report [--format md] Show a run report
+  milhouse --report [--format md|json]
+                                  Show a run report: issues, tasks, commits, cost
   milhouse --list-runs            List runs
-  milhouse --clean [--days 30]    Delete finished runs older than N days
+  milhouse --clean [--days 30] [--all]
+                                  Delete finished runs older than N days (--all: stopped and
+                                  interrupted ones too); unmerged accepted work is kept
   milhouse init                   Create .milhouse/config.ts without running agents (also: --init)
 
 Options:
@@ -42,7 +45,7 @@ Options:
   --workers <n>    Parallel agents for validate and plan
   --harness <name> Agent for every step: claude or codex
   --allow-unchecked  Run exec without a build, lint or test command (an agent alone reviews the work)
-  --model <name>   Model for every step (of the steps' harness)
+  --model <name>   Model for every step that runs on the global harness
   --run-id <id>    Pick the run for --resume, --report and single phases
   -v, --verbose    Debug output
   -V, --version    Print the version
@@ -60,6 +63,7 @@ const OPTIONS = {
 	report: flag,
 	"list-runs": flag,
 	clean: flag,
+	all: flag,
 	scan: flag,
 	validate: flag,
 	plan: flag,
@@ -81,10 +85,14 @@ const OPTIONS = {
 
 class UsageError extends Error {}
 
-function positiveInt(value: string | undefined, name: string): number | undefined {
+function positiveInt(value: string | undefined, name: string, min = 1): number | undefined {
 	if (value === undefined) return undefined;
 	const n = Number(value);
-	if (!Number.isInteger(n) || n < 1) throw new UsageError(`${name} must be a positive integer`);
+	if (value.trim() === "" || !Number.isInteger(n) || n < min) {
+		throw new UsageError(
+			min > 0 ? `${name} must be a positive integer` : `${name} must be an integer of 0 or more`,
+		);
+	}
 	return n;
 }
 
@@ -94,6 +102,14 @@ function parseHarness(value: string | undefined): HarnessName | undefined {
 		throw new UsageError(`--harness must be one of: ${HARNESS_NAMES.join(", ")}`);
 	}
 	return value as HarnessName;
+}
+
+function parseFormat(value: string | undefined): ReportFormat {
+	const format = value ?? "terminal";
+	if (!(REPORT_FORMATS as readonly string[]).includes(format)) {
+		throw new UsageError(`--format must be one of: ${REPORT_FORMATS.join(", ")}`);
+	}
+	return format as ReportFormat;
 }
 
 /** --workers as a config override: it only affects the steps that run in parallel. */
@@ -160,19 +176,20 @@ function listRuns(workDir: string): void {
 		console.log(`${run.id}  ${run.status.padEnd(9)} ${run.phase.padEnd(12)} ${run.scope ?? "-"}`);
 }
 
-/** Removes old finished runs. Returns the exit code: 1 when a run had to be kept. */
-async function cleanRuns(workDir: string, days: string | undefined): Promise<number> {
+/** Removes old finished runs (`all`: whatever their status). Returns the exit code: 1 when a run had to be kept. */
+async function cleanRuns(workDir: string, days: string | undefined, all: boolean): Promise<number> {
 	if (!existsSync(join(workDir, STATE_DIR, "runs"))) {
 		console.log("Nothing to clean.");
 		return 0;
 	}
 	// Under the lock: a milhouse that resumes one of these runs must not find it half removed.
 	const release = acquireLock(workDir);
-	// cleanupRun first: the records go only once nothing of the run is left. Unmerged work is kept.
+	// removeRun first: the records go only once nothing of the run is left. A run with unmerged work is kept.
 	const { removed, kept } = await RunStore.clean(
 		workDir,
-		positiveInt(days, "--days") ?? 30,
-		cleanupRun,
+		positiveInt(days, "--days", 0) ?? 30,
+		removeRun,
+		all,
 	).finally(release);
 	console.log(
 		removed.length > 0
@@ -197,11 +214,10 @@ async function main(argv: string[]): Promise<number> {
 	if (phaseFlags.length > 1) throw new UsageError(`Pick one phase, got: ${phaseFlags.join(", ")}`);
 	const only: Phase | undefined = phaseFlags[0];
 	const scope = values.scope ?? (positionals.join(" ").trim() || undefined);
-	const runMode = values.run || values.resume || only;
+	const runMode = values.run || values.resume || only || values["run-id"] !== undefined;
 	const management = values.report || values["list-runs"] || values.clean;
 	// Reserve the single word "init" only in place of an implicit run. For example, --scan init still has a scope.
-	const implicit =
-		!runMode && !management && values["run-id"] === undefined && values.scope === undefined;
+	const implicit = !runMode && !management && values.scope === undefined;
 	const init = values.init || (implicit && positionals.length === 1 && positionals[0] === "init");
 
 	if (values.version) {
@@ -223,11 +239,19 @@ async function main(argv: string[]): Promise<number> {
 		return 0;
 	}
 	if (values.report) {
-		const format = values.format === "md" ? "md" : "terminal";
+		const format = parseFormat(values.format);
 		console.log(formatReport(generateReport(selectRun(workDir, values["run-id"])), format));
 		return 0;
 	}
-	if (values.clean) return cleanRuns(workDir, values.days);
+	if (values.clean) return cleanRuns(workDir, values.days, values.all);
+
+	// A run keeps the scope it started with: text given to a command that continues one would be lost unnoticed.
+	const continuing = values.resume || values["run-id"] !== undefined || (only && only !== "scan");
+	if (continuing && scope !== undefined) {
+		throw new UsageError(
+			"A run keeps the scope it started with. Leave the text out to continue it, or start a new run without --resume and --run-id.",
+		);
+	}
 
 	const workers = positiveInt(values.workers, "--workers");
 	const harness = parseHarness(values.harness);

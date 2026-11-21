@@ -107,6 +107,20 @@ describe("loadConfig", () => {
 		expect(error.message).toContain('gates.ignore: "!a.md" cannot start with "!"');
 	});
 
+	it("rejects a pattern that would match nothing, which git would have read differently", async () => {
+		for (const pattern of ["./migrations/**", "migrations/** ", " .env*", "/", ""]) {
+			const dir = projectWith(`export default { neverTouch: [${JSON.stringify(pattern)}] };`);
+			const error = await loadConfig(dir).catch((e) => e);
+			expect(error.message).toContain(`neverTouch: "${pattern}" matches no file`);
+		}
+		const ignore = projectWith('export default { gates: { ignore: ["./docs"] } };');
+		expect((await loadConfig(ignore).catch((e) => e)).message).toContain("gates.ignore");
+		const fine = projectWith(
+			'export default { neverTouch: ["migrations/**", "/LICENSE", ".env*"] };',
+		);
+		expect((await loadConfig(fine)).neverTouch).toHaveLength(3);
+	});
+
 	it("takes a time limit for the whole command, and rejects a negative one", async () => {
 		expect((await loadConfig(projectWith("export default { maxMinutes: 90 };"))).maxMinutes).toBe(
 			90,
@@ -116,6 +130,17 @@ describe("loadConfig", () => {
 			(e) => e,
 		);
 		expect(error.message).toContain("maxMinutes must be a finite number >= 0");
+	});
+
+	it("takes a token limit for the calls that report no dollars, and rejects a negative one", async () => {
+		expect((await loadConfig(projectWith("export default { maxTokens: 2e6 };"))).maxTokens).toBe(
+			2_000_000,
+		);
+		expect((await loadConfig(projectWith())).maxTokens).toBe(0); // no limit
+		const error = await loadConfig(projectWith("export default { maxTokens: -1 };")).catch(
+			(e) => e,
+		);
+		expect(error.message).toContain("maxTokens must be a finite number >= 0");
 	});
 
 	it("accepts the two harnesses, globally and per step, with their extra arguments", async () => {

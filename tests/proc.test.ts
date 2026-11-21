@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { run } from "../src/proc.ts";
 import { alive, cleanupTempDirs, goneWithin, tempDir } from "./helpers.ts";
 
@@ -76,4 +78,25 @@ describe("run", () => {
 		expect(out.timedOut).toBe(true);
 		expect(await goneWithin(Number(out.stdout.trim()), 2_000)).toBe(true);
 	});
+
+	it("asks a command that ran out of time to stop, so it can remove what it started", async () => {
+		const dir = tempDir();
+		const out = await run("trap 'echo stopped > cleaned; exit 0' TERM; sleep 30 & wait", [], {
+			cwd: dir,
+			shell: true,
+			timeoutMs: 300,
+		});
+		expect(out.timedOut).toBe(true); // also when it then exits with 0
+		expect(existsSync(join(dir, "cleaned"))).toBe(true);
+	});
+
+	it("kills a command that does not stop when asked, with everything it started", async () => {
+		const out = await run("trap '' TERM; sleep 30 & echo $!; wait", [], {
+			cwd: tempDir(),
+			shell: true,
+			timeoutMs: 300,
+		});
+		expect(out.timedOut).toBe(true);
+		expect(await goneWithin(Number(out.stdout.trim()), 2_000)).toBe(true);
+	}, 15_000);
 });

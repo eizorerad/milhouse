@@ -411,6 +411,31 @@ describe("the log of a run", () => {
 		expect(failed.error).toContain("The reviewer rejected the work");
 		expect(events.some((e) => e.event === "accepted")).toBe(true);
 	});
+
+	it("keeps what every agent answered, with its step and its cost", async () => {
+		useFakeAgent({ cost: 0.02 });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(true);
+		const events = readFile(repo, `.milhouse/runs/${latest(repo).runId}/events.jsonl`)
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line))
+			.filter((e) => e.event === "agent");
+		expect(events.map((e) => e.step)).toEqual([
+			"scan",
+			"validate",
+			"plan",
+			"consolidate",
+			"exec",
+			"verify",
+		]);
+		for (const event of events) {
+			expect(event.harness).toBe("claude");
+			expect(event.cost_usd).toBe(0.02);
+			expect(typeof event.answer).toBe("string");
+		}
+		expect(events[0].answer).toContain("Add greeting"); // the scanner's findings
+	});
 });
 
 describe("the log of a run that fails", () => {
