@@ -4,7 +4,15 @@ import { checkBase } from "./baseline.ts";
 import { agentSteps, describeAgents, projectChecksEnabled, stepHarness } from "./config.ts";
 import { CostTracker, formatCost, formatTokens, formatUsd } from "./cost.ts";
 import { HARNESSES } from "./engine.ts";
-import { currentBranch, detectIdentity, hasCommits, isDirty, isRepo, revParse } from "./git.ts";
+import {
+	currentBranch,
+	detectIdentity,
+	hasCommits,
+	isAncestor,
+	isDirty,
+	isRepo,
+	revParse,
+} from "./git.ts";
 import { acquireLock } from "./lock.ts";
 import { consolidatePhase } from "./phases/consolidate.ts";
 import { execPhase } from "./phases/exec.ts";
@@ -17,7 +25,7 @@ import { RunStore } from "./state.ts";
 import { type Config, PHASES, type Phase } from "./types.ts";
 import { log } from "./ui.ts";
 import { MINUTE, errorMessage } from "./util.ts";
-import { cleanupRun } from "./worktree.ts";
+import { cleanupRun, readWorktree, releaseWorktree } from "./worktree.ts";
 
 export interface PipelineOptions {
 	/** Repository to work in. Defaults to the current directory. */
@@ -73,22 +81,28 @@ async function existingRun(workDir: string, opts: PipelineOptions): Promise<RunS
 	if (!continuing) return undefined;
 	const store = opts.runId ? RunStore.byId(workDir, opts.runId) : RunStore.latest(workDir);
 	if (!store) throw new Error("There is no run to continue. Start one with: milhouse --run");
-	// Every phase reads the code of the branch the run started on, and merge writes to it.
-	const { base_branch: baseBranch } = store.loadMeta();
-	if (baseBranch && (await currentBranch(workDir)) !== baseBranch) {
+	// Merge writes to the branch the run started on. A run that began on a detached HEAD (a CI checkout)
+	// takes the branch it is continued on, if that branch holds its starting commit.
+	const { base_branch: baseBranch, base_sha: base } = store.loadMeta();
+	const branch = await currentBranch(workDir);
+	if (!baseBranch && branch && (await isAncestor(workDir, base, "HEAD"))) store.setBranch(branch);
+	if (baseBranch && branch !== baseBranch) {
 		throw new Error(`This run started on "${baseBranch}". Check it out first, then continue.`);
 	}
 	return store;
 }
 
-/** Scan, validate and plan read the checkout; exec starts from the last commit and would not have its untracked files. */
-async function refuseUntracked(workDir: string, todo: Phase[]): Promise<void> {
-	const readsCheckout = todo.some((p) => p === "scan" || p === "validate" || p === "plan");
-	if (todo.includes("exec") && readsCheckout && (await isDirty(workDir, { untracked: true }))) {
+/** A run works on the last commit, in a checkout of its own: what is not committed when it starts is not part of it. */
+async function uncommittedAtStart(workDir: string, todo: Phase[]): Promise<void> {
+	if (!(await isDirty(workDir, { untracked: true }))) return;
+	if (todo.includes("exec")) {
 		throw new Error(
-			"The working tree has untracked files, which exec would not see (it starts from the last commit). Commit them, add them to .gitignore, or stash them: git stash -u",
+			"The working tree has untracked files, which the run would not see (it works on the last commit). Commit them, add them to .gitignore, or stash them: git stash -u",
 		);
 	}
+	log.warn(
+		"Uncommitted changes and untracked files are not part of this run: it works on the last commit.",
+	);
 }
 
 /** What this command is about to do and spend, and what to watch out for. */
@@ -160,7 +174,7 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 		const todo =
 			opts.only || !opts.resume ? wanted : wanted.filter((phase) => !done.includes(phase));
 		refuseUnchecked(config, todo);
-		await refuseUntracked(workDir, todo);
+		if (!existing) await uncommittedAtStart(workDir, todo);
 		requireAgents(config, todo); // before a new run leaves anything behind
 		const store =
 			existing ??
@@ -196,8 +210,11 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
 			if (phase !== "merge" && cost.exceeded()) continue; // merging costs nothing: it still runs
 			store.startPhase(phase);
 			log.phase(phase);
-			const outcomes =
-				phase === "merge"
+			// The steps that only read need the run's checkout too; exec prepares it for every issue itself.
+			const unreadable = phase === "merge" || phase === "exec" ? null : await readWorktree(store);
+			const outcomes = unreadable
+				? [{ ok: false as const, error: unreadable }]
+				: phase === "merge"
 					? await mergePhase(store, config, opts.only === "merge")
 					: await RUNNERS[phase](store, config, cost);
 			if (outcomes.every((o) => o.ok) && upstreamDone(store, config, phase))
@@ -243,6 +260,13 @@ async function finish(
 	failures: number,
 ): Promise<boolean> {
 	const complete = config.pipeline.every((phase) => store.loadMeta().done.includes(phase));
+	try {
+		// Nothing is left to do with the worktree of a finished run (unmerged work stays in the ref); an
+		// unfinished one keeps it only for the setup that was run in it.
+		await (complete ? cleanupRun(store) : releaseWorktree(store));
+	} catch (err) {
+		log.warn(`The run's worktree was not removed: ${errorMessage(err)}`);
+	}
 	const spent = formatCost(cost.current);
 	const limit = cost.limitReached(); // once: the clock goes on while this function runs
 	const limitHint =
@@ -260,11 +284,6 @@ async function finish(
 		return false;
 	}
 	if (complete) {
-		try {
-			await cleanupRun(store); // nothing is left to do with the worktree; unmerged work stays in the ref
-		} catch (err) {
-			log.warn(`The run's worktree was not removed: ${errorMessage(err)}`);
-		}
 		store.finish("completed");
 		log.success(`Pipeline complete: ${spent}. Summary: milhouse --report`);
 		return true;

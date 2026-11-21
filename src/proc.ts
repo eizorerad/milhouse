@@ -14,6 +14,8 @@ export interface RunOptions {
 	reap?: boolean;
 	/** Bytes of each output stream to keep (the end of it). */
 	maxOutput?: number;
+	/** The signal that asks the process to stop when its time is up, before it is killed. Default SIGTERM. */
+	timeoutSignal?: NodeJS.Signals;
 	/**
 	 * The signal the process gets when milhouse itself exits or is interrupted. By default it is killed at
 	 * once. Git is asked to stop instead (SIGTERM): it then removes its lock files, also in the user's checkout.
@@ -134,7 +136,7 @@ export function run(file: string, args: string[], opts: RunOptions): Promise<Run
 		const timer = opts.timeoutMs
 			? setTimeout(() => {
 					timedOut = true;
-					killTree(child.pid, "SIGTERM"); // ask first: a test runner removes what it started
+					killTree(child.pid, opts.timeoutSignal ?? "SIGTERM"); // ask first: a test runner removes what it started
 					escalate = setTimeout(() => {
 						killTree(child.pid);
 						// If a stray process keeps the pipes open, do not wait for it forever.

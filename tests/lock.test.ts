@@ -27,7 +27,10 @@ describe("acquireLock", () => {
 	it("never shows a lock without its owner, and leaves no temporary file behind", () => {
 		const dir = tempDir();
 		const release = acquireLock(dir);
-		expect(readFileSync(join(dir, ".milhouse", "lock"), "utf-8")).toBe(String(process.pid));
+		// The pid and when that process started: the pid alone may be another process after a crash.
+		expect(readFileSync(join(dir, ".milhouse", "lock"), "utf-8")).toMatch(
+			new RegExp(`^${process.pid} \\w{3} \\w{3} +\\d+ [\\d:]+ \\d{4}$`),
+		);
 		expect(readdirSync(join(dir, ".milhouse"))).toEqual(["lock"]);
 		release();
 		expect(readdirSync(join(dir, ".milhouse"))).toEqual([]);
@@ -38,6 +41,20 @@ describe("acquireLock", () => {
 		mkdirSync(join(dir, ".milhouse"));
 		writeFileSync(join(dir, ".milhouse", "lock"), "2147483646");
 		acquireLock(dir)();
+	});
+
+	it("takes over a lock whose pid now belongs to another process, and names the file when it is held", () => {
+		const dir = tempDir();
+		mkdirSync(join(dir, ".milhouse"));
+		const path = join(dir, ".milhouse", "lock");
+		// This very pid is alive, but the lock was written by a process that started long ago.
+		writeFileSync(path, `${process.pid} Thu Jan  1 00:00:00 1970`);
+		const release = acquireLock(dir);
+		expect(() => acquireLock(dir)).toThrow(`If it is not, delete ${path}`);
+		release();
+
+		writeFileSync(path, String(process.pid)); // a lock of 0.5.2 holds the pid only: it is judged by that
+		expect(() => acquireLock(dir)).toThrow(/Another milhouse is running/);
 	});
 
 	it("treats an unreadable lock file as stale (never signals pid 0)", () => {

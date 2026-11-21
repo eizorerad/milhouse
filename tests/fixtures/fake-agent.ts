@@ -40,6 +40,7 @@ interface Scenario {
 		| "own-branch"
 		| "reset-history"
 		| "milhouse-config"
+		| "milhouse-capitals"
 		| "nested-milhouse"
 		| "milhouse-link"
 	>;
@@ -63,6 +64,8 @@ interface Scenario {
 	proseOnce?: string[];
 	/** Sleep this many ms before answering, per role. */
 	sleep?: Record<string, number>;
+	/** Answer an interrupt (SIGINT) as Claude Code does: with a failed result that says what the call cost so far. */
+	interrupted?: number;
 }
 
 const scenario: Scenario = JSON.parse(process.env.FAKE_AGENT_SCENARIO ?? "{}");
@@ -171,6 +174,8 @@ function fail(
 	process.exit(1);
 }
 
+const costSoFar = scenario.interrupted;
+if (costSoFar !== undefined && !codex) process.on("SIGINT", () => fail("aborted", costSoFar));
 const sleepMs = scenario.sleep?.[role];
 if (sleepMs) await Bun.sleep(sleepMs);
 if (scenario.garbage?.includes(role)) {
@@ -286,12 +291,10 @@ switch (role) {
 			mkdirSync(join(process.cwd(), "examples", ".milhouse"), { recursive: true });
 			writeFileSync(join(process.cwd(), "examples", ".milhouse", "note.txt"), "an example\n");
 		}
-		if (mode === "milhouse-config") {
-			mkdirSync(join(process.cwd(), ".milhouse"), { recursive: true });
-			writeFileSync(
-				join(process.cwd(), ".milhouse", "config.ts"),
-				"export default { gates: {} };\n",
-			);
+		if (mode === "milhouse-config" || mode === "milhouse-capitals") {
+			const folder = mode === "milhouse-config" ? ".milhouse" : ".MILHOUSE";
+			mkdirSync(join(process.cwd(), folder), { recursive: true });
+			writeFileSync(join(process.cwd(), folder, "config.ts"), "export default { gates: {} };\n");
 		}
 		if (mode === "own-branch") git("checkout", "-q", "-b", `agent-work-${process.pid}`);
 		if (mode === "reset-history") {

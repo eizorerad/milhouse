@@ -74,6 +74,12 @@ async function readyToMerge(store: RunStore, verified: Task[]): Promise<Ready | 
 	if (!(await refExists(repo, store.ref))) {
 		return { error: `The accepted work of this run (${store.ref}) is missing.` };
 	}
+	if (!baseBranch) {
+		return {
+			error:
+				"This run started on a detached HEAD. Check out a branch that contains its starting commit, then run: milhouse --merge",
+		};
+	}
 	if ((await currentBranch(repo)) !== baseBranch) {
 		return {
 			error: `Check out "${baseBranch}" (the run started there), then run: milhouse --merge`,

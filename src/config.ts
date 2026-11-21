@@ -49,7 +49,7 @@ export const DEFAULTS: Config = {
 		dod: true,
 		baseline: true,
 		// Where trailing spaces mean something, and a TODO in the text is not unfinished code.
-		ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
+		ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff", "*.snap"],
 	},
 };
 
@@ -349,7 +349,7 @@ export default {
   rules: [],
   neverTouch: [], // e.g. ["migrations/**", ".env*"]
 
-  // evidence: validate cites real code. placeholder: no new TODO/FIXME/stubs. diffHygiene: no trailing whitespace or conflict markers.
+  // evidence: validate cites real code. placeholder: no new TODO/FIXME notes or todo!() stubs. diffHygiene: no trailing whitespace or conflict markers.
   // dod: commands pass and the reviewer confirms the acceptance criteria.
   // baseline: the commands must pass on the starting commit before the run spends anything; otherwise every issue fails for what was broken already.
   // ignore: files that placeholder and diffHygiene skip (patterns as in .gitignore, without "!"; a list here replaces the default).
@@ -359,7 +359,7 @@ export default {
     placeholder: true,
     dod: true,
     baseline: true,
-    ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff"],
+    ignore: ["*.md", "*.tsv", "*.csv", "*.patch", "*.diff", "*.snap"],
   },
 };
 `;

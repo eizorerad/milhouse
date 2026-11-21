@@ -36,7 +36,7 @@ import {
 } from "../git.ts";
 import { feedback, prompt } from "../prompts.ts";
 import { type Ctx, GiveUp, type PhaseDef, Skip } from "../runner.ts";
-import { type RunStore, parkBranch } from "../state.ts";
+import { type RunStore, STATE_DIR, parkBranch } from "../state.ts";
 import type { Config, Task } from "../types.ts";
 import { errorMessage, parseJson, tail } from "../util.ts";
 import { discardWorktree, prepareWorktree } from "../worktree.ts";
@@ -90,9 +90,13 @@ async function checkWork(work: Work, group: IssueGroup, config: Config): Promise
 		return `Uncommitted changes are left in the worktree. Commit them under the right task or remove them:\n${tail(status, 800)}`;
 	}
 
-	// .milhouse/ is milhouse's own: its config is executed as code, so no commit may change it.
-	const protectedPaths = [...config.neverTouch, "/.milhouse"]; // also a file or a link of that name
-	const forbidden = forbiddenFiles(await touchedFiles(work.dir, work.accepted), protectedPaths);
+	// .milhouse/ is milhouse's own: its config is executed as code, so no commit may change it. Also a file
+	// or a link of that name, and in any spelling: on a Mac `.MILHOUSE/config.ts` is the same file.
+	const ownState = (file: string): boolean => file.split("/")[0].toLowerCase() === STATE_DIR;
+	const touched = await touchedFiles(work.dir, work.accepted);
+	const forbidden = [
+		...new Set([...forbiddenFiles(touched, config.neverTouch), ...touched.filter(ownState)]),
+	];
 	if (forbidden.length > 0) {
 		return `Commits touched files that must never be modified: ${forbidden.join(", ")}. Rewrite the history so that no commit after ${tip} touches them (for example git reset --soft ${tip}, restore those files, then commit per task again).`;
 	}
@@ -161,7 +165,6 @@ async function review(ctx: Ctx, group: IssueGroup, work: Work): Promise<void> {
 		try {
 			answer = await ctx.ask(prompt(text, feedback(failure)), {
 				step: "verify",
-				cwd: work.dir,
 				schema: REVIEW_SCHEMA,
 				maxTurns: 25,
 			});
@@ -248,10 +251,7 @@ async function implement(
 	const problem = blamesAgent(previous) ? previous : undefined;
 	if (done.length === group.tasks.length && problem === undefined) return;
 	try {
-		await ctx.ask(execPrompt(group, done, ctx.config, problem), {
-			cwd: work.dir,
-			tools: "all",
-		});
+		await ctx.ask(execPrompt(group, done, ctx.config, problem), { tools: "all" });
 	} catch (err) {
 		if (!(err instanceof EngineError)) throw err;
 		// The agent was killed or crashed, perhaps in the middle of a commit.
@@ -298,7 +298,7 @@ export const execPhase: PhaseDef<IssueGroup, string> = {
 		store.updateTasks(
 			group.tasks.map((t) => t.id),
 			{ sha: checked, checks_passed: work.passedChecks.length > 0 },
-		); // before the ref moves: a crash in between is recognised on resume
+		); // before the ref moves: a crash right after the move is recognised on resume (before it, the issue is done again)
 		await acceptCommit(store.workDir, store.ref, checked);
 		return checked;
 	},

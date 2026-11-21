@@ -7,7 +7,14 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: # the two systems the README names
+          - { os: ubuntu-latest, name: check } # "check" is the name that the protection of main requires
+          - { os: macos-latest, name: check-macos }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2

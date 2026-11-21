@@ -20,7 +20,6 @@ export type Outcome<T> =
 export interface AskOptions {
 	/** Step to charge and whose model to use. Defaults to the running phase. */
 	step?: AgentStep;
-	cwd?: string;
 	schema?: object;
 	maxTurns?: number;
 	/** Default "read". */
@@ -90,7 +89,7 @@ function makeAsk(
 			const extra = section("Extra rules for this step", stepRules);
 			const result = await runAgent(extra ? `${prompt}\n\n${extra}` : prompt, {
 				harness,
-				cwd: o.cwd ?? store.workDir,
+				cwd: store.worktree, // never the user's checkout: the run reads and writes its own
 				model: stepModel(config, step),
 				schema: o.schema,
 				maxTurns: o.maxTurns,

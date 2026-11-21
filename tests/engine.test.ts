@@ -101,6 +101,19 @@ describe("runAgent with Claude", () => {
 		expect(Date.now() - started).toBeLessThan(15_000);
 	});
 
+	it("counts what an agent that ran out of time says it cost, not an estimate", async () => {
+		useFakeAgent({ sleep: { Planner: 30_000 }, interrupted: 0.37 });
+		const error = await runAgent("## Role: Planner", {
+			...base,
+			cwd: tempDir(),
+			timeoutMs: 1_000,
+			maxBudgetUsd: 50,
+		}).catch((e) => e);
+		expect(error.message).toContain("timed out");
+		expect(error.message).not.toContain("estimate");
+		expect(error.costUsd).toBe(0.37);
+	});
+
 	it("fails clearly when the binary does not exist", async () => {
 		process.env.MILHOUSE_CLAUDE = "/nonexistent/claude";
 		const error = await runAgent("hi", { ...base, cwd: tempDir() }).catch((e) => e);

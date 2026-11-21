@@ -89,15 +89,34 @@ describe("forbiddenFiles", () => {
 });
 
 describe("findPlaceholders", () => {
-	it("flags TODO/FIXME and stubs in added lines", () => {
+	it("flags the notes and stubs that say themselves that work is left", () => {
 		const found = findPlaceholders([
 			{ file: "a.ts", text: "// TODO: handle errors" },
-			{ file: "b.ts", text: "throw new Error('not implemented')" },
-			{ file: "c.py", text: "raise NotImplementedError" },
-			{ file: "d.rs", text: "todo!()" },
-			{ file: "e.ts", text: "const x = 1; // FIXME" },
+			{ file: "b.py", text: "    x = compute()  # FIXME wrong for negative numbers" },
+			{ file: "c.rs", text: "todo!()" },
+			{ file: "d.rs", text: '    unimplemented!("later")' },
+			{ file: "e.ts", text: "const x = 1; /* TODO(leo) */" },
+			{ file: "f.ts", text: " * FIXME: describe the return value" },
+			{ file: "g.sql", text: "-- TODO add the index" },
+			{ file: "h.txt", text: "TODO: finish this later" },
 		]);
-		expect(found.map((f) => f.split(":")[0])).toEqual(["a.ts", "b.ts", "c.py", "d.rs", "e.ts"]);
+		expect(found.map((f) => f.split(":")[0])).toEqual(
+			["a.ts", "b.py", "c.rs", "d.rs", "e.ts", "f.ts", "g.sql", "h.txt"], // every one of them
+		);
+	});
+
+	it("leaves alone what only looks like one: a wrong gate costs every retry of an issue", () => {
+		expect(
+			findPlaceholders([
+				{ file: "a.ts", text: "enum Status { TODO, DONE }" },
+				{ file: "b.ts", text: "  TODO," },
+				{ file: "c.py", text: '    TODO = "todo"' },
+				{ file: "d.ts", text: 'res.status(501).send("Not Implemented");' },
+				{ file: "e.py", text: "        raise NotImplementedError  # abstract method" },
+				{ file: "f.ts", text: 'expect(render(item)).toBe("TODO: a");' },
+				{ file: "g.ts", text: "if (status === Status.TODO) return;" },
+			]),
+		).toEqual([]);
 	});
 
 	it("leaves ordinary code and words alone", () => {

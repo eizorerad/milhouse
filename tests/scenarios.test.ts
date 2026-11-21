@@ -249,16 +249,35 @@ describe("what exec may build on", () => {
 		writeFile(repo, "wip.ts", "export const wip = 1;\n");
 		await expect(go(repo)).rejects.toThrow(/untracked/);
 		expect(fake.journal()).toHaveLength(0);
-		expect(await go(repo, testConfig({ pipeline: ["scan"] }))).toBe(true); // reading is fine
+		// Only reading: it starts, and says that it reads the last commit.
+		expect(await go(repo, testConfig({ pipeline: ["scan"] }))).toBe(true);
+		expect(output.join("\n")).toContain("not part of this run");
 	});
 
-	it("also refuses when an earlier phase reads the checkout again: a resumed run that still has to validate", async () => {
-		const fake = useFakeAgent({});
+	it("works on the commit it started from, whatever the checkout has become since", async () => {
+		const later = {
+			file: "later.ts",
+			line_start: 1,
+			line_end: 1,
+			snippet: "export const later = 1;",
+		};
+		const fake = useFakeAgent({ evidence: { "Add greeting": [later] } });
 		const repo = await makeRepo();
 		expect(await go(repo, testConfig({ pipeline: ["scan"] }))).toBe(true);
-		writeFile(repo, "wip.ts", "export const wip = 1;\n");
-		await expect(go(repo, testConfig(), { resume: true })).rejects.toThrow(/untracked/);
-		expect(calls(fake, "Issue Validator")).toHaveLength(0);
+		await commitFile(repo, "later.ts", "export const later = 1;\n", "made after the run began");
+		writeFile(repo, "wip.ts", "export const wip = 1;\n"); // nothing of the run: it does not stop it
+
+		// The validator cites a file that the run's commit does not have: the checkout is not what counts.
+		expect(await go(repo, testConfig(), { resume: true })).toBe(false);
+		const store = latest(repo);
+		expect(calls(fake, "Issue Validator").every((call) => call.cwd === store.worktree)).toBe(true);
+		expect(store.loadIssues()[0].status).toBe("UNVALIDATED");
+
+		setScenario({});
+		expect(await go(repo, testConfig(), { resume: true })).toBe(true);
+		expect(await git(repo, "log", "--merges", "--oneline")).not.toBe(""); // the branch had moved on
+		expect(readFile(repo, "later.ts")).toContain("later");
+		expect(readFile(repo, "wip.ts")).toContain("wip");
 	});
 
 	it("will not carry on from a ref that moved ahead of every commit that was accepted", async () => {
@@ -539,6 +558,15 @@ describe("what agents and checks do to the worktree", () => {
 		expect(await go(repo)).toBe(false);
 		expect(calls(fake, "Executor")[1].prompt).toContain(".milhouse/config.ts");
 		expect(allStatus(repo, "failed")).toBe(true);
+	});
+
+	it("never lets a commit change it under another spelling: on a Mac .MILHOUSE is the same folder", async () => {
+		const fake = useFakeAgent({ exec: { "Add greeting": "milhouse-capitals" } });
+		const repo = await makeRepo();
+		expect(await go(repo)).toBe(false);
+		expect(calls(fake, "Executor")[1].prompt).toContain(
+			"must never be modified: .MILHOUSE/config.ts",
+		);
 	});
 
 	it("never lets a commit make .milhouse a link either: its config would be run from elsewhere", async () => {

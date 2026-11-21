@@ -69,6 +69,9 @@ describe("arguments", () => {
 		const two = await milhouse(dir, "--scan", "--exec");
 		expect(two.code).toBe(2);
 		expect(two.stderr).toContain("Pick one phase");
+		const both = await milhouse(dir, "--report", "--clean");
+		expect(both.code).toBe(2);
+		expect(both.stderr).toContain("Pick one of: --report, --clean");
 	});
 
 	it("rejects an invalid config with a clear message", async () => {

@@ -80,7 +80,7 @@ export const validatePhase: PhaseDef<Issue, Verdict> = {
 
 		const cited = Array.isArray(verdict.evidence) ? verdict.evidence : [];
 		if (!ctx.config.gates.evidence) return { ...verdict, evidence: cited };
-		const evidence = verifyEvidence(ctx.store.workDir, cited);
+		const evidence = verifyEvidence(ctx.store.worktree, cited);
 		if (evidence.length === 0) {
 			throw new Error(
 				`Validate: none of the cited evidence holds up (file missing, lines out of range, a range of more than ${MAX_CITED_LINES} lines or snippet not found). Cite real files, line ranges and verbatim snippets.`,

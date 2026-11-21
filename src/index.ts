@@ -215,7 +215,11 @@ async function main(argv: string[]): Promise<number> {
 	const only: Phase | undefined = phaseFlags[0];
 	const scope = values.scope ?? (positionals.join(" ").trim() || undefined);
 	const runMode = values.run || values.resume || only || values["run-id"] !== undefined;
-	const management = values.report || values["list-runs"] || values.clean;
+	const asked = (["report", "list-runs", "clean"] as const).filter((name) => values[name]);
+	if (asked.length > 1) {
+		throw new UsageError(`Pick one of: ${asked.map((name) => `--${name}`).join(", ")}`);
+	}
+	const management = asked.length > 0;
 	// Reserve the single word "init" only in place of an implicit run. For example, --scan init still has a scope.
 	const implicit = !runMode && !management && values.scope === undefined;
 	const init = values.init || (implicit && positionals.length === 1 && positionals[0] === "init");

@@ -93,7 +93,7 @@ describe("resuming", () => {
 		const head = await revParse(repo, "HEAD");
 		expect(store.loadMeta().base_sha).toBe(head); // the run now starts from the merged state
 		expect(await revParse(repo, store.ref)).toBe(head);
-		expect(await revParse(store.worktree, "HEAD")).toBe(head);
+		expect(existsSync(store.worktree)).toBe(false); // no setup was run in it: it is made again in a moment
 		expect((await mainSubjects(repo)).length).toBe(3); // initial + the low issue's two tasks
 
 		setScenario(TWO_ISSUES);
@@ -139,6 +139,22 @@ describe("resuming", () => {
 		expect(existsSync(`${repo}/ghost.txt`)).toBe(false);
 		expect(existsSync(`${repo}/dirty.txt`)).toBe(false);
 		expect((await mainSubjects(repo)).some((s) => s.includes("T-ghost"))).toBe(false);
+	});
+
+	it("keeps the git settings that the caller passes through the environment, for the agents too", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		Object.assign(process.env, {
+			GIT_CONFIG_COUNT: "1",
+			GIT_CONFIG_KEY_0: "user.name",
+			GIT_CONFIG_VALUE_0: "From The Caller",
+		});
+		try {
+			expect(await go(repo)).toBe(true);
+			expect(await git(repo, "log", "-1", "--format=%an")).toBe("From The Caller"); // the agent's commit
+		} finally {
+			for (const name of ["COUNT", "KEY_0", "VALUE_0"]) delete process.env[`GIT_CONFIG_${name}`];
+		}
 	});
 
 	it("does not tell the executor to fix an outage: the next attempt gets the tasks, not the error", async () => {

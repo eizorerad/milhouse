@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync } from "node:fs";
 import { CostTracker, emptyCost } from "../src/cost.ts";
 import { EngineError } from "../src/engine.ts";
 import { GiveUp, type Outcome, type PhaseDef, Skip, runPhase } from "../src/runner.ts";
@@ -26,7 +27,9 @@ interface Setup {
 }
 
 function setup(configOverrides: Record<string, unknown> = {}, budget = 0): Setup {
+	process.env.MILHOUSE_WORK_DIR = tempDir(); // agents run in the run's worktree: here, an empty folder
 	const store = RunStore.create(tempDir(), undefined, BASE);
+	mkdirSync(store.worktree, { recursive: true });
 	const config = testConfig({ budget, ...configOverrides });
 	return { store, config, cost: new CostTracker(emptyCost(), budget, () => {}) };
 }

@@ -131,6 +131,11 @@ export class RunStore {
 		writeJson(this.file("meta.json"), { ...this.loadMeta(), ...patch, updated_at: now() });
 	}
 
+	/** A run that began on a detached HEAD belongs to the branch it is continued on. */
+	setBranch(branch: string): void {
+		this.patchMeta({ base_branch: branch });
+	}
+
 	/** After a merge the run continues from the merged state. */
 	setBase(sha: string): void {
 		this.patchMeta({ base_sha: sha });

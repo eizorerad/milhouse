@@ -47,13 +47,22 @@ export function findWhitespaceProblems(added: AddedLine[]): string[] {
 	});
 }
 
-const FIXME_MARKER = /\b(?:TODO|FIXME)\b/;
-const STUB_MARKER = /not implemented|unimplemented!\(|todo!\(|NotImplementedError/i;
+/**
+ * A note that work is left: TODO or FIXME where a comment begins, or where a line begins when a colon or a
+ * name in brackets follows. The word alone is none (an enum value, a string, `todoList`).
+ */
+const NOTE = /(?:\/\/|\/\*|^\s*\*|#|--|<!--)\s*(?:TODO|FIXME)\b|^\s*(?:TODO|FIXME)\s*[:(]/;
+/** Rust's own words for code that is not written yet. */
+const STUB = /\b(?:todo|unimplemented)!\(/;
 
-/** Added lines that leave work undone: "file: line". */
+/**
+ * Added lines that say themselves that work is left: "file: line". Only what cannot be meant otherwise: a
+ * gate that is wrong costs every retry of an issue. Whether a `throw new Error("not implemented")` is a stub
+ * or an answer to a caller is for the reviewer to say.
+ */
 export function findPlaceholders(added: AddedLine[]): string[] {
 	return added
-		.filter(({ text }) => FIXME_MARKER.test(text) || STUB_MARKER.test(text))
+		.filter(({ text }) => NOTE.test(text) || STUB.test(text))
 		.map(({ file, text }) => `${file}: ${text.trim()}`);
 }
 
