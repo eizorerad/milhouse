@@ -149,7 +149,7 @@ async function publishWork(
 	const published = await publish(repo, baseBranch, head, result.sha);
 	if (!published.ok) {
 		return {
-			error: `git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched. If a file you changed stands in the way, commit or stash it; then run: milhouse --merge`,
+			error: `git refused to move "${baseBranch}" to the merged work: ${published.error}\nNothing was merged and nothing of yours was touched. If a file you changed stands in the way, commit or stash it; if the branch is in the middle of a rebase or a bisect, finish that; then run: milhouse --merge`,
 		};
 	}
 	return result;
