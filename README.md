@@ -4,17 +4,16 @@ Correctness-first orchestrator for [Claude Code](https://claude.com/claude-code)
 
 ## Quick start
 
-Needs [Bun](https://bun.sh) ≥ 1.1, `git`, and the `claude` or the `codex` CLI, logged in. Works on macOS and Linux; Windows is not supported.
+Needs `git` and the `claude` or the `codex` CLI, logged in. Works on macOS and Linux (x64 and arm64); Windows is not supported.
 
 ```bash
-git clone --depth 1 https://github.com/eizorerad/milhouse.git && cd milhouse
-bun install && bun link        # puts `milhouse` on your PATH
+curl -fsSL https://raw.githubusercontent.com/eizorerad/milhouse/main/install.sh | sh
 
 cd your-project                # a git repo, on the branch you want changed
 milhouse "fix authentication bugs"
 ```
 
-Without Bun, from release 0.5.4 on: `curl -fsSL https://raw.githubusercontent.com/eizorerad/milhouse/main/install.sh | sh` puts the binary of the latest release into `~/.local/bin` (`MILHOUSE_INSTALL_DIR` names another folder). Either way, `milhouse upgrade` brings the installation to the latest version: a binary is replaced by the one of the latest release, a git checkout is pulled.
+The installer puts the binary of the latest release into `~/.local/bin` (`MILHOUSE_INSTALL_DIR` names another folder). From source instead, with [Bun](https://bun.sh) ≥ 1.1: `git clone --depth 1 https://github.com/eizorerad/milhouse.git && cd milhouse && bun install && bun link`. Either way, `milhouse upgrade` brings the installation to the latest version: a binary is replaced by the one of the latest release, a git checkout is pulled.
 
 That is all there is to set up. The first run writes `.milhouse/config.ts` with the setup, build, lint and test commands your project defines and goes on with them; the folder is kept out of git, so there is nothing to commit. Work that you have not committed is no obstacle, and neither is switching to another branch while a run is under way: the run works on your last commit in a checkout of its own, leaves your files alone and merges into the branch it started on. Every command ends with the report of its run: the issues, their tasks and commits, the cost.
 
@@ -177,8 +176,9 @@ A new run tidies up before it starts: finished runs older than 30 days go as wit
 
 ## Upgrading from 0.5.3
 
+- To get it: in a git checkout, `git pull && bun install` this once; from 0.5.4 on, `milhouse upgrade` does it.
 - Nothing has to be prepared: the first run writes the config (with the agent that is installed), `.milhouse/` is ignored by git through its own ignore file, and uncommitted changes stop neither a run nor its merge.
-- A run no longer needs its branch checked out: it can be resumed and merged from any branch, and from a detached HEAD it does its work and leaves the merge for a branch. The merge moves the branch the run started on.
+- A run no longer needs its branch checked out: it can be resumed and merged from any branch, and from a detached HEAD it does its work and leaves the merge for a branch. The merge moves the branch the run started on, unless that branch is in the middle of a rebase or a bisect: then it waits for `milhouse --merge`.
 - A failed agent call waits longer before it is tried again (about 15 seconds, a minute, four) instead of a few seconds.
 - A new run removes finished runs older than 30 days and the worktrees of earlier runs.
 - Every command ends with the report of its run.
