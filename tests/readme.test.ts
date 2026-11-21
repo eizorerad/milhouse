@@ -1,4 +1,4 @@
-/** The README's examples are what people paste: they have to load, and a run has to do what they say. */
+/** The documentation's examples are what people paste: they have to load, and a run has to do what they say. */
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -24,18 +24,18 @@ afterEach(() => {
 	resetFakeAgentEnv();
 });
 
-const README = readFileSync(resolve(import.meta.dir, "../README.md"), "utf-8");
+const DOC = readFileSync(resolve(import.meta.dir, "../docs/configuration.md"), "utf-8");
 
 /** The first ```ts block after `heading`. */
 function exampleAfter(heading: string): string {
-	const from = README.indexOf(heading);
+	const from = DOC.indexOf(heading);
 	expect(from).toBeGreaterThan(-1);
-	const open = README.indexOf("```ts\n", from) + "```ts\n".length;
-	return README.slice(open, README.indexOf("\n```", open));
+	const open = DOC.indexOf("```ts\n", from) + "```ts\n".length;
+	return DOC.slice(open, DOC.indexOf("\n```", open));
 }
 
-describe('the README example "One agent per step"', () => {
-	const example = () => exampleAfter("### One agent per step");
+describe('the documented example "One agent per step"', () => {
+	const example = () => exampleAfter("## One agent per step");
 
 	it("loads, and every step has the agent, model and parallelism its comment promises", async () => {
 		const config = await loadConfig(projectWith(example()));
