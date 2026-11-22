@@ -2,6 +2,13 @@
 
 What changes for you between versions, newest first. `milhouse upgrade` brings an installation to the latest one.
 
+## From 0.5.4
+
+- To get it: `milhouse upgrade`.
+- The check of the starting commit, which can take a minute or two before the first agent starts, shows what it does: a line for each of `setup`, `build`, `lint` and `test` with the time it took, and on a terminal a spinner with the time so far.
+- Releases carry each binary twice, gzipped (`milhouse-<system>-<arch>.gz`, about half the size) and plain. `install.sh` and `milhouse upgrade` fetch the gzipped one and fall back to the plain one; 0.5.4 and earlier fetch the plain one, which stays attached.
+- Nothing in your config or your runs changes.
+
 ## From 0.5.3
 
 - To get it: in a git checkout, `git pull && bun install` this once; from 0.5.4 on, `milhouse upgrade` does it.
