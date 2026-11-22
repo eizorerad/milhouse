@@ -28,21 +28,29 @@ afterEach(() => {
 	cleanupTempDirs();
 });
 
-/** Serve `binary` as the latest release for this computer; without one, there is no release. */
-function release(binary?: string): void {
+/**
+ * Serve the latest release for this computer: `binary` as the plain file (releases up to 0.5.4 have only this)
+ * and `packed` as the gzipped file beside it. Without either, there is no release.
+ */
+function release(binary?: string, packed?: Uint8Array): void {
 	const path = `/latest/download/${assetName()}`;
 	server = Bun.serve({
 		port: 0,
-		fetch: (request) =>
-			binary !== undefined && new URL(request.url).pathname === path
-				? new Response(binary)
-				: new Response("not found", { status: 404 }),
+		fetch: (request) => {
+			const asked = new URL(request.url).pathname;
+			if (binary !== undefined && asked === path) return new Response(binary);
+			if (packed !== undefined && asked === `${path}.gz`) return new Response(packed);
+			return new Response("not found", { status: 404 });
+		},
 	});
 	process.env.MILHOUSE_RELEASES = `http://localhost:${server.port}`;
 }
 
 /** A stand-in for a milhouse binary: all that an upgrade asks of one is its version. */
 const binary = (version: string): string => `#!/bin/sh\necho ${version}\n`;
+
+const gzipped = (text: string): Uint8Array => Bun.gzipSync(text);
+const NOT_GZIP = new TextEncoder().encode("this is not gzip");
 
 /** An installed binary of this version, in a folder of its own. */
 function installed(): string {
@@ -59,6 +67,37 @@ describe("upgrading a binary", () => {
 		expect(readFileSync(path, "utf-8")).toBe(binary("9.9.9"));
 		expect((await run(path, ["--version"], { cwd: tempDir() })).stdout.trim()).toBe("9.9.9");
 		expect(output.join("\n")).toContain(`Milhouse ${pkg.version} -> 9.9.9`);
+		expect(existsSync(`${path}.new`)).toBe(false);
+	});
+
+	it("takes the gzipped file of a release when there is one, and unpacks it", async () => {
+		const path = installed();
+		release(undefined, gzipped(binary("9.9.9"))); // a release without a plain file
+		await upgradeBinary(path);
+		expect(readFileSync(path, "utf-8")).toBe(binary("9.9.9"));
+		expect(output.join("\n")).toContain(`Milhouse ${pkg.version} -> 9.9.9`);
+		expect(existsSync(`${path}.new`)).toBe(false);
+	});
+
+	it("prefers the gzipped file to the plain one attached beside it", async () => {
+		const path = installed();
+		release(binary("1.1.1"), gzipped(binary("9.9.9")));
+		await upgradeBinary(path);
+		expect(readFileSync(path, "utf-8")).toBe(binary("9.9.9"));
+	});
+
+	it("falls back to the plain file when the gzipped one is damaged", async () => {
+		const path = installed();
+		release(binary("9.9.9"), NOT_GZIP);
+		await upgradeBinary(path);
+		expect(readFileSync(path, "utf-8")).toBe(binary("9.9.9"));
+	});
+
+	it("keeps the one in use when the gzipped file is damaged and there is no plain one", async () => {
+		const path = installed();
+		release(undefined, NOT_GZIP);
+		await expect(upgradeBinary(path)).rejects.toThrow(/Could not fetch/);
+		expect(readFileSync(path, "utf-8")).toBe("the one in use\n");
 		expect(existsSync(`${path}.new`)).toBe(false);
 	});
 
@@ -133,12 +172,45 @@ describe("the installer", () => {
 		);
 	});
 
-	it("installs nothing when there is no release to fetch", async () => {
+	it("takes the gzipped file of the release when there is one", async () => {
+		release(undefined, gzipped(binary("9.9.9")));
+		const dir = join(tempDir(), "bin");
+		const result = await install(dir);
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain(`Installed milhouse 9.9.9 in ${dir}`);
+		expect(existsSync(join(dir, "milhouse.new"))).toBe(false);
+	});
+
+	it("prefers the gzipped file to the plain one attached beside it", async () => {
+		release(binary("1.1.1"), gzipped(binary("9.9.9")));
+		const dir = join(tempDir(), "bin");
+		expect((await install(dir)).stdout).toContain("Installed milhouse 9.9.9");
+	});
+
+	it("falls back to the plain file when the gzipped one is damaged", async () => {
+		release(binary("9.9.9"), NOT_GZIP);
+		const dir = join(tempDir(), "bin");
+		const result = await install(dir);
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("Installed milhouse 9.9.9");
+	});
+
+	it("installs nothing, and leaves nothing behind, when there is no release to fetch", async () => {
 		release();
 		const dir = join(tempDir(), "bin");
 		const result = await install(dir);
 		expect(result.code).toBe(1);
 		expect(result.stderr).toContain("the latest release has no binary");
 		expect(existsSync(join(dir, "milhouse"))).toBe(false);
+		expect(existsSync(join(dir, "milhouse.new"))).toBe(false);
+	});
+
+	it("installs nothing when the only file of the release is damaged", async () => {
+		release(undefined, NOT_GZIP);
+		const dir = join(tempDir(), "bin");
+		const result = await install(dir);
+		expect(result.code).toBe(1);
+		expect(existsSync(join(dir, "milhouse"))).toBe(false);
+		expect(existsSync(join(dir, "milhouse.new"))).toBe(false);
 	});
 });

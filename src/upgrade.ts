@@ -41,14 +41,32 @@ export async function upgradeCheckout(dir: string): Promise<void> {
 	log.success(`Milhouse ${before.version} (${before.commit}) -> ${version()} (${commit})`);
 }
 
+/**
+ * The binary of the latest release for this computer. A release carries it twice: gzipped (about half of the
+ * download) and plain, which is all that releases up to 0.5.4 have and what their `milhouse upgrade` fetches.
+ * The gzipped file is taken when it can be fetched and unpacked, otherwise the plain one.
+ */
+async function fetchBinary(): Promise<Uint8Array> {
+	const url = `${releases()}/latest/download/${assetName()}`;
+	const packed = await fetch(`${url}.gz`);
+	if (packed.ok) {
+		try {
+			return Bun.gunzipSync(new Uint8Array(await packed.arrayBuffer()));
+		} catch {
+			// not a gzip file: the plain one is next to it
+		}
+	}
+	const plain = await fetch(url);
+	if (!plain.ok) throw new Error(`Could not fetch ${url} (HTTP ${plain.status}).`);
+	return new Uint8Array(await plain.arrayBuffer());
+}
+
 /** A binary from a release: fetch the latest, see that it starts, then put it in the place of this one. */
 export async function upgradeBinary(path: string): Promise<void> {
-	const url = `${releases()}/latest/download/${assetName()}`;
-	const response = await fetch(url);
-	if (!response.ok) throw new Error(`Could not fetch ${url} (HTTP ${response.status}).`);
+	const binary = await fetchBinary();
 	const fresh = `${path}.new`; // beside it: a rename within one folder replaces the file in one step
 	try {
-		await Bun.write(fresh, response);
+		await Bun.write(fresh, binary);
 		chmodSync(fresh, 0o755);
 		const version = await output(fresh, ["--version"], dirname(path));
 		if (version === pkg.version) {
