@@ -23,7 +23,7 @@ dir=${MILHOUSE_INSTALL_DIR:-$HOME/.local/bin}
 mkdir -p "$dir"
 url=$releases/latest/download/milhouse-$os-$arch
 # Under another name first: a download that breaks off must not leave half a milhouse behind.
-# The gzipped file is about half of the download; the plain one beside it is all that releases up to 0.5.4 have.
+# The gzipped file is less than half of the download; the plain one beside it is all that releases up to 0.5.4 have.
 if ! { curl -fsSL "$url.gz" | gunzip >"$dir/milhouse.new"; } 2>/dev/null; then
 	curl -fsSL "$url" -o "$dir/milhouse.new" || {
 		rm -f "$dir/milhouse.new"

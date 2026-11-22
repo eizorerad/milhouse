@@ -1,6 +1,6 @@
 /** `milhouse upgrade` and the installer, against releases served from this machine and an origin on disk. */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import pkg from "../package.json";
@@ -50,7 +50,13 @@ function release(binary?: string, packed?: Uint8Array): void {
 const binary = (version: string): string => `#!/bin/sh\necho ${version}\n`;
 
 const gzipped = (text: string): Uint8Array => Bun.gzipSync(text);
-const NOT_GZIP = new TextEncoder().encode("this is not gzip");
+
+/** Gzipped files that do not unpack: not gzip at all, and a download that broke off. */
+const DAMAGED = [
+	["is not gzip", new TextEncoder().encode("this is not gzip")],
+	["is cut off", gzipped(binary("9.9.9")).subarray(0, 20)],
+] as const;
+const NOT_GZIP = DAMAGED[0][1];
 
 /** An installed binary of this version, in a folder of its own. */
 function installed(): string {
@@ -86,10 +92,29 @@ describe("upgrading a binary", () => {
 		expect(readFileSync(path, "utf-8")).toBe(binary("9.9.9"));
 	});
 
-	it("falls back to the plain file when the gzipped one is damaged", async () => {
+	for (const [what, damaged] of DAMAGED) {
+		it(`falls back to the plain file when the gzipped one ${what}`, async () => {
+			const path = installed();
+			release(binary("9.9.9"), damaged);
+			await upgradeBinary(path);
+			expect(readFileSync(path, "utf-8")).toBe(binary("9.9.9"));
+		});
+	}
+
+	it("falls back to the plain file when the gzipped one cannot be fetched at all", async () => {
 		const path = installed();
-		release(binary("9.9.9"), NOT_GZIP);
-		await upgradeBinary(path);
+		release(binary("9.9.9"));
+		const realFetch = globalThis.fetch;
+		const gzippedCutsOff = (input: string, init?: RequestInit) =>
+			input.endsWith(".gz")
+				? Promise.reject(new TypeError("The socket connection was closed unexpectedly"))
+				: realFetch(input, init);
+		const broken = spyOn(globalThis, "fetch").mockImplementation(gzippedCutsOff as typeof fetch);
+		try {
+			await upgradeBinary(path);
+		} finally {
+			broken.mockRestore();
+		}
 		expect(readFileSync(path, "utf-8")).toBe(binary("9.9.9"));
 	});
 
@@ -187,13 +212,15 @@ describe("the installer", () => {
 		expect((await install(dir)).stdout).toContain("Installed milhouse 9.9.9");
 	});
 
-	it("falls back to the plain file when the gzipped one is damaged", async () => {
-		release(binary("9.9.9"), NOT_GZIP);
-		const dir = join(tempDir(), "bin");
-		const result = await install(dir);
-		expect(result.code).toBe(0);
-		expect(result.stdout).toContain("Installed milhouse 9.9.9");
-	});
+	for (const [what, damaged] of DAMAGED) {
+		it(`falls back to the plain file when the gzipped one ${what}`, async () => {
+			release(binary("9.9.9"), damaged);
+			const dir = join(tempDir(), "bin");
+			const result = await install(dir);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("Installed milhouse 9.9.9");
+		});
+	}
 
 	it("installs nothing, and leaves nothing behind, when there is no release to fetch", async () => {
 		release();

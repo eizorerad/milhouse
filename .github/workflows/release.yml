@@ -36,12 +36,10 @@ jobs:
         run: codesign --force --sign - dist/milhouse-darwin-*
       - name: Compress
         # After the signature, so that the unpacked file is the signed one. The plain files stay beside the
-        # gzipped ones: releases up to 0.5.4 fetch only those.
+        # gzipped ones: `milhouse upgrade` in 0.5.4 and earlier fetches only those.
         run: |
-          for file in dist/milhouse-*; do
-            gzip -9 -k "$file"
-            gunzip -c "$file.gz" | cmp - "$file"
-          done
+          gzip -k dist/milhouse-*
+          for file in dist/milhouse-*.gz; do gunzip -c "$file" | cmp - "${file%.gz}"; done
       - name: Start the one for this machine
         run: ./dist/milhouse-${{ matrix.system }}-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/') --version
       - name: Attach to the release

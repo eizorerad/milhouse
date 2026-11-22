@@ -42,19 +42,17 @@ export async function upgradeCheckout(dir: string): Promise<void> {
 }
 
 /**
- * The binary of the latest release for this computer. A release carries it twice: gzipped (about half of the
+ * The binary of the latest release for this computer. A release carries it twice: gzipped (less than half of the
  * download) and plain, which is all that releases up to 0.5.4 have and what their `milhouse upgrade` fetches.
  * The gzipped file is taken when it can be fetched and unpacked, otherwise the plain one.
  */
 async function fetchBinary(): Promise<Uint8Array> {
 	const url = `${releases()}/latest/download/${assetName()}`;
-	const packed = await fetch(`${url}.gz`);
-	if (packed.ok) {
-		try {
-			return Bun.gunzipSync(new Uint8Array(await packed.arrayBuffer()));
-		} catch {
-			// not a gzip file: the plain one is next to it
-		}
+	try {
+		const packed = await fetch(`${url}.gz`);
+		if (packed.ok) return Bun.gunzipSync(new Uint8Array(await packed.arrayBuffer()));
+	} catch {
+		// not fetched whole, or not gzip: the plain file is beside it
 	}
 	const plain = await fetch(url);
 	if (!plain.ok) throw new Error(`Could not fetch ${url} (HTTP ${plain.status}).`);
