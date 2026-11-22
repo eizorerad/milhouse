@@ -5,6 +5,7 @@ import { resolve, sep } from "node:path";
 import { type AddedLine, gitOrThrow, revParse, withoutGitRouting } from "./git.ts";
 import { run } from "./proc.ts";
 import type { Config, Evidence } from "./types.ts";
+import { type Progress, formatDuration } from "./ui.ts";
 import { MINUTE, tail } from "./util.ts";
 
 export const COMMAND_TIMEOUT_MS = 10 * MINUTE;
@@ -66,9 +67,13 @@ export function findPlaceholders(added: AddedLine[]): string[] {
 		.map(({ file, text }) => `${file}: ${text.trim()}`);
 }
 
+/** What a run of checks tells the screen: which command has started, and how it ended. */
+export type StepProgress = Pick<Progress, "begin" | "end">;
+
 /**
  * Run shell commands (label -> command) one after another, in the order given. Returns a description of the
  * first failure, or null. `reap`: stop what a command left running (a watcher, a server) when it has finished.
+ * `progress` is told when each command starts and, with the time it took, how it ended.
  */
 export async function runChecks(
 	cwd: string,
@@ -78,10 +83,19 @@ export async function runChecks(
 		reap = true,
 		passed,
 		env = {},
-	}: { timeoutMs?: number; reap?: boolean; passed?: string[]; env?: NodeJS.ProcessEnv } = {},
+		progress,
+	}: {
+		timeoutMs?: number;
+		reap?: boolean;
+		passed?: string[];
+		env?: NodeJS.ProcessEnv;
+		progress?: StepProgress;
+	} = {},
 ): Promise<string | null> {
 	for (const [label, command] of Object.entries(commands)) {
 		if (!command.trim()) continue;
+		progress?.begin(label);
+		const startedAt = Date.now();
 		const result = await run(command, [], {
 			cwd,
 			shell: true,
@@ -90,7 +104,9 @@ export async function runChecks(
 			env: { ...withoutGitRouting(process.env), CI: "true", ...env },
 		});
 		// A shell can exit 0 while a child it started keeps running; a timeout is a failure either way.
-		if (result.code === 0 && !result.timedOut) {
+		const ok = result.code === 0 && !result.timedOut;
+		progress?.end(label, ok, formatDuration(Date.now() - startedAt));
+		if (ok) {
 			passed?.push(`${label}: \`${command}\` (exit 0)`);
 			continue;
 		}
@@ -110,7 +126,7 @@ export async function runChecks(
 export async function runProjectChecks(
 	dir: string,
 	commands: Config["commands"],
-	opts: { passed?: string[]; timeoutMs?: number } = {},
+	opts: { passed?: string[]; timeoutMs?: number; progress?: StepProgress } = {},
 ): Promise<string | null> {
 	const before = await revParse(dir, "HEAD");
 	const { build, lint, test } = commands;

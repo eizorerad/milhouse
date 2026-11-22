@@ -512,6 +512,36 @@ describe("the starting commit", () => {
 		expect(await go(repo, passing)).toBe(true);
 		expect(allStatus(repo, "merged")).toBe(true);
 	});
+
+	it("says what it is doing while it checks, step by step, and that the checks passed", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({
+			commands: { setup: "true", build: "true", test: "true" },
+			gates: { baseline: true },
+		});
+		expect(await go(repo, config)).toBe(true);
+		const text = output.join("\n");
+		expect(text).toContain("Checking the starting commit on a clean copy");
+		// The lines that say how each step ended are printed on a terminal too; the ones that say it began are not.
+		const at = ["setup - ", "build - ", "test - "].map((step) => text.indexOf(step));
+		expect(at.every((index) => index >= 0)).toBe(true);
+		expect(at).toEqual([...at].sort((a, b) => a - b)); // in the order the checks run
+		expect(text).toContain("The starting commit passes its checks");
+	});
+
+	it("shows which step of the check failed, and does not claim that the checks passed", async () => {
+		useFakeAgent({});
+		const repo = await makeRepo();
+		const config = testConfig({
+			commands: { build: "true", test: "exit 1" },
+			gates: { baseline: true },
+		});
+		expect(await go(repo, config)).toBe(false);
+		const text = output.join("\n");
+		expect(text).toMatch(/\bx test - \d+s/);
+		expect(text).not.toContain("The starting commit passes its checks");
+	});
 });
 
 describe("time limits from the config", () => {

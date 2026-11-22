@@ -1,6 +1,6 @@
 {
 	"name": "milhouse-cli",
-	"version": "0.5.4",
+	"version": "0.5.5",
 	"description": "Correctness-first AI coding orchestrator: it investigates before it acts and verifies before it merges.",
 	"type": "module",
 	"bin": {

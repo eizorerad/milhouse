@@ -35,7 +35,7 @@ The tests drive the whole pipeline against real git repositories with a fake age
 
 ## Releasing
 
-A pull request titled `Release X.Y.Z` bumps `package.json` and adds a section to [Upgrading](upgrading.md); after the merge, an annotated tag `vX.Y.Z` and a published GitHub release. Publishing makes `.github/workflows/release.yml` build the binaries for Linux and macOS, x64 and arm64, and attach them: `install.sh` and `milhouse upgrade` fetch them from there.
+A pull request titled `Release X.Y.Z` bumps `package.json` and adds a section to [Upgrading](upgrading.md); after the merge, an annotated tag `vX.Y.Z` and a published GitHub release. Publishing makes `.github/workflows/release.yml` build the binaries for Linux and macOS, x64 and arm64, and attach each of them gzipped and plain: `install.sh` and `milhouse upgrade` fetch the gzipped file (less than half the size) and fall back to the plain one, which is all that `milhouse upgrade` in 0.5.4 and earlier fetches.
 
 ---
 [← README](../README.md)

@@ -186,6 +186,31 @@ describe("runChecks", () => {
 		expect(await runChecks(dir, { test: "test -f marker.txt" })).toBeNull();
 	});
 
+	it("tells a progress indicator when each command starts and ends, and how long it took", async () => {
+		const events: string[] = [];
+		const progress = {
+			begin: (id: string) => void events.push(`begin ${id}`),
+			end: (id: string, ok: boolean, note = "") => void events.push(`end ${id} ${ok} ${note}`),
+		};
+		await runChecks(tempDir(), { setup: "", build: "true", test: "true" }, { progress });
+		expect(events.map((event) => event.replace(/ (\d+m )?\d+s$/, " <time>"))).toEqual([
+			"begin build",
+			"end build true <time>",
+			"begin test",
+			"end test true <time>",
+		]);
+	});
+
+	it("ends the command that failed as failed, and starts no later one", async () => {
+		const events: string[] = [];
+		const progress = {
+			begin: (id: string) => void events.push(`begin ${id}`),
+			end: (id: string, ok: boolean) => void events.push(`end ${id} ${ok}`),
+		};
+		await runChecks(tempDir(), { build: "exit 3", test: "true" }, { progress });
+		expect(events).toEqual(["begin build", "end build false"]);
+	});
+
 	it("kills a command that hangs, including what it spawned", async () => {
 		const started = Date.now();
 		const failure = await runChecks(tempDir(), { test: "sleep 30 & sleep 30" }, { timeoutMs: 300 });
@@ -245,6 +270,16 @@ describe("runProjectChecks", () => {
 		const failure = await runProjectChecks(repo, commands({ test: "echo x > junk.txt; exit 1" }));
 		expect(failure).toContain("test failed");
 		expect(await git(repo, "status", "--porcelain", "--untracked-files=all")).toBe("");
+	});
+
+	it("tells a progress indicator about each command that runs", async () => {
+		const repo = await makeRepo();
+		const begun: string[] = [];
+		const progress = { begin: (id: string) => void begun.push(id), end: () => {} };
+		expect(
+			await runProjectChecks(repo, commands({ build: "true", test: "true" }), { progress }),
+		).toBeNull();
+		expect(begun).toEqual(["build", "test"]);
 	});
 
 	it("rejects checks that rewrite a tracked file: what was tested is not what is committed", async () => {
