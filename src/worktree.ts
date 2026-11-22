@@ -2,7 +2,7 @@
 
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { commandTimeoutMs } from "./config.ts";
-import { runChecks } from "./gates.ts";
+import { type StepProgress, runChecks } from "./gates.ts";
 import {
 	branchRef,
 	deleteBranch,
@@ -60,12 +60,12 @@ export async function readWorktree(store: RunStore): Promise<string | null> {
  * Make the worktree usable for work. `commands.setup` runs whenever the worktree is new or its setup never
  * finished (also when it was removed and recreated later, for example for a merge).
  * Returns a description of the failure when setup fails; the worktree is then removed so that the
- * next call sets up again.
+ * next call sets up again. `progress` is told when setup starts and how it ended.
  */
 export async function prepareWorktree(
 	store: RunStore,
 	config: Config,
-	opts: { setupAgain?: boolean } = {},
+	opts: { setupAgain?: boolean; progress?: StepProgress } = {},
 ): Promise<string | null> {
 	const opened = await openWorktree(store);
 	if (typeof opened === "string") return opened;
@@ -84,6 +84,7 @@ export async function prepareWorktree(
 			reap: false,
 			timeoutMs: commandTimeoutMs(config),
 			env: { MILHOUSE_PROJECT: store.workDir },
+			progress: opts.progress,
 		},
 	);
 	if (failure) {
